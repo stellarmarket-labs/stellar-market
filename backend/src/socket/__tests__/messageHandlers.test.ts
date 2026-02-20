@@ -1,0 +1,226 @@
+import { createServer } from "http";
+import { Server as SocketServer } from "socket.io";
+import ioc, { type Socket as ClientSocket } from "socket.io-client";
+import express from "express";
+import jwt from "jsonwebtoken";
+import { initSocket } from "../index";
+import { config } from "../../config";
+
+// ─── Prisma mock ─────────────────────────────────────────────────────────────
+jest.mock("@prisma/client", () => {
+  const mockPrisma = {
+    message: {
+      create: jest.fn(),
+      updateMany: jest.fn(),
+    },
+  };
+  return { PrismaClient: jest.fn(() => mockPrisma) };
+});
+
+import { PrismaClient } from "@prisma/client";
+const prismaMock = new PrismaClient() as jest.Mocked<PrismaClient>;
+const messageMock = prismaMock.message as unknown as {
+  create: jest.Mock;
+  updateMany: jest.Mock;
+};
+
+// ─── Helper: make a signed JWT ────────────────────────────────────────────────
+function makeToken(userId: string) {
+  return jwt.sign({ userId }, config.jwtSecret, { expiresIn: "1h" });
+}
+
+// ─── Setup / Teardown ─────────────────────────────────────────────────────────
+let io: SocketServer;
+let httpServer: ReturnType<typeof createServer>;
+let port: number;
+
+beforeAll((done) => {
+  const app = express();
+  httpServer = createServer(app);
+  io = initSocket(httpServer);
+  httpServer.listen(0, () => {
+    const addr = httpServer.address();
+    port = typeof addr === "object" && addr ? addr.port : 0;
+    done();
+  });
+});
+
+afterAll((done) => {
+  io.close();
+  httpServer.close(done);
+});
+
+afterEach(() => {
+  jest.clearAllMocks();
+});
+
+// ─── Helper: connect client ───────────────────────────────────────────────────
+function connectClient(
+  token?: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  userId?: string
+): Promise<ReturnType<typeof ioc>> {
+  return new Promise((resolve, reject) => {
+    const socket = ioc(`http://localhost:${port}`, {
+      auth: token ? { token } : {},
+      forceNew: true,
+      transports: ["websocket"],
+    });
+    socket.on("connect", () => resolve(socket));
+    socket.on("connect_error", (err: Error) => {
+      socket.disconnect();
+      reject(err);
+    });
+  });
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+describe("Socket.io auth middleware", () => {
+  it("rejects connection with no token", async () => {
+    await expect(connectClient(undefined)).rejects.toThrow();
+  });
+
+  it("rejects connection with an invalid token", async () => {
+    await expect(connectClient("bad.token.here")).rejects.toThrow();
+  });
+
+  it("accepts connection with a valid JWT", async () => {
+    const token = makeToken("user-1");
+    const client = await connectClient(token);
+    expect(client.connected).toBe(true);
+    client.disconnect();
+  });
+});
+
+describe("send_message event", () => {
+  it("persists message and emits new_message to sender", async () => {
+    const mockMessage = {
+      id: "msg-1",
+      senderId: "user-1",
+      receiverId: "user-2",
+      content: "Hello!",
+      read: false,
+      createdAt: new Date(),
+      sender: { id: "user-1", username: "alice", avatarUrl: null },
+      receiver: { id: "user-2", username: "bob", avatarUrl: null },
+    };
+    messageMock.create.mockResolvedValueOnce(mockMessage);
+
+    const token = makeToken("user-1");
+    const client = await connectClient(token);
+
+    const received = await new Promise<unknown>((resolve) => {
+      client.on("new_message", resolve);
+      client.emit("send_message", { receiverId: "user-2", content: "Hello!" });
+    });
+
+    expect(messageMock.create).toHaveBeenCalledTimes(1);
+    expect(messageMock.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ content: "Hello!", receiverId: "user-2" }),
+      })
+    );
+    expect(received).toMatchObject({ content: "Hello!" });
+    client.disconnect();
+  });
+
+  it("also delivers new_message to the receiver's socket", async () => {
+    const mockMessage = {
+      id: "msg-2",
+      senderId: "user-a",
+      receiverId: "user-b",
+      content: "Hey receiver!",
+      read: false,
+      createdAt: new Date(),
+      sender: { id: "user-a", username: "alice", avatarUrl: null },
+      receiver: { id: "user-b", username: "bob", avatarUrl: null },
+    };
+    messageMock.create.mockResolvedValueOnce(mockMessage);
+
+    const senderClient = await connectClient(makeToken("user-a"));
+    const receiverClient = await connectClient(makeToken("user-b"));
+
+    const receiverGotMessage = new Promise<unknown>((resolve) => {
+      receiverClient.on("new_message", resolve);
+    });
+
+    senderClient.emit("send_message", { receiverId: "user-b", content: "Hey receiver!" });
+
+    const msg = await receiverGotMessage;
+    expect(msg).toMatchObject({ content: "Hey receiver!" });
+
+    senderClient.disconnect();
+    receiverClient.disconnect();
+  });
+
+  it("emits error event when receiverId or content is missing", async () => {
+    const client = await connectClient(makeToken("user-1"));
+
+    const err = await new Promise<{ message: string }>((resolve) => {
+      client.on("error", resolve);
+      client.emit("send_message", { content: "oops — no receiver" });
+    });
+
+    expect(err.message).toMatch(/receiverId and content are required/i);
+    client.disconnect();
+  });
+});
+
+describe("mark_read event", () => {
+  it("calls updateMany and emits messages_read to original sender", async () => {
+    messageMock.updateMany.mockResolvedValueOnce({ count: 3 });
+
+    const senderClient = await connectClient(makeToken("user-s"));
+    const readerClient = await connectClient(makeToken("user-r"));
+
+    const senderGotReadReceipt = new Promise<{ byUserId: string }>((resolve) => {
+      senderClient.on("messages_read", resolve);
+    });
+
+    readerClient.emit("mark_read", { senderId: "user-s" });
+
+    const receipt = await senderGotReadReceipt;
+    expect(receipt.byUserId).toBe("user-r");
+    expect(messageMock.updateMany).toHaveBeenCalledTimes(1);
+
+    senderClient.disconnect();
+    readerClient.disconnect();
+  });
+});
+
+describe("typing events", () => {
+  it("forwards user_typing to the receiver when typing_start is emitted", async () => {
+    const typer = await connectClient(makeToken("typer-id"));
+    const watcher = await connectClient(makeToken("watcher-id"));
+
+    const typingEvent = new Promise<{ userId: string }>((resolve) => {
+      watcher.on("user_typing", resolve);
+    });
+
+    typer.emit("typing_start", { receiverId: "watcher-id" });
+
+    const evt = await typingEvent;
+    expect(evt.userId).toBe("typer-id");
+
+    typer.disconnect();
+    watcher.disconnect();
+  });
+
+  it("forwards user_stopped_typing when typing_stop is emitted", async () => {
+    const typer = await connectClient(makeToken("typer-id2"));
+    const watcher = await connectClient(makeToken("watcher-id2"));
+
+    const stoppedEvent = new Promise<{ userId: string }>((resolve) => {
+      watcher.on("user_stopped_typing", resolve);
+    });
+
+    typer.emit("typing_stop", { receiverId: "watcher-id2" });
+
+    const evt = await stoppedEvent;
+    expect(evt.userId).toBe("typer-id2");
+
+    typer.disconnect();
+    watcher.disconnect();
+  });
+});

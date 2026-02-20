@@ -10,7 +10,6 @@ import Image from "next/image";
 export default function InboxPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
-  // const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
@@ -27,7 +26,6 @@ export default function InboxPage() {
         setConversations(response.data);
       } catch (err) {
         console.error("Fetch conversations error:", err);
-        // setError("Failed to load your messages.");
       } finally {
         setLoading(false);
       }

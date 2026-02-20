@@ -9,11 +9,16 @@ import {
   Briefcase,
   LayoutDashboard,
   PenLine,
-  LogOut, Loader2 
+  LogOut,
+  Loader2,
 } from "lucide-react";
 import axios from "axios";
 import { useState, useRef, useEffect } from "react";
 import { useWallet, truncateAddress } from "@/context/WalletContext";
+import { useSocket } from "@/context/SocketContext";
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
+const TOKEN_KEY = "stellarmarket_jwt";
 
 function WalletButton({ className }: { className?: string }) {
   const { address, isConnecting, error, connect, disconnect } = useWallet();
@@ -89,33 +94,54 @@ function WalletButton({ className }: { className?: string }) {
   );
 }
 
-export default function Navbar() {
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+/** Real-time unread badge powered by Socket.io + initial REST count */
+function UnreadBadge() {
+  const { socket } = useSocket();
+  const [count, setCount] = useState(0);
 
   useEffect(() => {
-    const fetchUnreadCount = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        if (!token) return;
-        const response = await axios.get(
-          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"}/messages/unread-count`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          },
-        );
-        setUnreadCount(response.data.count);
-      } catch (err) {
-        // Silent error for navbar badge
-        console.log(err);
-      }
-    };
+    const token =
+      typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
+    if (!token) return;
 
-    fetchUnreadCount();
-    // Refresh every 30 seconds for non-websocket version
-    const interval = setInterval(fetchUnreadCount, 30000);
-    return () => clearInterval(interval);
+    axios
+      .get<{ count: number }>(`${API}/messages/unread-count`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .then((res) => setCount(res.data.count))
+      .catch(() => {/* silently ignore */});
   }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewMessage = () => setCount((c) => c + 1);
+    const handleMessagesRead = () => setCount(0);
+
+    socket.on("new_message", handleNewMessage);
+    socket.on("messages_read", handleMessagesRead);
+
+    return () => {
+      socket.off("new_message", handleNewMessage);
+      socket.off("messages_read", handleMessagesRead);
+    };
+  }, [socket]);
+
+  if (count === 0) return null;
+
+  return (
+    <span
+      id="unread-badge"
+      data-testid="unread-badge"
+      className="absolute -top-1.5 -right-2.5 bg-stellar-blue text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-lg border border-dark-bg animate-pulse"
+    >
+      {count > 9 ? "9+" : count}
+    </span>
+  );
+}
+
+export default function Navbar() {
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <nav className="border-b border-dark-border bg-dark-bg/80 backdrop-blur-md sticky top-0 z-50">
@@ -145,15 +171,12 @@ export default function Navbar() {
             </Link>
             <Link
               href="/messages"
+              id="messages-nav-link"
               className="relative text-dark-text hover:text-dark-heading transition-colors flex items-center gap-2"
             >
               <MessageSquare size={16} />
               Messages
-              {unreadCount > 0 && (
-                <span className="absolute -top-1.5 -right-2.5 bg-stellar-blue text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-lg border border-dark-bg animate-pulse">
-                  {unreadCount}
-                </span>
-              )}
+              <UnreadBadge />
             </Link>
             <Link
               href="/post-job"
@@ -189,14 +212,11 @@ export default function Navbar() {
             </Link>
             <Link
               href="/messages"
-              className="text-dark-text hover:text-dark-heading flex items-center gap-2"
+              className="relative text-dark-text hover:text-dark-heading flex items-center gap-2"
             >
-              <MessageSquare size={18} /> Messages
-              {unreadCount > 0 && (
-                <span className="bg-stellar-blue text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                  {unreadCount}
-                </span>
-              )}
+              <MessageSquare size={18} />
+              Messages
+              <UnreadBadge />
             </Link>
             <Link
               href="/post-job"
