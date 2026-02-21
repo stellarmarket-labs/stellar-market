@@ -9,9 +9,85 @@ import {
   Briefcase,
   LayoutDashboard,
   PenLine,
+  LogOut, Loader2 
 } from "lucide-react";
-import { useState, useEffect } from "react";
 import axios from "axios";
+import { useState, useRef, useEffect } from "react";
+import { useWallet, truncateAddress } from "@/context/WalletContext";
+
+function WalletButton({ className }: { className?: string }) {
+  const { address, isConnecting, error, connect, disconnect } = useWallet();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  if (isConnecting) {
+    return (
+      <button
+        disabled
+        className={`btn-primary flex items-center gap-2 text-sm opacity-70 cursor-not-allowed ${className ?? ""}`}
+      >
+        <Loader2 size={16} className="animate-spin" />
+        Connecting...
+      </button>
+    );
+  }
+
+  if (address) {
+    return (
+      <div className="relative" ref={menuRef}>
+        <button
+          onClick={() => setMenuOpen(!menuOpen)}
+          className={`btn-primary flex items-center gap-2 text-sm ${className ?? ""}`}
+        >
+          <Wallet size={16} />
+          {truncateAddress(address)}
+        </button>
+        {menuOpen && (
+          <div className="absolute right-0 mt-2 w-48 bg-dark-card border border-dark-border rounded-lg shadow-lg py-1 z-50">
+            <div className="px-4 py-2 text-xs text-dark-muted border-b border-dark-border break-all">
+              {address}
+            </div>
+            <button
+              onClick={() => {
+                disconnect();
+                setMenuOpen(false);
+              }}
+              className="w-full px-4 py-2 text-sm text-left text-dark-text hover:bg-dark-border/50 flex items-center gap-2 transition-colors"
+            >
+              <LogOut size={14} />
+              Disconnect
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <button
+        onClick={connect}
+        className={`btn-primary flex items-center gap-2 text-sm ${className ?? ""}`}
+      >
+        <Wallet size={16} />
+        Connect Wallet
+      </button>
+      {error && (
+        <p className="text-red-400 text-xs mt-1 max-w-[220px]">{error}</p>
+      )}
+    </div>
+  );
+}
 
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -86,10 +162,7 @@ export default function Navbar() {
               <PenLine size={16} />
               Post a Job
             </Link>
-            <button className="btn-primary flex items-center gap-2 text-sm">
-              <Wallet size={16} />
-              Connect Wallet
-            </button>
+            <WalletButton />
           </div>
 
           <button
@@ -131,10 +204,7 @@ export default function Navbar() {
             >
               <PenLine size={18} /> Post a Job
             </Link>
-            <button className="btn-primary flex items-center gap-2 text-sm w-fit">
-              <Wallet size={16} />
-              Connect Wallet
-            </button>
+            <WalletButton className="w-fit" />
           </div>
         )}
       </div>
