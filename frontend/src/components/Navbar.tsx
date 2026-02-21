@@ -12,18 +12,18 @@ import {
   LogOut,
   User as UserIcon,
   Loader2,
+  Settings,
 } from "lucide-react";
 import axios from "axios";
 import { useState, useRef, useEffect } from "react";
 import { useWallet, truncateAddress } from "@/context/WalletContext";
 import { useSocket } from "@/context/SocketContext";
 import { useAuth } from "@/context/AuthContext";
-import { User as UserType } from "@/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 
 function UserMenu({ className }: { className?: string }) {
-  const { address, isConnecting, connect, disconnect } = useWallet();
+  const { address, connect, disconnect } = useWallet();
   const { user, logout, isLoading } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -40,7 +40,9 @@ function UserMenu({ className }: { className?: string }) {
 
   if (isLoading) {
     return (
-      <div className={`h-10 w-32 bg-dark-border/50 animate-pulse rounded-lg ${className ?? ""}`} />
+      <div
+        className={`h-10 w-32 bg-dark-border/50 animate-pulse rounded-lg ${className ?? ""}`}
+      />
     );
   }
 
@@ -53,24 +55,34 @@ function UserMenu({ className }: { className?: string }) {
         >
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex items-center justify-center text-white font-bold text-sm">
             {user.avatarUrl ? (
-              <img src={user.avatarUrl} alt={user.username} className="w-full h-full rounded-full object-cover" />
+              <img
+                src={user.avatarUrl}
+                alt={user.username}
+                className="w-full h-full rounded-full object-cover"
+              />
             ) : (
               user.username.charAt(0).toUpperCase()
             )}
           </div>
           <div className="text-left hidden lg:block">
-            <p className="text-sm font-medium text-dark-heading leading-tight">{user.username}</p>
+            <p className="text-sm font-medium text-dark-heading leading-tight">
+              {user.username}
+            </p>
             <p className="text-xs text-dark-muted leading-tight">{user.role}</p>
           </div>
         </button>
         {menuOpen && (
           <div className="absolute right-0 mt-2 w-56 bg-dark-card border border-dark-border rounded-xl shadow-2xl py-2 z-50 animate-in fade-in slide-in-from-top-2">
             <div className="px-4 py-3 border-b border-dark-border mb-1">
-              <p className="text-sm font-medium text-dark-heading">{user.username}</p>
-              <p className="text-xs text-dark-muted break-all">{user.walletAddress}</p>
+              <p className="text-sm font-medium text-dark-heading">
+                {user.username}
+              </p>
+              <p className="text-xs text-dark-muted break-all">
+                {user.walletAddress}
+              </p>
             </div>
             <Link
-              href="/profile"
+              href={`/profile/${user.id}`}
               onClick={() => setMenuOpen(false)}
               className="flex items-center gap-2 px-4 py-2.5 text-sm text-dark-text hover:bg-dark-border/50 transition-colors"
             >
@@ -84,6 +96,14 @@ function UserMenu({ className }: { className?: string }) {
             >
               <LayoutDashboard size={16} />
               Dashboard
+            </Link>
+            <Link
+              href="/settings"
+              onClick={() => setMenuOpen(false)}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm text-dark-text hover:bg-dark-border/50 transition-colors"
+            >
+              <Settings size={16} />
+              Settings
             </Link>
             <button
               onClick={() => {
@@ -104,7 +124,10 @@ function UserMenu({ className }: { className?: string }) {
 
   return (
     <div className="flex items-center gap-3">
-      <Link href="/auth/login" className="text-sm font-medium text-dark-text hover:text-dark-heading transition-colors">
+      <Link
+        href="/auth/login"
+        className="text-sm font-medium text-dark-text hover:text-dark-heading transition-colors"
+      >
         Log In
       </Link>
       <Link href="/auth/register" className="btn-primary text-sm py-2 px-4">
@@ -128,7 +151,9 @@ function UnreadBadge() {
         headers: { Authorization: `Bearer ${token}` },
       })
       .then((res) => setCount(res.data.count))
-      .catch(() => {/* silently ignore */});
+      .catch(() => {
+        /* silently ignore */
+      });
   }, [token]);
 
   useEffect(() => {
