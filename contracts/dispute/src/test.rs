@@ -79,7 +79,7 @@ fn test_vote_and_resolve() {
 }
 
 #[test]
-#[should_panic(expected = "NotEnoughVotes")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn test_resolve_without_enough_votes() {
     let env = Env::default();
     env.mock_all_auths();

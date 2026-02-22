@@ -8,6 +8,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
+stellar-market-escrow = { path = "../escrow" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+stellar-market-escrow = { path = "../escrow" }

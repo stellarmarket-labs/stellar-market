@@ -1,8 +1,9 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Vec, Symbol,
+    contract, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Vec,
 };
+use stellar_market_escrow::{EscrowContractClient, JobStatus};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -12,6 +13,9 @@ pub enum ReputationError {
     AlreadyReviewed = 2,
     SelfReview = 3,
     UserNotFound = 4,
+    JobNotCompleted = 5,
+    NotJobParticipant = 6,
+    JobNotFound = 7,
 }
 
 #[contracttype]
@@ -50,8 +54,11 @@ pub struct ReputationContract;
 impl ReputationContract {
     /// Submit a review for a user after completing a job.
     /// Rating must be between 1 and 5. Stake weight affects the review's influence.
+    /// The escrow_contract_id is used to verify the job exists, is completed,
+    /// and that reviewer/reviewee are the actual participants of the job.
     pub fn submit_review(
         env: Env,
+        escrow_contract_id: Address,
         reviewer: Address,
         reviewee: Address,
         job_id: u64,
@@ -72,6 +79,25 @@ impl ReputationContract {
         let review_key = DataKey::ReviewExists(reviewer.clone(), reviewee.clone(), job_id);
         if env.storage().persistent().has(&review_key) {
             return Err(ReputationError::AlreadyReviewed);
+        }
+
+        // Cross-contract call: verify the job exists, is completed, and the
+        // reviewer/reviewee are the actual client and freelancer of the job.
+        let escrow_client = EscrowContractClient::new(&env, &escrow_contract_id);
+        let job = match escrow_client.try_get_job(&job_id) {
+            Ok(Ok(j)) => j,
+            Ok(Err(_)) | Err(_) => return Err(ReputationError::JobNotFound),
+        };
+
+        if job.status != JobStatus::Completed {
+            return Err(ReputationError::JobNotCompleted);
+        }
+
+        let valid_participants = (reviewer == job.client && reviewee == job.freelancer)
+            || (reviewer == job.freelancer && reviewee == job.client);
+
+        if !valid_participants {
+            return Err(ReputationError::NotJobParticipant);
         }
 
         let weight = if stake_weight > 0 {
