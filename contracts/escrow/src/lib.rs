@@ -64,6 +64,21 @@ fn get_job_key(job_id: u64) -> (Symbol, u64) {
     (symbol_short!("JOB"), job_id)
 }
 
+const MIN_TTL_THRESHOLD: u32 = 1_000;
+const MIN_TTL_EXTEND_TO: u32 = 10_000;
+
+fn bump_job_ttl(env: &Env, job_id: u64) {
+    env.storage()
+        .persistent()
+        .extend_ttl(&get_job_key(job_id), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
+fn bump_job_count_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
 #[contract]
 pub struct EscrowContract;
 
@@ -107,7 +122,9 @@ impl EscrowContract {
         };
 
         env.storage().persistent().set(&get_job_key(job_count), &job);
+        bump_job_ttl(&env, job_count);
         env.storage().instance().set(&symbol_short!("JOB_CNT"), &job_count);
+        bump_job_count_ttl(&env);
 
         // Emit event
         env.events().publish(
@@ -127,6 +144,7 @@ impl EscrowContract {
             .persistent()
             .get(&get_job_key(job_id))
             .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
 
         if job.client != client {
             return Err(EscrowError::Unauthorized);
@@ -140,6 +158,7 @@ impl EscrowContract {
 
         job.status = JobStatus::Funded;
         env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
 
         // Emit event
         env.events().publish(
@@ -160,6 +179,7 @@ impl EscrowContract {
             .persistent()
             .get(&get_job_key(job_id))
             .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
 
         if job.status == JobStatus::Created
             || job.status == JobStatus::Completed
@@ -199,6 +219,7 @@ impl EscrowContract {
         }
 
         env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
 
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("dispute")),
@@ -222,6 +243,7 @@ impl EscrowContract {
             .persistent()
             .get(&get_job_key(job_id))
             .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
 
         if job.freelancer != freelancer {
             return Err(EscrowError::Unauthorized);
@@ -248,6 +270,7 @@ impl EscrowContract {
         job.milestones = milestones;
         job.status = JobStatus::InProgress;
         env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
 
         Ok(())
     }
@@ -266,6 +289,7 @@ impl EscrowContract {
             .persistent()
             .get(&get_job_key(job_id))
             .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
 
         if job.client != client {
             return Err(EscrowError::Unauthorized);
@@ -302,6 +326,7 @@ impl EscrowContract {
         }
 
         env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
 
         // Emit event
         env.events().publish(
@@ -321,6 +346,7 @@ impl EscrowContract {
             .persistent()
             .get(&get_job_key(job_id))
             .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
 
         if job.client != client {
             return Err(EscrowError::Unauthorized);
@@ -346,6 +372,7 @@ impl EscrowContract {
 
         job.status = JobStatus::Cancelled;
         env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
 
         // Emit event
         env.events().publish(
@@ -358,15 +385,24 @@ impl EscrowContract {
 
     /// Get job details by ID.
     pub fn get_job(env: Env, job_id: u64) -> Result<Job, EscrowError> {
-        env.storage()
+        let job: Job = env
+            .storage()
             .persistent()
             .get(&get_job_key(job_id))
-            .ok_or(EscrowError::JobNotFound)
+            .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
+        Ok(job)
     }
 
     /// Get total number of jobs.
     pub fn get_job_count(env: Env) -> u64 {
-        env.storage().instance().get(&symbol_short!("JOB_CNT")).unwrap_or(0)
+        let count: u64 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("JOB_CNT"))
+            .unwrap_or(0);
+        bump_job_count_ttl(&env);
+        count
     }
 }
 

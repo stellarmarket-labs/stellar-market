@@ -68,6 +68,33 @@ enum DataKey {
     HasVoted(u64, Address),
 }
 
+const MIN_TTL_THRESHOLD: u32 = 1_000;
+const MIN_TTL_EXTEND_TO: u32 = 10_000;
+
+fn bump_dispute_ttl(env: &Env, dispute_id: u64) {
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Dispute(dispute_id), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
+fn bump_votes_ttl(env: &Env, dispute_id: u64) {
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Votes(dispute_id), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
+fn bump_has_voted_ttl(env: &Env, dispute_id: u64, voter: &Address) {
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::HasVoted(dispute_id, voter.clone()), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
+fn bump_dispute_count_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
 #[contract]
 pub struct DisputeContract;
 
@@ -116,9 +143,12 @@ impl DisputeContract {
         env.storage()
             .instance()
             .set(&DataKey::DisputeCount, &count);
+        bump_dispute_ttl(&env, count);
+        bump_dispute_count_ttl(&env);
         env.storage()
             .persistent()
             .set(&DataKey::Votes(count), &Vec::<Vote>::new(&env));
+        bump_votes_ttl(&env, count);
 
         // Emit event
         env.events().publish(
@@ -144,6 +174,7 @@ impl DisputeContract {
             .persistent()
             .get(&DataKey::Dispute(dispute_id))
             .ok_or(DisputeError::DisputeNotFound)?;
+        bump_dispute_ttl(&env, dispute_id);
 
         if dispute.status != DisputeStatus::Open && dispute.status != DisputeStatus::Voting {
             return Err(DisputeError::VotingClosed);
@@ -177,6 +208,7 @@ impl DisputeContract {
         env.storage()
             .persistent()
             .set(&DataKey::Votes(dispute_id), &votes);
+        bump_votes_ttl(&env, dispute_id);
 
         match choice {
             VoteChoice::Client => dispute.votes_for_client += 1,
@@ -188,6 +220,8 @@ impl DisputeContract {
             .persistent()
             .set(&DataKey::Dispute(dispute_id), &dispute);
         env.storage().persistent().set(&voted_key, &true);
+        bump_dispute_ttl(&env, dispute_id);
+        bump_has_voted_ttl(&env, dispute_id, &voter);
 
         // Emit event
         env.events().publish(
@@ -208,6 +242,7 @@ impl DisputeContract {
             .persistent()
             .get(&DataKey::Dispute(dispute_id))
             .ok_or(DisputeError::DisputeNotFound)?;
+        bump_dispute_ttl(&env, dispute_id);
 
         if dispute.status == DisputeStatus::ResolvedForClient
             || dispute.status == DisputeStatus::ResolvedForFreelancer
@@ -242,6 +277,7 @@ impl DisputeContract {
         env.storage()
             .persistent()
             .set(&DataKey::Dispute(dispute_id), &dispute);
+        bump_dispute_ttl(&env, dispute_id);
 
         // Emit event
         env.events().publish(
@@ -254,10 +290,13 @@ impl DisputeContract {
 
     /// Get dispute details.
     pub fn get_dispute(env: Env, dispute_id: u64) -> Result<Dispute, DisputeError> {
-        env.storage()
+        let dispute: Dispute = env
+            .storage()
             .persistent()
             .get(&DataKey::Dispute(dispute_id))
-            .ok_or(DisputeError::DisputeNotFound)
+            .ok_or(DisputeError::DisputeNotFound)?;
+        bump_dispute_ttl(&env, dispute_id);
+        Ok(dispute)
     }
 
     /// Get all votes for a dispute.

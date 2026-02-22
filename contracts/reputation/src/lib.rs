@@ -43,6 +43,29 @@ enum DataKey {
     ReviewExists(Address, Address, u64),
 }
 
+const MIN_TTL_THRESHOLD: u32 = 1_000;
+const MIN_TTL_EXTEND_TO: u32 = 10_000;
+
+fn bump_reputation_ttl(env: &Env, user: &Address) {
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Reputation(user.clone()), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
+fn bump_reviews_ttl(env: &Env, user: &Address) {
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Reviews(user.clone()), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
+fn bump_review_exists_ttl(env: &Env, reviewer: &Address, reviewee: &Address, job_id: u64) {
+    env.storage().persistent().extend_ttl(
+        &DataKey::ReviewExists(reviewer.clone(), reviewee.clone(), job_id),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
+}
+
 #[contract]
 pub struct ReputationContract;
 
@@ -98,6 +121,7 @@ impl ReputationContract {
         reputation.review_count += 1;
 
         env.storage().persistent().set(&rep_key, &reputation);
+        bump_reputation_ttl(&env, &reviewee);
 
         // Store review
         let review = Review {
@@ -118,9 +142,11 @@ impl ReputationContract {
             .unwrap_or(Vec::new(&env));
         reviews.push_back(review);
         env.storage().persistent().set(&reviews_key, &reviews);
+        bump_reviews_ttl(&env, &reviewee);
 
         // Mark as reviewed
         env.storage().persistent().set(&review_key, &true);
+        bump_review_exists_ttl(&env, &reviewer, &reviewee, job_id);
 
         // Emit event
         env.events().publish(
@@ -134,10 +160,13 @@ impl ReputationContract {
     /// Get the reputation data for a user.
     pub fn get_reputation(env: Env, user: Address) -> Result<UserReputation, ReputationError> {
         let rep_key = DataKey::Reputation(user);
-        env.storage()
+        let reputation: UserReputation = env
+            .storage()
             .persistent()
             .get(&rep_key)
-            .ok_or(ReputationError::UserNotFound)
+            .ok_or(ReputationError::UserNotFound)?;
+        bump_reputation_ttl(&env, &reputation.user);
+        Ok(reputation)
     }
 
     /// Get the weighted average rating for a user (multiplied by 100 for precision).
@@ -155,7 +184,10 @@ impl ReputationContract {
         let rep_key = DataKey::Reputation(user);
         let reputation: Option<UserReputation> = env.storage().persistent().get(&rep_key);
         match reputation {
-            Some(rep) => rep.review_count,
+            Some(rep) => {
+                bump_reputation_ttl(&env, &rep.user);
+                rep.review_count
+            }
             None => 0,
         }
     }
@@ -163,10 +195,16 @@ impl ReputationContract {
     /// Get all reviews for a user.
     pub fn get_reviews(env: Env, user: Address) -> Vec<Review> {
         let reviews_key = DataKey::Reviews(user);
-        env.storage()
-            .persistent()
-            .get(&reviews_key)
-            .unwrap_or(Vec::new(&env))
+        let reviews: Option<Vec<Review>> = env.storage().persistent().get(&reviews_key);
+        match reviews {
+            Some(list) => {
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&reviews_key, MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+                list
+            }
+            None => Vec::new(&env),
+        }
     }
 }
 
