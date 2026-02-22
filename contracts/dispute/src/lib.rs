@@ -1,7 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Vec, Symbol,
+    contract, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Vec,
+    Symbol, vec, IntoVal,
 };
 
 #[contracterror]
@@ -197,9 +198,11 @@ impl DisputeContract {
         Ok(())
     }
 
-    /// Resolve the dispute after enough votes have been cast.
-    /// The side with more votes wins.
-    pub fn resolve_dispute(env: Env, dispute_id: u64) -> Result<DisputeStatus, DisputeError> {
+    pub fn resolve_dispute(
+        env: Env,
+        dispute_id: u64,
+        escrow: Address,
+    ) -> Result<DisputeStatus, DisputeError> {
         let mut dispute: Dispute = env
             .storage()
             .persistent()
@@ -222,6 +225,19 @@ impl DisputeContract {
         } else {
             DisputeStatus::ResolvedForFreelancer
         };
+
+        let resolved_status = dispute.status.clone();
+        let resolved_for_client = resolved_status == DisputeStatus::ResolvedForClient;
+
+        let _ = env.invoke_contract::<()>(
+            &escrow,
+            &Symbol::new(&env, "resolve_dispute_callback"),
+            vec![
+                &env,
+                dispute.job_id.into_val(&env),
+                resolved_for_client.into_val(&env),
+            ],
+        );
 
         env.storage()
             .persistent()
