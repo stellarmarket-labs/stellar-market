@@ -2,6 +2,7 @@
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Vec,
+    Symbol, vec, IntoVal,
 };
 
 #[contracterror]
@@ -67,6 +68,33 @@ enum DataKey {
     HasVoted(u64, Address),
 }
 
+const MIN_TTL_THRESHOLD: u32 = 1_000;
+const MIN_TTL_EXTEND_TO: u32 = 10_000;
+
+fn bump_dispute_ttl(env: &Env, dispute_id: u64) {
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Dispute(dispute_id), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
+fn bump_votes_ttl(env: &Env, dispute_id: u64) {
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Votes(dispute_id), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
+fn bump_has_voted_ttl(env: &Env, dispute_id: u64, voter: &Address) {
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::HasVoted(dispute_id, voter.clone()), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
+fn bump_dispute_count_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+}
+
 #[contract]
 pub struct DisputeContract;
 
@@ -100,7 +128,7 @@ impl DisputeContract {
             job_id,
             client,
             freelancer,
-            initiator,
+            initiator: initiator.clone(),
             reason,
             status: DisputeStatus::Open,
             votes_for_client: 0,
@@ -115,9 +143,18 @@ impl DisputeContract {
         env.storage()
             .instance()
             .set(&DataKey::DisputeCount, &count);
+        bump_dispute_ttl(&env, count);
+        bump_dispute_count_ttl(&env);
         env.storage()
             .persistent()
             .set(&DataKey::Votes(count), &Vec::<Vote>::new(&env));
+        bump_votes_ttl(&env, count);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("dispute"), symbol_short!("raised")),
+            (count, job_id, initiator),
+        );
 
         Ok(count)
     }
@@ -137,6 +174,7 @@ impl DisputeContract {
             .persistent()
             .get(&DataKey::Dispute(dispute_id))
             .ok_or(DisputeError::DisputeNotFound)?;
+        bump_dispute_ttl(&env, dispute_id);
 
         if dispute.status != DisputeStatus::Open && dispute.status != DisputeStatus::Voting {
             return Err(DisputeError::VotingClosed);
@@ -170,6 +208,7 @@ impl DisputeContract {
         env.storage()
             .persistent()
             .set(&DataKey::Votes(dispute_id), &votes);
+        bump_votes_ttl(&env, dispute_id);
 
         match choice {
             VoteChoice::Client => dispute.votes_for_client += 1,
@@ -181,18 +220,29 @@ impl DisputeContract {
             .persistent()
             .set(&DataKey::Dispute(dispute_id), &dispute);
         env.storage().persistent().set(&voted_key, &true);
+        bump_dispute_ttl(&env, dispute_id);
+        bump_has_voted_ttl(&env, dispute_id, &voter);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("dispute"), symbol_short!("voted")),
+            (dispute_id, voter, choice),
+        );
 
         Ok(())
     }
 
-    /// Resolve the dispute after enough votes have been cast.
-    /// The side with more votes wins.
-    pub fn resolve_dispute(env: Env, dispute_id: u64) -> Result<DisputeStatus, DisputeError> {
+    pub fn resolve_dispute(
+        env: Env,
+        dispute_id: u64,
+        escrow: Address,
+    ) -> Result<DisputeStatus, DisputeError> {
         let mut dispute: Dispute = env
             .storage()
             .persistent()
             .get(&DataKey::Dispute(dispute_id))
             .ok_or(DisputeError::DisputeNotFound)?;
+        bump_dispute_ttl(&env, dispute_id);
 
         if dispute.status == DisputeStatus::ResolvedForClient
             || dispute.status == DisputeStatus::ResolvedForFreelancer
@@ -211,19 +261,42 @@ impl DisputeContract {
             DisputeStatus::ResolvedForFreelancer
         };
 
+        let resolved_status = dispute.status.clone();
+        let resolved_for_client = resolved_status == DisputeStatus::ResolvedForClient;
+
+        let _ = env.invoke_contract::<()>(
+            &escrow,
+            &Symbol::new(&env, "resolve_dispute_callback"),
+            vec![
+                &env,
+                dispute.job_id.into_val(&env),
+                resolved_for_client.into_val(&env),
+            ],
+        );
+
         env.storage()
             .persistent()
             .set(&DataKey::Dispute(dispute_id), &dispute);
+        bump_dispute_ttl(&env, dispute_id);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("dispute"), symbol_short!("resolved")),
+            (dispute_id, dispute.status.clone()),
+        );
 
         Ok(dispute.status)
     }
 
     /// Get dispute details.
     pub fn get_dispute(env: Env, dispute_id: u64) -> Result<Dispute, DisputeError> {
-        env.storage()
+        let dispute: Dispute = env
+            .storage()
             .persistent()
             .get(&DataKey::Dispute(dispute_id))
-            .ok_or(DisputeError::DisputeNotFound)
+            .ok_or(DisputeError::DisputeNotFound)?;
+        bump_dispute_ttl(&env, dispute_id);
+        Ok(dispute)
     }
 
     /// Get all votes for a dispute.

@@ -63,3 +63,27 @@ export interface Review {
   reviewer: User;
   createdAt: string;
 }
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+export interface UserProfile extends User {
+  reviewsReceived: Review[];
+  clientJobs: Job[];
+  freelancerJobs: Job[];
+  averageRating: number;
+  reviewCount: number;
+  createdAt: string;
+}
+
+export interface Conversation {
+  id: string;
+  otherUser: User;
+  job: { id: string; title: string } | null;
+  lastMessage: Message;
+  unreadCount: number;
+}

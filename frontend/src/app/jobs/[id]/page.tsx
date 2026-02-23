@@ -1,4 +1,4 @@
-import { Clock, DollarSign, ArrowLeft } from "lucide-react";
+import { Clock, DollarSign, ArrowLeft, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import StatusBadge from "@/components/StatusBadge";
 
@@ -169,7 +169,13 @@ export default function JobDetailPage() {
                 </div>
               </div>
             </div>
-            <p className="text-sm text-dark-text">{mockJob.client.bio}</p>
+            <p className="text-sm text-dark-text mb-4">{mockJob.client.bio}</p>
+            <Link
+              href={`/messages/${mockJob.client.id}-${mockJob.id}`}
+              className="btn-secondary w-full flex items-center justify-center gap-2"
+            >
+              <MessageSquare size={18} /> Message Client
+            </Link>
           </div>
 
           <div className="card">
