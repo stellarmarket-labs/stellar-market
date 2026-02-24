@@ -22,6 +22,8 @@ fn setup_completed_job(
         total_amount: 1000,
         status: JobStatus::Completed,
         milestones: Vec::new(env),
+        job_deadline: 0,
+        auto_refund_after: 0,
     };
     env.as_contract(escrow_id, || {
         env.storage()
@@ -47,6 +49,8 @@ fn setup_in_progress_job(
         total_amount: 1000,
         status: JobStatus::InProgress,
         milestones: Vec::new(env),
+        job_deadline: 0,
+        auto_refund_after: 0,
     };
     env.as_contract(escrow_id, || {
         env.storage()

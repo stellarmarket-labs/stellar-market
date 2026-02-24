@@ -125,7 +125,7 @@ router.get(
   authenticate,
   validate({ params: getMilestoneByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
 
     const milestone = await prisma.milestone.findUnique({
       where: { id: id as string },
@@ -168,7 +168,7 @@ router.put(
     body: updateMilestoneSchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const updateData = req.body;
 
     if (updateData.dueDate) {
@@ -207,7 +207,7 @@ router.delete(
   authenticate,
   validate({ params: getMilestoneByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
 
     const milestone = await prisma.milestone.findUnique({
       where: { id: id as string },
@@ -237,7 +237,7 @@ router.patch(
     body: updateMilestoneStatusSchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { status } = req.body;
 
     const milestone = await prisma.milestone.findUnique({

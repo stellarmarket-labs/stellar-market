@@ -31,8 +31,12 @@ const app = express();
 app.use(express.json());
 app.use("/api/messages", messageRouter);
 
+// ─── Stable test UUIDs (RFC 4122 v4 format) ──────────────────────────────────
+const USER_TEST_ID  = "00000000-0000-4000-8000-000000000001";
+const USER_OTHER_ID = "00000000-0000-4000-8000-000000000002";
+
 // ─── Helper: auth header ──────────────────────────────────────────────────────
-function authHeader(userId = "user-test") {
+function authHeader(userId = USER_TEST_ID) {
   const token = jwt.sign({ userId }, config.jwtSecret, { expiresIn: "1h" });
   return { Authorization: `Bearer ${token}` };
 }
@@ -42,15 +46,15 @@ afterEach(() => jest.clearAllMocks());
 // ─── POST /api/messages ───────────────────────────────────────────────────────
 describe("POST /api/messages", () => {
   const mockCreated = {
-    id: "msg-1",
-    senderId: "user-test",
-    receiverId: "user-other",
+    id: "00000000-0000-4000-8000-000000000010",
+    senderId: USER_TEST_ID,
+    receiverId: USER_OTHER_ID,
     content: "Hi!",
     read: false,
     jobId: null,
     createdAt: new Date().toISOString(),
-    sender: { id: "user-test", username: "alice", avatarUrl: null },
-    receiver: { id: "user-other", username: "bob", avatarUrl: null },
+    sender: { id: USER_TEST_ID, username: "alice", avatarUrl: null },
+    receiver: { id: USER_OTHER_ID, username: "bob", avatarUrl: null },
   };
 
   it("creates a message and returns 201", async () => {
@@ -59,7 +63,7 @@ describe("POST /api/messages", () => {
     const res = await request(app)
       .post("/api/messages")
       .set(authHeader())
-      .send({ receiverId: "user-other", content: "Hi!" });
+      .send({ receiverId: USER_OTHER_ID, content: "Hi!" });
 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ content: "Hi!" });
@@ -70,7 +74,7 @@ describe("POST /api/messages", () => {
     const res = await request(app)
       .post("/api/messages")
       .set(authHeader())
-      .send({ content: "Hi!" });
+      .send({ content: "Hi!" }); // missing receiverId
 
     expect(res.status).toBe(400);
     expect(messageMock.create).not.toHaveBeenCalled();
@@ -80,7 +84,7 @@ describe("POST /api/messages", () => {
     const res = await request(app)
       .post("/api/messages")
       .set(authHeader())
-      .send({ receiverId: "user-other" });
+      .send({ receiverId: USER_OTHER_ID }); // missing content
 
     expect(res.status).toBe(400);
   });
@@ -88,7 +92,7 @@ describe("POST /api/messages", () => {
   it("returns 401 with no auth token", async () => {
     const res = await request(app)
       .post("/api/messages")
-      .send({ receiverId: "user-other", content: "Hi!" });
+      .send({ receiverId: USER_OTHER_ID, content: "Hi!" });
 
     expect(res.status).toBe(401);
   });
@@ -107,7 +111,7 @@ describe("GET /api/messages/unread-count", () => {
     expect(res.body).toEqual({ count: 5 });
     expect(messageMock.count).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ receiverId: "user-test", read: false }),
+        where: expect.objectContaining({ receiverId: USER_TEST_ID, read: false }),
       })
     );
   });
@@ -121,17 +125,18 @@ describe("GET /api/messages/unread-count", () => {
 // ─── GET /api/messages/conversations ─────────────────────────────────────────
 describe("GET /api/messages/conversations", () => {
   it("returns a list of conversations", async () => {
+    const USER_BOB_ID = "00000000-0000-4000-8000-000000000003";
     const now = new Date().toISOString();
     messageMock.findMany.mockResolvedValueOnce([
       {
-        id: "msg-1",
-        senderId: "user-test",
-        receiverId: "user-bob",
+        id: "00000000-0000-4000-8000-000000000010",
+        senderId: USER_TEST_ID,
+        receiverId: USER_BOB_ID,
         content: "Hey!",
         read: true,
         createdAt: now,
-        sender: { id: "user-test", username: "alice", avatarUrl: null },
-        receiver: { id: "user-bob", username: "bob", avatarUrl: null },
+        sender: { id: USER_TEST_ID, username: "alice", avatarUrl: null },
+        receiver: { id: USER_BOB_ID, username: "bob", avatarUrl: null },
       },
     ]);
 
@@ -157,20 +162,20 @@ describe("GET /api/messages/:userId", () => {
   it("returns conversation history and marks messages as read", async () => {
     const mockMessages = [
       {
-        id: "msg-1",
-        senderId: "user-other",
-        receiverId: "user-test",
+        id: "00000000-0000-4000-8000-000000000010",
+        senderId: USER_OTHER_ID,
+        receiverId: USER_TEST_ID,
         content: "Hello",
         read: false,
         createdAt: new Date().toISOString(),
-        sender: { id: "user-other", username: "bob", avatarUrl: null },
+        sender: { id: USER_OTHER_ID, username: "bob", avatarUrl: null },
       },
     ];
     messageMock.findMany.mockResolvedValueOnce(mockMessages);
     messageMock.updateMany.mockResolvedValueOnce({ count: 1 });
 
     const res = await request(app)
-      .get("/api/messages/user-other")
+      .get(`/api/messages/${USER_OTHER_ID}`)
       .set(authHeader());
 
     expect(res.status).toBe(200);
@@ -178,8 +183,8 @@ describe("GET /api/messages/:userId", () => {
     expect(messageMock.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          senderId: "user-other",
-          receiverId: "user-test",
+          senderId: USER_OTHER_ID,
+          receiverId: USER_TEST_ID,
           read: false,
         }),
         data: { read: true },
@@ -188,7 +193,7 @@ describe("GET /api/messages/:userId", () => {
   });
 
   it("returns 401 with no auth token", async () => {
-    const res = await request(app).get("/api/messages/user-other");
+    const res = await request(app).get(`/api/messages/${USER_OTHER_ID}`);
     expect(res.status).toBe(401);
   });
 });

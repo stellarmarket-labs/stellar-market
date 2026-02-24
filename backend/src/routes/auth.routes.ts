@@ -208,7 +208,7 @@ router.get(
   "/verify-email/:token",
   validate({ params: verifyEmailParamSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const { token } = req.params;
+    const token = req.params.token as string;
 
     const hashed = hashToken(token);
 

@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Vec,
-    Symbol, vec, IntoVal,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, vec, Address, Env,
+    IntoVal, String, Symbol, Vec,
 };
 
 #[contracterror]
@@ -20,6 +20,10 @@ pub enum DisputeError {
     MaxAppealsReached = 9,
     NotLosingParty = 10,
     CannotAppealBeforeResolution = 11,
+    DisputeNotResolved = 12,
+    NotWinningVoter = 13,
+    AlreadyClaimed = 14,
+    NoRewardAvailable = 15,
 }
 
 #[contracttype]
@@ -67,6 +71,9 @@ pub struct Dispute {
     pub max_appeals: u32,
     pub appeal_deadline: u64,
     pub resolution_timestamp: u64,
+    pub dispute_fee: i128,
+    pub token: Address,
+    pub malicious: bool,
 }
 
 #[contracttype]
@@ -76,27 +83,42 @@ enum DataKey {
     DisputeCount,
     Votes(u64),
     HasVoted(u64, Address),
+    VoterRewarded(u64, Address),
 }
 
 const MIN_TTL_THRESHOLD: u32 = 1_000;
 const MIN_TTL_EXTEND_TO: u32 = 10_000;
 
 fn bump_dispute_ttl(env: &Env, dispute_id: u64) {
-    env.storage()
-        .persistent()
-        .extend_ttl(&DataKey::Dispute(dispute_id), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        &DataKey::Dispute(dispute_id),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
 }
 
 fn bump_votes_ttl(env: &Env, dispute_id: u64) {
-    env.storage()
-        .persistent()
-        .extend_ttl(&DataKey::Votes(dispute_id), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        &DataKey::Votes(dispute_id),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
 }
 
 fn bump_has_voted_ttl(env: &Env, dispute_id: u64, voter: &Address) {
-    env.storage()
-        .persistent()
-        .extend_ttl(&DataKey::HasVoted(dispute_id, voter.clone()), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        &DataKey::HasVoted(dispute_id, voter.clone()),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
+}
+
+fn bump_voter_rewarded_ttl(env: &Env, dispute_id: u64, voter: &Address) {
+    env.storage().persistent().extend_ttl(
+        &DataKey::VoterRewarded(dispute_id, voter.clone()),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
 }
 
 fn bump_dispute_count_ttl(env: &Env) {
@@ -111,6 +133,7 @@ pub struct DisputeContract;
 #[contractimpl]
 impl DisputeContract {
     /// Raise a dispute on a job. Either the client or freelancer can initiate.
+    /// The initiator pays a dispute fee held in escrow during voting.
     pub fn raise_dispute(
         env: Env,
         job_id: u64,
@@ -119,11 +142,19 @@ impl DisputeContract {
         initiator: Address,
         reason: String,
         min_votes: u32,
+        dispute_fee: i128,
+        token: Address,
     ) -> Result<u64, DisputeError> {
         initiator.require_auth();
 
         if initiator != client && initiator != freelancer {
             return Err(DisputeError::InvalidParty);
+        }
+
+        // Hold dispute fee in contract escrow
+        if dispute_fee > 0 {
+            let token_client = token::Client::new(&env, &token);
+            token_client.transfer(&initiator, &env.current_contract_address(), &dispute_fee);
         }
 
         let mut count: u64 = env
@@ -149,14 +180,15 @@ impl DisputeContract {
             max_appeals: 2,
             appeal_deadline: 0,
             resolution_timestamp: 0,
+            dispute_fee,
+            token,
+            malicious: false,
         };
 
         env.storage()
             .persistent()
             .set(&DataKey::Dispute(count), &dispute);
-        env.storage()
-            .instance()
-            .set(&DataKey::DisputeCount, &count);
+        env.storage().instance().set(&DataKey::DisputeCount, &count);
         bump_dispute_ttl(&env, count);
         bump_dispute_count_ttl(&env);
         env.storage()
@@ -190,9 +222,10 @@ impl DisputeContract {
             .ok_or(DisputeError::DisputeNotFound)?;
         bump_dispute_ttl(&env, dispute_id);
 
-        if dispute.status != DisputeStatus::Open 
-            && dispute.status != DisputeStatus::Voting 
-            && dispute.status != DisputeStatus::Appealed {
+        if dispute.status != DisputeStatus::Open
+            && dispute.status != DisputeStatus::Voting
+            && dispute.status != DisputeStatus::Appealed
+        {
             return Err(DisputeError::VotingClosed);
         }
 
@@ -248,10 +281,14 @@ impl DisputeContract {
         Ok(())
     }
 
+    /// Resolve a dispute after enough votes are cast.
+    /// If `malicious` is true, the dispute fee is refunded to the winning party
+    /// instead of being distributed to voters.
     pub fn resolve_dispute(
         env: Env,
         dispute_id: u64,
         escrow: Address,
+        malicious: bool,
     ) -> Result<DisputeStatus, DisputeError> {
         let mut dispute: Dispute = env
             .storage()
@@ -265,19 +302,19 @@ impl DisputeContract {
         }
 
         let total_votes = dispute.votes_for_client + dispute.votes_for_freelancer;
-        
+
         // Calculate required votes based on appeal count (doubles each round)
         let required_votes = dispute.min_votes * (2_u32.pow(dispute.appeal_count));
-        
+
         if total_votes < required_votes {
             return Err(DisputeError::NotEnoughVotes);
         }
 
         let resolved_for_client = dispute.votes_for_client >= dispute.votes_for_freelancer;
-        
+
         // Check if this is the final resolution
         let is_final = dispute.appeal_count >= dispute.max_appeals;
-        
+
         if is_final {
             dispute.status = DisputeStatus::FinalResolution;
         } else {
@@ -292,6 +329,8 @@ impl DisputeContract {
         dispute.resolution_timestamp = env.ledger().timestamp();
         dispute.appeal_deadline = env.ledger().sequence() as u64 + 100;
 
+        dispute.malicious = malicious;
+
         let resolved_status = dispute.status.clone();
 
         // Only invoke escrow callback for final resolution
@@ -304,6 +343,21 @@ impl DisputeContract {
                     dispute.job_id.into_val(&env),
                     resolved_for_client.into_val(&env),
                 ],
+            );
+        }
+
+        // If malicious, refund dispute fee to the winning party (victim of bad-faith dispute)
+        if malicious && dispute.dispute_fee > 0 {
+            let token_client = token::Client::new(&env, &dispute.token);
+            let refund_to = if resolved_for_client {
+                &dispute.client
+            } else {
+                &dispute.freelancer
+            };
+            token_client.transfer(
+                &env.current_contract_address(),
+                refund_to,
+                &dispute.dispute_fee,
             );
         }
 
@@ -349,9 +403,10 @@ impl DisputeContract {
         }
 
         // Check if dispute has been resolved (but not final)
-        if dispute.status != DisputeStatus::ResolvedForClient 
-            && dispute.status != DisputeStatus::ResolvedForFreelancer 
-            && dispute.status != DisputeStatus::FinalResolution {
+        if dispute.status != DisputeStatus::ResolvedForClient
+            && dispute.status != DisputeStatus::ResolvedForFreelancer
+            && dispute.status != DisputeStatus::FinalResolution
+        {
             return Err(DisputeError::CannotAppealBeforeResolution);
         }
 
@@ -400,6 +455,176 @@ impl DisputeContract {
         );
 
         Ok(())
+    }
+
+    /// Claim voter reward for a resolved dispute. Only winning-side voters can claim.
+    /// Reward = dispute_fee / winning_vote_count. Double-claim prevented by storage flag.
+    pub fn claim_voter_reward(
+        env: Env,
+        dispute_id: u64,
+        voter: Address,
+    ) -> Result<i128, DisputeError> {
+        voter.require_auth();
+
+        let dispute: Dispute = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Dispute(dispute_id))
+            .ok_or(DisputeError::DisputeNotFound)?;
+        bump_dispute_ttl(&env, dispute_id);
+
+        // Must be resolved (including FinalResolution from appeal system)
+        if dispute.status != DisputeStatus::ResolvedForClient
+            && dispute.status != DisputeStatus::ResolvedForFreelancer
+            && dispute.status != DisputeStatus::FinalResolution
+        {
+            return Err(DisputeError::DisputeNotResolved);
+        }
+
+        // No rewards if dispute was malicious (fee already refunded)
+        if dispute.malicious {
+            return Err(DisputeError::NoRewardAvailable);
+        }
+
+        // No reward if fee is zero
+        if dispute.dispute_fee <= 0 {
+            return Err(DisputeError::NoRewardAvailable);
+        }
+
+        // Check voter hasn't already claimed
+        let rewarded_key = DataKey::VoterRewarded(dispute_id, voter.clone());
+        if env.storage().persistent().has(&rewarded_key) {
+            return Err(DisputeError::AlreadyClaimed);
+        }
+
+        // Check voter voted on the winning side
+        let votes: Vec<Vote> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Votes(dispute_id))
+            .unwrap_or(Vec::new(&env));
+
+        let winning_choice = if dispute.status == DisputeStatus::ResolvedForClient {
+            VoteChoice::Client
+        } else {
+            // ResolvedForFreelancer or FinalResolution — determine from vote counts
+            if dispute.votes_for_client >= dispute.votes_for_freelancer {
+                VoteChoice::Client
+            } else {
+                VoteChoice::Freelancer
+            }
+        };
+
+        let mut voter_on_winning_side = false;
+        for vote in votes.iter() {
+            if vote.voter == voter && vote.choice == winning_choice {
+                voter_on_winning_side = true;
+                break;
+            }
+        }
+
+        if !voter_on_winning_side {
+            return Err(DisputeError::NotWinningVoter);
+        }
+
+        // Calculate reward: dispute_fee / winning_vote_count
+        let winning_count = match winning_choice {
+            VoteChoice::Client => dispute.votes_for_client as i128,
+            VoteChoice::Freelancer => dispute.votes_for_freelancer as i128,
+        };
+
+        if winning_count == 0 {
+            return Err(DisputeError::NoRewardAvailable);
+        }
+
+        let reward = dispute.dispute_fee / winning_count;
+        if reward <= 0 {
+            return Err(DisputeError::NoRewardAvailable);
+        }
+
+        // Transfer reward to voter
+        let token_client = token::Client::new(&env, &dispute.token);
+        token_client.transfer(&env.current_contract_address(), &voter, &reward);
+
+        // Mark as claimed
+        env.storage().persistent().set(&rewarded_key, &true);
+        bump_voter_rewarded_ttl(&env, dispute_id, &voter);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("dispute"), symbol_short!("reward")),
+            (dispute_id, voter, reward),
+        );
+
+        Ok(reward)
+    }
+
+    /// View function: returns the claimable reward for a voter, or 0 if not eligible.
+    pub fn get_claimable_reward(env: Env, dispute_id: u64, voter: Address) -> i128 {
+        let dispute: Dispute = match env
+            .storage()
+            .persistent()
+            .get(&DataKey::Dispute(dispute_id))
+        {
+            Some(d) => d,
+            None => return 0,
+        };
+
+        // Must be resolved, not malicious, and have a fee
+        if (dispute.status != DisputeStatus::ResolvedForClient
+            && dispute.status != DisputeStatus::ResolvedForFreelancer
+            && dispute.status != DisputeStatus::FinalResolution)
+            || dispute.malicious
+            || dispute.dispute_fee <= 0
+        {
+            return 0;
+        }
+
+        // Must not have already claimed
+        let rewarded_key = DataKey::VoterRewarded(dispute_id, voter.clone());
+        if env.storage().persistent().has(&rewarded_key) {
+            return 0;
+        }
+
+        // Must have voted on the winning side
+        let votes: Vec<Vote> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Votes(dispute_id))
+            .unwrap_or(Vec::new(&env));
+
+        let winning_choice = if dispute.status == DisputeStatus::ResolvedForClient {
+            VoteChoice::Client
+        } else {
+            if dispute.votes_for_client >= dispute.votes_for_freelancer {
+                VoteChoice::Client
+            } else {
+                VoteChoice::Freelancer
+            }
+        };
+
+        let mut voter_on_winning_side = false;
+        for vote in votes.iter() {
+            if vote.voter == voter && vote.choice == winning_choice {
+                voter_on_winning_side = true;
+                break;
+            }
+        }
+
+        if !voter_on_winning_side {
+            return 0;
+        }
+
+        let winning_count = match winning_choice {
+            VoteChoice::Client => dispute.votes_for_client as i128,
+            VoteChoice::Freelancer => dispute.votes_for_freelancer as i128,
+        };
+
+        if winning_count == 0 {
+            return 0;
+        }
+
+        dispute.dispute_fee / winning_count
     }
 
     /// Get dispute details.
