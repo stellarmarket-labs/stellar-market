@@ -34,6 +34,14 @@ enum ApplicationStatus {
   REJECTED
 }
 
+enum EscrowStatus {
+  UNFUNDED
+  FUNDED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
 model User {
   id            String   @id @default(cuid())
   walletAddress String   @unique
@@ -53,6 +61,7 @@ model User {
   receivedMessages Message[]   @relation("ReceivedMessages")
   reviewsGiven   Review[]      @relation("ReviewsGiven")
   reviewsReceived Review[]     @relation("ReviewsReceived")
+  skills          String[]
 }
 
 model Job {
@@ -64,6 +73,10 @@ model Job {
   status       JobStatus @default(OPEN)
   clientId     String
   freelancerId String?
+  contractJobId String?   @unique
+  escrowStatus  EscrowStatus @default(UNFUNDED)
+  skills       String[]
+  deadline     DateTime
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -83,6 +96,9 @@ model Milestone {
   amount      Float
   status      MilestoneStatus @default(PENDING)
   order       Int
+  onChainIndex Int?
+  contractDeadline DateTime?
+  dueDate     DateTime?
   createdAt   DateTime        @default(now())
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
@@ -90,11 +106,12 @@ model Milestone {
 
 model Application {
   id             String            @id @default(cuid())
-  jobId          String
-  freelancerId   String
-  coverLetter    String
-  proposedBudget Float
-  status         ApplicationStatus @default(PENDING)
+  jobId             String
+  freelancerId      String
+  proposal          String
+  bidAmount         Float
+  estimatedDuration String
+  status            ApplicationStatus @default(PENDING)
   createdAt      DateTime          @default(now())
 
   job        Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
