@@ -42,6 +42,18 @@ enum EscrowStatus {
   DISPUTED
 }
 
+enum DisputeStatus {
+  OPEN
+  VOTING
+  RESOLVED
+  APPEALED
+}
+
+enum VoteChoice {
+  CLIENT
+  FREELANCER
+}
+
 model User {
   id            String   @id @default(cuid())
   walletAddress String   @unique
@@ -66,6 +78,10 @@ model User {
   reviewsGiven   Review[]      @relation("ReviewsGiven")
   reviewsReceived Review[]     @relation("ReviewsReceived")
   skills          String[]
+  initiatedDisputes Dispute[]  @relation("InitiatedDisputes")
+  clientDisputes    Dispute[]  @relation("ClientDisputes")
+  freelancerDisputes Dispute[] @relation("FreelancerDisputes")
+  disputeVotes      DisputeVote[]
 }
 
 model Job {
@@ -90,6 +106,7 @@ model Job {
   applications Application[]
   messages     Message[]
   reviews      Review[]
+  disputes     Dispute[]
 }
 
 model Milestone {
@@ -152,4 +169,39 @@ model Review {
   reviewee User @relation("ReviewsReceived", fields: [revieweeId], references: [id])
 
   @@unique([jobId, reviewerId])
+}
+
+model Dispute {
+  id                String        @id @default(cuid())
+  jobId             String
+  clientId          String
+  freelancerId      String
+  initiatorId       String
+  reason            String
+  status            DisputeStatus @default(OPEN)
+  onChainDisputeId  String?       @unique
+  resolution        String?
+  winningParty      VoteChoice?
+  createdAt         DateTime      @default(now())
+  resolvedAt        DateTime?
+
+  job         Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  client      User           @relation("ClientDisputes", fields: [clientId], references: [id])
+  freelancer  User           @relation("FreelancerDisputes", fields: [freelancerId], references: [id])
+  initiator   User           @relation("InitiatedDisputes", fields: [initiatorId], references: [id])
+  votes       DisputeVote[]
+}
+
+model DisputeVote {
+  id         String     @id @default(cuid())
+  disputeId  String
+  voterId    String
+  choice     VoteChoice
+  reason     String?
+  createdAt  DateTime   @default(now())
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  voter   User    @relation(fields: [voterId], references: [id])
+
+  @@unique([disputeId, voterId])
 }

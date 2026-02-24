@@ -7,16 +7,18 @@ import messageRoutes from "./message.routes";
 import reviewRoutes from "./review.routes";
 import milestoneRoutes from "./milestone.routes";
 import escrowRoutes from "./escrow.routes";
+import disputeRoutes from "./dispute.routes";
 
 const router = Router();
 
 router.use("/auth", authRoutes);
 router.use("/users", userRoutes);
 router.use("/jobs", jobRoutes);
-router.use("/", applicationRoutes);
-router.use("/", milestoneRoutes);
 router.use("/messages", messageRoutes);
 router.use("/reviews", reviewRoutes);
 router.use("/escrow", escrowRoutes);
+router.use("/disputes", disputeRoutes);
+router.use("/", applicationRoutes);
+router.use("/", milestoneRoutes);
 
 export default router;

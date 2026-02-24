@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -37,11 +35,26 @@ fn test_create_job() {
     let milestones = vec![
         &env,
         (String::from_str(&env, "Design mockups"), 500_i128, 2000_u64),
-        (String::from_str(&env, "Frontend implementation"), 1000_i128, 3000_u64),
-        (String::from_str(&env, "Backend integration"), 1500_i128, 4000_u64),
+        (
+            String::from_str(&env, "Frontend implementation"),
+            1000_i128,
+            3000_u64,
+        ),
+        (
+            String::from_str(&env, "Backend integration"),
+            1500_i128,
+            4000_u64,
+        ),
     ];
 
-    let job_id = client.create_job(&user_client, &freelancer, &token, &milestones, &5000_u64, &GRACE_PERIOD);
+    let job_id = client.create_job(
+        &user_client,
+        &freelancer,
+        &token,
+        &milestones,
+        &5000_u64,
+        &GRACE_PERIOD,
+    );
     assert_eq!(job_id, 1);
 
     let job = client.get_job(&job_id);
@@ -67,13 +80,24 @@ fn test_job_count_increments() {
     let freelancer = Address::generate(&env);
     let token = Address::generate(&env);
 
-    let milestones = vec![
-        &env,
-        (String::from_str(&env, "Task 1"), 100_i128, 2000_u64),
-    ];
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
 
-    let id1 = client.create_job(&user, &freelancer, &token, &milestones, &2500_u64, &GRACE_PERIOD);
-    let id2 = client.create_job(&user, &freelancer, &token, &milestones, &2500_u64, &GRACE_PERIOD);
+    let id1 = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+    let id2 = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
 
     assert_eq!(id1, 1);
     assert_eq!(id2, 2);
@@ -99,7 +123,14 @@ fn test_create_job_invalid_deadline() {
         (String::from_str(&env, "Task 1"), 100_i128, 500_u64), // Invalid, < 1000
     ];
 
-    client.create_job(&user, &freelancer, &token, &milestones, &2000_u64, &GRACE_PERIOD);
+    client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2000_u64,
+        &GRACE_PERIOD,
+    );
 }
 
 #[test]
@@ -116,12 +147,16 @@ fn test_submit_milestone_past_deadline() {
     let freelancer = Address::generate(&env);
     let token = env.register_contract(None, MockToken);
 
-    let milestones = vec![
-        &env,
-        (String::from_str(&env, "Task 1"), 100_i128, 2000_u64),
-    ];
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
 
-    let job_id = client.create_job(&user, &freelancer, &token, &milestones, &3000_u64, &GRACE_PERIOD);
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &3000_u64,
+        &GRACE_PERIOD,
+    );
     client.fund_job(&job_id, &user);
 
     // fast forward past deadline
@@ -143,21 +178,25 @@ fn test_is_milestone_overdue() {
     let freelancer = Address::generate(&env);
     let token = Address::generate(&env);
 
-    let milestones = vec![
-        &env,
-        (String::from_str(&env, "Task 1"), 100_i128, 2000_u64),
-    ];
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
 
-    let job_id = client.create_job(&user, &freelancer, &token, &milestones, &3000_u64, &GRACE_PERIOD);
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &3000_u64,
+        &GRACE_PERIOD,
+    );
 
     // not overdue initially
-    assert_eq!(client.is_milestone_overdue(&job_id, &0), false);
+    assert!(!client.is_milestone_overdue(&job_id, &0));
 
     // fast forward past deadline
     env.ledger().with_mut(|l| l.timestamp = 2500);
 
     // overdue now
-    assert_eq!(client.is_milestone_overdue(&job_id, &0), true);
+    assert!(client.is_milestone_overdue(&job_id, &0));
 }
 
 #[test]
@@ -173,12 +212,16 @@ fn test_extend_deadline() {
     let freelancer = Address::generate(&env);
     let token = Address::generate(&env);
 
-    let milestones = vec![
-        &env,
-        (String::from_str(&env, "Task 1"), 100_i128, 2000_u64),
-    ];
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
 
-    let job_id = client.create_job(&user, &freelancer, &token, &milestones, &3000_u64, &GRACE_PERIOD);
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &3000_u64,
+        &GRACE_PERIOD,
+    );
 
     client.extend_deadline(&job_id, &0, &4000_u64);
 
@@ -188,7 +231,7 @@ fn test_extend_deadline() {
 
 // ── Helpers for claim_refund tests ───────────────────────────────────────────
 
-fn setup_refund_env(env: &Env) -> (EscrowContractClient, Address) {
+fn setup_refund_env(env: &Env) -> (EscrowContractClient<'_>, Address) {
     env.mock_all_auths();
     env.ledger().with_mut(|l| l.timestamp = 1000);
 
@@ -229,14 +272,20 @@ fn test_claim_refund_full() {
     let milestones = default_milestones(&env);
 
     let job_id = escrow.create_job(
-        &client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
     );
 
     mint_tokens(&env, &token, &client, 3000);
     escrow.fund_job(&job_id, &client);
 
     // Advance time past job_deadline + grace period
-    env.ledger().with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
 
     escrow.claim_refund(&job_id, &client);
 
@@ -260,7 +309,12 @@ fn test_claim_refund_partial() {
     let milestones = default_milestones(&env);
 
     let job_id = escrow.create_job(
-        &client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
     );
 
     mint_tokens(&env, &token, &client, 3000);
@@ -271,7 +325,8 @@ fn test_claim_refund_partial() {
     escrow.approve_milestone(&job_id, &0, &client);
 
     // Advance past job_deadline + grace
-    env.ledger().with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
 
     escrow.claim_refund(&job_id, &client);
 
@@ -298,7 +353,12 @@ fn test_claim_refund_in_progress_status() {
     let milestones = default_milestones(&env);
 
     let job_id = escrow.create_job(
-        &client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
     );
 
     mint_tokens(&env, &token, &client, 3000);
@@ -311,7 +371,8 @@ fn test_claim_refund_in_progress_status() {
     let job = escrow.get_job(&job_id);
     assert_eq!(job.status, JobStatus::InProgress);
 
-    env.ledger().with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
 
     escrow.claim_refund(&job_id, &client);
     let job = escrow.get_job(&job_id);
@@ -331,7 +392,12 @@ fn test_claim_refund_fails_before_grace_period() {
     let milestones = default_milestones(&env);
 
     let job_id = escrow.create_job(
-        &client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
     );
 
     mint_tokens(&env, &token, &client, 3000);
@@ -356,7 +422,12 @@ fn test_claim_refund_fails_with_pending_milestone() {
     let milestones = default_milestones(&env);
 
     let job_id = escrow.create_job(
-        &client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
     );
 
     mint_tokens(&env, &token, &client, 3000);
@@ -365,7 +436,8 @@ fn test_claim_refund_fails_with_pending_milestone() {
     // Freelancer submits a milestone (status = Submitted, not yet approved)
     escrow.submit_milestone(&job_id, &0, &freelancer);
 
-    env.ledger().with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
 
     // Should fail because there's a submitted milestone awaiting review
     escrow.claim_refund(&job_id, &client);
@@ -384,13 +456,19 @@ fn test_claim_refund_fails_unauthorized() {
     let milestones = default_milestones(&env);
 
     let job_id = escrow.create_job(
-        &client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
     );
 
     mint_tokens(&env, &token, &client, 3000);
     escrow.fund_job(&job_id, &client);
 
-    env.ledger().with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
 
     // Freelancer tries to claim refund — should fail
     escrow.claim_refund(&job_id, &freelancer);
@@ -408,10 +486,18 @@ fn test_claim_refund_fails_on_completed_job() {
     let freelancer = Address::generate(&env);
 
     // Single milestone so we can complete the whole job
-    let milestones = vec![&env, (String::from_str(&env, "Only task"), 1000_i128, 500_000_u64)];
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Only task"), 1000_i128, 500_000_u64),
+    ];
 
     let job_id = escrow.create_job(
-        &client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
     );
 
     mint_tokens(&env, &token, &client, 1000);
@@ -424,7 +510,8 @@ fn test_claim_refund_fails_on_completed_job() {
     let job = escrow.get_job(&job_id);
     assert_eq!(job.status, JobStatus::Completed);
 
-    env.ledger().with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
 
     // Should fail — job is already completed
     escrow.claim_refund(&job_id, &client);
@@ -443,7 +530,12 @@ fn test_claim_refund_fails_on_cancelled_job() {
     let milestones = default_milestones(&env);
 
     let job_id = escrow.create_job(
-        &client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
     );
 
     mint_tokens(&env, &token, &client, 3000);
@@ -452,7 +544,8 @@ fn test_claim_refund_fails_on_cancelled_job() {
     // Cancel the job first via existing cancel_job
     escrow.cancel_job(&job_id, &client);
 
-    env.ledger().with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp = JOB_DEADLINE + GRACE_PERIOD + 1);
 
     // Should fail — job is already cancelled
     escrow.claim_refund(&job_id, &client);

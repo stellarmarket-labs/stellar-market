@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use super::*;
 use soroban_sdk::{
     contract, contractimpl,
@@ -65,7 +63,7 @@ fn test_raise_dispute() {
     assert_eq!(dispute.appeal_count, 0);
     assert_eq!(dispute.max_appeals, 2);
     assert_eq!(dispute.dispute_fee, 100);
-    assert_eq!(dispute.malicious, false);
+    assert!(!dispute.malicious);
 
     // Verify fee was transferred to contract
     let token_client = token::Client::new(&env, &token_address);
@@ -431,7 +429,7 @@ fn test_malicious_dispute_refunds_winning_party() {
 
     // Dispute marked as malicious
     let dispute = client.get_dispute(&dispute_id);
-    assert_eq!(dispute.malicious, true);
+    assert!(dispute.malicious);
 }
 
 #[test]
