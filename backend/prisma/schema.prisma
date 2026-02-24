@@ -62,6 +62,22 @@ model User {
   reviewsGiven   Review[]      @relation("ReviewsGiven")
   reviewsReceived Review[]     @relation("ReviewsReceived")
   skills          String[]
+  services        ServiceListing[]
+  savedJobs       SavedJob[]
+}
+
+model ServiceListing {
+  id           String   @id @default(cuid())
+  title        String
+  description  String
+  price        Float
+  category     String
+  freelancerId String
+  skills       String[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  freelancer User @relation(fields: [freelancerId], references: [id], onDelete: Cascade)
 }
 
 model Job {
@@ -86,6 +102,7 @@ model Job {
   applications Application[]
   messages     Message[]
   reviews      Review[]
+  savedBy      SavedJob[]
 }
 
 model Milestone {
@@ -148,4 +165,16 @@ model Review {
   reviewee User @relation("ReviewsReceived", fields: [revieweeId], references: [id])
 
   @@unique([jobId, reviewerId])
+}
+
+model SavedJob {
+  id           String   @id @default(cuid())
+  freelancerId String
+  jobId        String
+  createdAt    DateTime @default(now())
+
+  freelancer User @relation(fields: [freelancerId], references: [id], onDelete: Cascade)
+  job        Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([freelancerId, jobId])
 }
