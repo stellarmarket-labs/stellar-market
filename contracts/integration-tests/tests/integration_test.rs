@@ -179,6 +179,8 @@ fn test_dispute_resolved_for_freelancer() {
         &client,
         &String::from_str(&env, "Work quality is not acceptable"),
         &3,
+        &0_i128,
+        &token_address,
     );
 
     let dispute = dispute_client.get_dispute(&dispute_id_val);
@@ -216,7 +218,7 @@ fn test_dispute_resolved_for_freelancer() {
     assert_eq!(dispute.votes_for_client, 1);
 
     // Resolve dispute - should transfer remaining funds to freelancer
-    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id);
+    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id, &false);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 
     // Verify funds transferred to freelancer
@@ -274,6 +276,8 @@ fn test_dispute_resolved_for_client() {
         &client,
         &String::from_str(&env, "Second milestone not delivered properly"),
         &3,
+        &0_i128,
+        &token_address,
     );
 
     // Voters side with client
@@ -303,7 +307,7 @@ fn test_dispute_resolved_for_client() {
     );
 
     // Resolve dispute - remaining funds should go back to client
-    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id);
+    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id, &false);
     assert_eq!(result, DisputeStatus::ResolvedForClient);
 
     // Verify remaining funds (2000) returned to client
@@ -510,6 +514,8 @@ fn test_duplicate_vote_on_dispute_fails() {
         &client,
         &String::from_str(&env, "Issue"),
         &3,
+        &0_i128,
+        &token_address,
     );
 
     let voter = Address::generate(&env);
@@ -568,6 +574,8 @@ fn test_dispute_with_all_milestones_approved() {
         &client,
         &String::from_str(&env, "Quality issue"),
         &3,
+        &0_i128,
+        &token_address,
     );
 
     // Vote and resolve for freelancer (so they get the funds)
@@ -579,7 +587,7 @@ fn test_dispute_with_all_milestones_approved() {
     dispute_client.cast_vote(&dispute_id_val, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 2"));
     dispute_client.cast_vote(&dispute_id_val, &voter3, &VoteChoice::Client, &String::from_str(&env, "Vote 3"));
 
-    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id);
+    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id, &false);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 
     // Funds transferred to freelancer

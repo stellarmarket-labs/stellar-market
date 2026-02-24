@@ -45,7 +45,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                 },
                 {
-                  "string": "Issue"
+                  "string": "No fee dispute"
                 },
                 {
                   "u32": 3
@@ -84,12 +84,12 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Freelancer"
+                      "symbol": "Client"
                     }
                   ]
                 },
                 {
-                  "string": "Vote"
+                  "string": "r"
                 }
               ]
             }
@@ -116,12 +116,12 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Freelancer"
+                      "symbol": "Client"
                     }
                   ]
                 },
                 {
-                  "string": "Vote"
+                  "string": "r"
                 }
               ]
             }
@@ -153,7 +153,7 @@
                   ]
                 },
                 {
-                  "string": "Vote"
+                  "string": "r"
                 }
               ]
             }
@@ -167,7 +167,7 @@
   ],
   "ledger": {
     "protocol_version": 21,
-    "sequence_number": 101,
+    "sequence_number": 0,
     "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
@@ -377,7 +377,7 @@
                         "symbol": "reason"
                       },
                       "val": {
-                        "string": "Issue"
+                        "string": "No fee dispute"
                       }
                     },
                     {
@@ -395,7 +395,7 @@
                       "val": {
                         "vec": [
                           {
-                            "symbol": "ResolvedForFreelancer"
+                            "symbol": "ResolvedForClient"
                           }
                         ]
                       }
@@ -413,7 +413,7 @@
                         "symbol": "votes_for_client"
                       },
                       "val": {
-                        "u32": 0
+                        "u32": 2
                       }
                     },
                     {
@@ -421,7 +421,7 @@
                         "symbol": "votes_for_freelancer"
                       },
                       "val": {
-                        "u32": 3
+                        "u32": 1
                       }
                     }
                   ]
@@ -632,7 +632,7 @@
                           "val": {
                             "vec": [
                               {
-                                "symbol": "Freelancer"
+                                "symbol": "Client"
                               }
                             ]
                           }
@@ -642,7 +642,7 @@
                             "symbol": "reason"
                           },
                           "val": {
-                            "string": "Vote"
+                            "string": "r"
                           }
                         },
                         {
@@ -672,7 +672,7 @@
                           "val": {
                             "vec": [
                               {
-                                "symbol": "Freelancer"
+                                "symbol": "Client"
                               }
                             ]
                           }
@@ -682,7 +682,7 @@
                             "symbol": "reason"
                           },
                           "val": {
-                            "string": "Vote"
+                            "string": "r"
                           }
                         },
                         {
@@ -722,7 +722,7 @@
                             "symbol": "reason"
                           },
                           "val": {
-                            "string": "Vote"
+                            "string": "r"
                           }
                         },
                         {
@@ -1250,7 +1250,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                 },
                 {
-                  "string": "Issue"
+                  "string": "No fee dispute"
                 },
                 {
                   "u32": 3
@@ -1356,12 +1356,12 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Freelancer"
+                      "symbol": "Client"
                     }
                   ]
                 },
                 {
-                  "string": "Vote"
+                  "string": "r"
                 }
               ]
             }
@@ -1396,7 +1396,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Freelancer"
+                      "symbol": "Client"
                     }
                   ]
                 }
@@ -1457,12 +1457,12 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Freelancer"
+                      "symbol": "Client"
                     }
                   ]
                 },
                 {
-                  "string": "Vote"
+                  "string": "r"
                 }
               ]
             }
@@ -1497,7 +1497,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Freelancer"
+                      "symbol": "Client"
                     }
                   ]
                 }
@@ -1563,7 +1563,7 @@
                   ]
                 },
                 {
-                  "string": "Vote"
+                  "string": "r"
                 }
               ]
             }
@@ -1689,7 +1689,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "ResolvedForFreelancer"
+                      "symbol": "ResolvedForClient"
                     }
                   ]
                 }
@@ -1718,7 +1718,7 @@
             "data": {
               "vec": [
                 {
-                  "symbol": "ResolvedForFreelancer"
+                  "symbol": "ResolvedForClient"
                 }
               ]
             }
@@ -1742,7 +1742,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "raise_appeal"
+                "symbol": "get_claimable_reward"
               }
             ],
             "data": {
@@ -1751,7 +1751,7 @@
                   "u64": 1
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                 }
               ]
             }
@@ -1772,105 +1772,14 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "raise_appeal"
+                "symbol": "get_claimable_reward"
               }
             ],
             "data": {
-              "error": {
-                "contract": 8
+              "i128": {
+                "hi": 0,
+                "lo": 0
               }
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "contract": 8
-                }
-              }
-            ],
-            "data": {
-              "string": "escalating Ok(ScErrorType::Contract) frame-exit to Err"
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "contract": 8
-                }
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "string": "contract call failed"
-                },
-                {
-                  "symbol": "raise_appeal"
-                },
-                {
-                  "vec": [
-                    {
-                      "u64": 1
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                    }
-                  ]
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "contract": 8
-                }
-              }
-            ],
-            "data": {
-              "string": "escalating error to panic"
             }
           }
         }
