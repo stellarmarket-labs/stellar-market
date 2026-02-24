@@ -1,37 +1,54 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Search } from "lucide-react";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { Search, SlidersHorizontal } from "lucide-react";
 import axios from "axios";
 import JobCard from "@/components/JobCard";
 import Pagination from "@/components/Pagination";
+import FilterSidebar from "@/components/FilterSidebar";
+import { useJobFilters } from "@/hooks/useJobFilters";
 import { Job, PaginatedResponse } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 const JOBS_PER_PAGE = 10;
 
-const categories = ["All", "Frontend", "Backend", "Smart Contract", "Design", "Mobile", "Documentation"];
+function JobsContent() {
+  const {
+    filters,
+    debouncedSearch,
+    updateFilter,
+    updateSearch,
+    toggleArrayFilter,
+    clearAll,
+    activeCount,
+    postedAfterDate,
+  } = useJobFilters();
 
-export default function JobsPage() {
-  const [search, setSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("All");
-  const [page, setPage] = useState(1);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const fetchJobs = useCallback(async () => {
     setLoading(true);
     try {
       const params: Record<string, string | number> = {
-        page,
+        page: filters.page,
         limit: JOBS_PER_PAGE,
       };
-      if (selectedCategory !== "All") params.category = selectedCategory;
-      if (search) params.search = search;
 
-      const res = await axios.get<PaginatedResponse<Job>>(`${API_URL}/jobs`, { params });
+      if (filters.sort !== "newest") params.sort = filters.sort;
+      if (debouncedSearch) params.search = debouncedSearch;
+      if (filters.skills.length) params.skills = filters.skills.join(",");
+      if (filters.status.length) params.status = filters.status.join(",");
+      if (filters.minBudget) params.minBudget = Number(filters.minBudget);
+      if (filters.maxBudget) params.maxBudget = Number(filters.maxBudget);
+      if (postedAfterDate) params.postedAfter = postedAfterDate;
+
+      const res = await axios.get<PaginatedResponse<Job>>(`${API_URL}/jobs`, {
+        params,
+      });
       setJobs(res.data.data);
       setTotal(res.data.total);
       setTotalPages(res.data.totalPages);
@@ -42,22 +59,23 @@ export default function JobsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, selectedCategory, search]);
+  }, [
+    filters.page,
+    filters.sort,
+    filters.skills,
+    filters.status,
+    filters.minBudget,
+    filters.maxBudget,
+    debouncedSearch,
+    postedAfterDate,
+  ]);
 
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
 
-  // Reset to page 1 when filters change
-  const handleCategoryChange = (cat: string) => {
-    setSelectedCategory(cat);
-    setPage(1);
-  };
-
-  const handleSearchChange = (value: string) => {
-    setSearch(value);
-    setPage(1);
-  };
+  const start = total > 0 ? (filters.page - 1) * JOBS_PER_PAGE + 1 : 0;
+  const end = Math.min(filters.page * JOBS_PER_PAGE, total);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -120,7 +138,21 @@ export default function JobsPage() {
         <div className="text-center py-20 text-theme-text">
           No jobs found matching your criteria.
         </div>
-      )}
+      </div>
     </div>
+  );
+}
+
+export default function JobsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="animate-pulse bg-dark-card rounded-xl h-96" />
+        </div>
+      }
+    >
+      <JobsContent />
+    </Suspense>
   );
 }
