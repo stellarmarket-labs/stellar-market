@@ -9,12 +9,12 @@ const config: Config = {
           blue: "#3E54CF",
           purple: "#7B61FF",
         },
-        dark: {
-          bg: "#0a0b14",
-          card: "#12131f",
-          border: "#1e2035",
-          text: "#a1a1b5",
-          heading: "#e4e4ed",
+        theme: {
+          bg: "var(--bg-main)",
+          card: "var(--bg-card)",
+          border: "var(--border)",
+          text: "var(--text-muted)",
+          heading: "var(--text-heading)",
         },
       },
     },
