@@ -24,7 +24,7 @@ router.post(
     body: createApplicationSchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { jobId } = req.params;
+    const jobId = req.params.jobId as string;
     const { proposal, estimatedDuration, bidAmount } = req.body;
 
     const job = await prisma.job.findUnique({ where: { id: jobId } });
@@ -51,7 +51,7 @@ router.post(
 
     const application = await prisma.application.create({
       data: {
-        jobId,
+        jobId: jobId as string,
         freelancerId: req.userId!,
         proposal,
         estimatedDuration,
@@ -75,7 +75,7 @@ router.get(
     query: getApplicationsQuerySchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { jobId } = req.params;
+    const jobId = req.params.jobId as string;
     const { page, limit, status } = req.query as any;
     const skip = (page - 1) * limit;
 
@@ -154,7 +154,7 @@ router.put(
     body: updateApplicationStatusSchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { status } = req.body;
 
     const application = await prisma.application.findUnique({
@@ -198,11 +198,12 @@ router.put(
     body: updateApplicationSchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const updateData = req.body;
 
     const application = await prisma.application.findUnique({
       where: { id },
+      include: { job: true },
     });
 
     if (!application) {

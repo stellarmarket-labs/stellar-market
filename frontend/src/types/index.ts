@@ -6,6 +6,8 @@ export interface User {
   bio?: string;
   avatarUrl?: string;
   role: "CLIENT" | "FREELANCER";
+  averageRating?: number;
+  reviewCount?: number;
 }
 
 export interface Milestone {
@@ -16,6 +18,8 @@ export interface Milestone {
   amount: number;
   status: "PENDING" | "IN_PROGRESS" | "SUBMITTED" | "APPROVED" | "REJECTED";
   order: number;
+  onChainIndex?: number;
+  contractDeadline?: string;
 }
 
 export interface Job {
@@ -28,6 +32,8 @@ export interface Job {
   client: User;
   freelancer?: User;
   milestones: Milestone[];
+  contractJobId?: string;
+  escrowStatus: "UNFUNDED" | "FUNDED" | "COMPLETED" | "CANCELLED" | "DISPUTED";
   createdAt: string;
   _count?: { applications: number };
 }
@@ -36,11 +42,25 @@ export interface Application {
   id: string;
   jobId: string;
   freelancerId: string;
-  coverLetter: string;
-  proposedBudget: number;
+  proposal: string;
+  bidAmount: number;
+  estimatedDuration: string;
   status: "PENDING" | "ACCEPTED" | "REJECTED";
   freelancer: User;
   createdAt: string;
+}
+
+export interface ServiceListing {
+  id: string;
+  title: string;
+  description: string;
+  price: number;
+  category: string;
+  freelancerId: string;
+  freelancer: User;
+  skills: string[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Message {
@@ -77,6 +97,7 @@ export interface UserProfile extends User {
   freelancerJobs: Job[];
   averageRating: number;
   reviewCount: number;
+  services: ServiceListing[];
   createdAt: string;
 }
 

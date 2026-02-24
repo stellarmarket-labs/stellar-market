@@ -56,7 +56,7 @@ router.post("/",
 router.get("/user/:userId",
   validate({ params: getReviewByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id: userId } = req.params;
+    const userId = req.params.userId as string;
     const reviews = await prisma.review.findMany({
       where: { revieweeId: userId },
       include: {
@@ -117,7 +117,7 @@ router.get("/:id",
   authenticate,
   validate({ params: getReviewByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     
     const review = await prisma.review.findUnique({
       where: { id },
@@ -144,7 +144,7 @@ router.put("/:id",
     body: updateReviewSchema
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const updateData = req.body;
 
     const review = await prisma.review.findUnique({
@@ -177,7 +177,7 @@ router.delete("/:id",
   authenticate,
   validate({ params: getReviewByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     
     const review = await prisma.review.findUnique({
       where: { id },

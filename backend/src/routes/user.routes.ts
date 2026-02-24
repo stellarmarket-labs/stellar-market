@@ -36,11 +36,7 @@ const updateProfileSchema = z.object({
     .url("Invalid URL for avatar")
     .optional()
     .nullable(),
-  role: z
-    .enum(["CLIENT", "FREELANCER"], {
-      errorMap: () => ({ message: "Role must be either CLIENT or FREELANCER" }),
-    })
-    .optional(),
+  role: z.enum(["CLIENT", "FREELANCER"]).optional(),
 });
 
 // GET /api/users/me — return current authenticated user's full profile
@@ -78,7 +74,7 @@ router.put("/me", authenticate, async (req: AuthRequest, res: Response) => {
     const parsed = updateProfileSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      const errors = parsed.error.errors.map((e) => ({
+      const errors = (parsed.error as any).issues.map((e: any) => ({
         field: e.path.join("."),
         message: e.message,
       }));
@@ -143,7 +139,7 @@ router.get(
   "/:id",
   validate({ params: getUserByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
 
     const user = await prisma.user.findUnique({
       where: { id },
@@ -260,7 +256,7 @@ router.put(
     body: updateUserProfileSchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const updateData = req.body;
 
     // Check if user is updating their own profile

@@ -112,7 +112,8 @@ router.get("/",
   authenticate,
   validate({ query: getMessagesQuerySchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { jobId, participantId } = req.query as any;
+    const jobId = req.query.jobId as string | undefined;
+    const participantId = req.query.participantId as string | undefined;
 
     if (participantId) {
       const messages = await prisma.message.findMany({
@@ -198,8 +199,8 @@ router.get(
     query: getMessagesQuerySchema.pick({ jobId: true })
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id: otherUserId } = req.params;
-    const { jobId } = req.query as any;
+    const otherUserId = req.params.id as string;
+    const jobId = req.query.jobId as string | undefined;
 
     const messages = await prisma.message.findMany({
       where: {
@@ -243,7 +244,7 @@ router.put(
     body: markMessageAsReadSchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { isRead } = req.body;
 
     await prisma.message.update({
@@ -266,7 +267,7 @@ router.put(
     body: updateMessageSchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { content } = req.body;
 
     const message = await prisma.message.findUnique({
@@ -301,7 +302,7 @@ router.delete(
   authenticate,
   validate({ params: getMessageByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
 
     const message = await prisma.message.findUnique({
       where: { id },

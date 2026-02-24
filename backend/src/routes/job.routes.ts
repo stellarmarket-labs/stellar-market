@@ -94,7 +94,7 @@ router.get("/",
 router.get("/:id",
   validate({ params: getJobByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const job = await prisma.job.findUnique({
       where: { id },
       include: {
@@ -129,6 +129,7 @@ router.post("/",
         title,
         description,
         budget,
+        category: req.body.category || "General",
         skills,
         deadline: new Date(deadline),
         clientId: req.userId!,
@@ -148,7 +149,7 @@ router.put("/:id",
     body: updateJobSchema
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const job = await prisma.job.findUnique({ where: { id } });
 
     if (!job) {
@@ -178,7 +179,7 @@ router.delete("/:id",
   authenticate,
   validate({ params: getJobByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const job = await prisma.job.findUnique({ where: { id } });
 
     if (!job) {
@@ -201,7 +202,7 @@ router.patch("/:id/status",
     body: updateJobStatusSchema
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { status } = req.body;
     
     const job = await prisma.job.findUnique({ where: { id } });

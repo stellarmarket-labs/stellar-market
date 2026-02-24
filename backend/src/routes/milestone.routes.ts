@@ -31,7 +31,7 @@ router.get(
   authenticate,
   validate({ params: getJobByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { jobId } = req.params;
+    const jobId = req.params.jobId as string;
 
     const job = await prisma.job.findUnique({ where: { id: jobId } });
     if (!job) {
@@ -100,6 +100,7 @@ router.post(
         .json({ error: "Not authorized to create milestones for this job." });
     }
 
+    const milestonesCount = await prisma.milestone.count({ where: { jobId } });
     const milestone = await prisma.milestone.create({
       data: {
         jobId,
@@ -107,6 +108,7 @@ router.post(
         description,
         amount,
         dueDate: new Date(dueDate),
+        order: milestonesCount + 1,
       },
       include: {
         job: { select: { id: true, title: true } },
@@ -144,8 +146,8 @@ router.get(
     }
 
     // Check if user is authorized to view this milestone
-    const isClient = milestone.job.clientId === req.userId;
-    const isFreelancer = milestone.job.freelancerId === req.userId;
+    const isClient = (milestone as any).job.clientId === req.userId;
+    const isFreelancer = (milestone as any).job.freelancerId === req.userId;
 
     if (!isClient && !isFreelancer) {
       return res
@@ -181,7 +183,7 @@ router.put(
     if (!milestone) {
       return res.status(404).json({ error: "Milestone not found." });
     }
-    if (milestone.job.clientId !== req.userId) {
+    if ((milestone as any).job.clientId !== req.userId) {
       return res
         .status(403)
         .json({ error: "Not authorized to update this milestone." });
@@ -215,7 +217,7 @@ router.delete(
     if (!milestone) {
       return res.status(404).json({ error: "Milestone not found." });
     }
-    if (milestone.job.clientId !== req.userId) {
+    if ((milestone as any).job.clientId !== req.userId) {
       return res
         .status(403)
         .json({ error: "Not authorized to delete this milestone." });
@@ -247,7 +249,7 @@ router.patch(
       return res.status(404).json({ error: "Milestone not found." });
     }
 
-    const job = milestone.job;
+    const job = (milestone as any).job;
     const isClient = job.clientId === req.userId;
     const isFreelancer = job.freelancerId === req.userId;
 
