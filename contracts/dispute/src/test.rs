@@ -4,8 +4,23 @@ use super::*;
 use soroban_sdk::{
     contract, contractimpl,
     testutils::{Address as _, Ledger},
-    token, Env, String,
+    token, Address, Env, String,
 };
+
+fn setup_test(env: &Env) -> (DisputeContractClient, Address, Address, Address, Address) {
+    let contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &80);
+
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+
+    (client, admin, token_id, token_admin, escrow_contract_id)
+}
 
 #[contract]
 pub struct DummyEscrow;
@@ -15,13 +30,12 @@ impl DummyEscrow {
     pub fn resolve_dispute_callback(_env: Env, _job_id: u64, _resolved_for_client: bool) {}
 }
 
-fn setup_env() -> (Env, Address, Address) {
+fn setup_env() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
-
-    let dispute_contract_id = env.register_contract(None, DisputeContract);
-    let escrow_contract_id = env.register_contract(None, DummyEscrow);
-    (env, dispute_contract_id, escrow_contract_id)
+    let (client, admin, token_id, _token_admin, escrow_id) = setup_test(&env);
+    let contract_id = client.address.clone();
+    (env, contract_id, token_id, admin, escrow_id)
 }
 
 fn create_token(env: &Env) -> (Address, token::StellarAssetClient<'_>) {
@@ -36,14 +50,14 @@ fn create_token(env: &Env) -> (Address, token::StellarAssetClient<'_>) {
 
 #[test]
 fn test_raise_dispute() {
-    let (env, dispute_contract_id, _escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, _escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
-    token_admin.mint(&user_client, &1000);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&user_client, &1000);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -52,8 +66,9 @@ fn test_raise_dispute() {
         &user_client,
         &String::from_str(&env, "Work not delivered"),
         &3u32,
-        &100,
-        &token_address,
+        &100i128,
+        &token_id,
+        &0i128,
     );
 
     assert_eq!(dispute_id, 1);
@@ -68,21 +83,21 @@ fn test_raise_dispute() {
     assert_eq!(dispute.malicious, false);
 
     // Verify fee was transferred to contract
-    let token_client = token::Client::new(&env, &token_address);
+    let token_client = token::Client::new(&env, &token_id);
     assert_eq!(token_client.balance(&user_client), 900);
-    assert_eq!(token_client.balance(&dispute_contract_id), 100);
+    assert_eq!(token_client.balance(&client.address), 100);
 }
 
 #[test]
 fn test_vote_and_resolve() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
-    token_admin.mint(&freelancer, &1000);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&freelancer, &1000);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -91,8 +106,9 @@ fn test_vote_and_resolve() {
         &freelancer,
         &String::from_str(&env, "Payment not released"),
         &3u32,
-        &100,
-        &token_address,
+        &100i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -118,21 +134,68 @@ fn test_vote_and_resolve() {
         &String::from_str(&env, "Incomplete work"),
     );
 
-    let result = client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    let result = client.resolve_dispute(&dispute_id, &escrow_id, &false);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 
     // Fee should still be held in contract for voter rewards
-    let token_client = token::Client::new(&env, &token_address);
-    assert_eq!(token_client.balance(&dispute_contract_id), 100);
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&client.address), 100);
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #5)")]
-fn test_resolve_without_enough_votes() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+fn test_malicious_dispute_penalty() {
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
+    let token = token::Client::new(&env, &token_id);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
 
-    let (token_address, _token_admin) = create_token(&env);
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let penalty_amount = 1000i128;
+
+    // Mint tokens to freelancer (initiator)
+    token_asset_client.mint(&freelancer, &penalty_amount);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &freelancer,
+        &String::from_str(&env, "Malicious dispute"),
+        &3u32,
+        &0i128,
+        &token_id,
+        &penalty_amount,
+    );
+
+    assert_eq!(token.balance(&freelancer), 0);
+    assert_eq!(token.balance(&client.address), penalty_amount);
+
+    // 3 voters: all for client (100% against freelancer)
+    for _ in 0..3 {
+        client.cast_vote(
+            &dispute_id,
+            &Address::generate(&env),
+            &VoteChoice::Client,
+            &String::from_str(&env, "Frivolous"),
+        );
+    }
+
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
+
+    assert!(client.is_malicious_dispute(&dispute_id));
+
+    // Penalty should go to the winner (client)
+    assert_eq!(token.balance(&user_client), penalty_amount);
+    assert_eq!(token.balance(&freelancer), 0);
+}
+
+#[test]
+#[should_panic]
+fn test_resolve_without_enough_votes() {
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
+
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
@@ -143,8 +206,9 @@ fn test_resolve_without_enough_votes() {
         &user_client,
         &String::from_str(&env, "Issue"),
         &3u32,
-        &0,
-        &token_address,
+        &0i128,
+        &token_id,
+        &0i128,
     );
 
     let voter = Address::generate(&env);
@@ -155,21 +219,21 @@ fn test_resolve_without_enough_votes() {
         &String::from_str(&env, "Reason"),
     );
 
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 }
 
 // ---- Voter reward tests ----
 
 #[test]
 fn test_claim_voter_reward_proportional() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
-    token_admin.mint(&user_client, &1000);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&user_client, &1000);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -178,8 +242,9 @@ fn test_claim_voter_reward_proportional() {
         &user_client,
         &String::from_str(&env, "Bad work"),
         &3u32,
-        &100,
-        &token_address,
+        &100i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -206,7 +271,7 @@ fn test_claim_voter_reward_proportional() {
         &String::from_str(&env, "r3"),
     );
 
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Each winning voter (voter1, voter2) should get 100/2 = 50
     let reward1 = client.claim_voter_reward(&dispute_id, &voter1);
@@ -215,22 +280,22 @@ fn test_claim_voter_reward_proportional() {
     let reward2 = client.claim_voter_reward(&dispute_id, &voter2);
     assert_eq!(reward2, 50);
 
-    let token_client = token::Client::new(&env, &token_address);
+    let token_client = token::Client::new(&env, &token_id);
     assert_eq!(token_client.balance(&voter1), 50);
     assert_eq!(token_client.balance(&voter2), 50);
-    assert_eq!(token_client.balance(&dispute_contract_id), 0);
+    assert_eq!(token_client.balance(&client.address), 0);
 }
 
 #[test]
 fn test_get_claimable_reward() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
-    token_admin.mint(&user_client, &1000);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&user_client, &1000);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -239,8 +304,9 @@ fn test_get_claimable_reward() {
         &user_client,
         &String::from_str(&env, "Bad work"),
         &3u32,
-        &90,
-        &token_address,
+        &90i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -270,7 +336,7 @@ fn test_get_claimable_reward() {
     // Before resolution, should return 0
     assert_eq!(client.get_claimable_reward(&dispute_id, &voter1), 0);
 
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Winning voter gets 90/2 = 45
     assert_eq!(client.get_claimable_reward(&dispute_id, &voter1), 45);
@@ -288,14 +354,14 @@ fn test_get_claimable_reward() {
 #[test]
 #[should_panic(expected = "Error(Contract, #14)")]
 fn test_double_claim_prevented() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
-    token_admin.mint(&user_client, &1000);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&user_client, &1000);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -304,8 +370,9 @@ fn test_double_claim_prevented() {
         &user_client,
         &String::from_str(&env, "Bad work"),
         &3u32,
-        &90,
-        &token_address,
+        &90i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -316,7 +383,7 @@ fn test_double_claim_prevented() {
     client.cast_vote(&dispute_id, &voter2, &VoteChoice::Client, &String::from_str(&env, "r"));
     client.cast_vote(&dispute_id, &voter3, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
 
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     client.claim_voter_reward(&dispute_id, &voter1); // First claim OK
     client.claim_voter_reward(&dispute_id, &voter1); // Double claim panics
@@ -325,14 +392,14 @@ fn test_double_claim_prevented() {
 #[test]
 #[should_panic(expected = "Error(Contract, #13)")]
 fn test_losing_voter_cannot_claim() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
-    token_admin.mint(&user_client, &1000);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&user_client, &1000);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -341,8 +408,9 @@ fn test_losing_voter_cannot_claim() {
         &user_client,
         &String::from_str(&env, "Bad work"),
         &3u32,
-        &90,
-        &token_address,
+        &90i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -353,7 +421,7 @@ fn test_losing_voter_cannot_claim() {
     client.cast_vote(&dispute_id, &voter2, &VoteChoice::Client, &String::from_str(&env, "r"));
     client.cast_vote(&dispute_id, &voter3, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
 
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // voter3 voted for freelancer but client won — should fail
     client.claim_voter_reward(&dispute_id, &voter3);
@@ -362,14 +430,14 @@ fn test_losing_voter_cannot_claim() {
 #[test]
 #[should_panic(expected = "Error(Contract, #12)")]
 fn test_claim_before_resolution_fails() {
-    let (env, dispute_contract_id, _escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, _escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
-    token_admin.mint(&user_client, &1000);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&user_client, &1000);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -378,8 +446,9 @@ fn test_claim_before_resolution_fails() {
         &user_client,
         &String::from_str(&env, "Bad work"),
         &3u32,
-        &90,
-        &token_address,
+        &90i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -391,15 +460,14 @@ fn test_claim_before_resolution_fails() {
 
 #[test]
 fn test_malicious_dispute_refunds_winning_party() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
-    // Initiator (user_client) pays 100 fee
-    token_admin.mint(&user_client, &1000);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&user_client, &1000);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -408,8 +476,9 @@ fn test_malicious_dispute_refunds_winning_party() {
         &user_client,
         &String::from_str(&env, "Malicious claim"),
         &3u32,
-        &100,
-        &token_address,
+        &100i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -421,13 +490,13 @@ fn test_malicious_dispute_refunds_winning_party() {
     client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
     client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "r"));
 
-    let result = client.resolve_dispute(&dispute_id, &escrow_contract_id, &true);
+    let result = client.resolve_dispute(&dispute_id, &escrow_id, &true);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 
     // Fee refunded to freelancer (winning/victim party)
-    let token_client = token::Client::new(&env, &token_address);
+    let token_client = token::Client::new(&env, &token_id);
     assert_eq!(token_client.balance(&freelancer), 100);
-    assert_eq!(token_client.balance(&dispute_contract_id), 0);
+    assert_eq!(token_client.balance(&client.address), 0);
 
     // Dispute marked as malicious
     let dispute = client.get_dispute(&dispute_id);
@@ -437,14 +506,14 @@ fn test_malicious_dispute_refunds_winning_party() {
 #[test]
 #[should_panic(expected = "Error(Contract, #15)")]
 fn test_claim_reward_on_malicious_dispute_fails() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
-    token_admin.mint(&user_client, &1000);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&user_client, &1000);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -453,8 +522,9 @@ fn test_claim_reward_on_malicious_dispute_fails() {
         &user_client,
         &String::from_str(&env, "Malicious"),
         &3u32,
-        &100,
-        &token_address,
+        &100i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -465,7 +535,7 @@ fn test_claim_reward_on_malicious_dispute_fails() {
     client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
     client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "r"));
 
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &true);
+    client.resolve_dispute(&dispute_id, &escrow_id, &true);
 
     // Winning voter tries to claim on malicious dispute — no reward available
     client.claim_voter_reward(&dispute_id, &voter1);
@@ -473,10 +543,9 @@ fn test_claim_reward_on_malicious_dispute_fails() {
 
 #[test]
 fn test_zero_fee_dispute() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, _token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
@@ -487,8 +556,9 @@ fn test_zero_fee_dispute() {
         &user_client,
         &String::from_str(&env, "No fee dispute"),
         &3u32,
-        &0,
-        &token_address,
+        &0i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -499,7 +569,7 @@ fn test_zero_fee_dispute() {
     client.cast_vote(&dispute_id, &voter2, &VoteChoice::Client, &String::from_str(&env, "r"));
     client.cast_vote(&dispute_id, &voter3, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
 
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Claimable reward should be 0
     assert_eq!(client.get_claimable_reward(&dispute_id, &voter1), 0);
@@ -507,14 +577,14 @@ fn test_zero_fee_dispute() {
 
 #[test]
 fn test_single_winning_voter_gets_full_fee() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
-    token_admin.mint(&user_client, &1000);
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&user_client, &1000);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -523,8 +593,9 @@ fn test_single_winning_voter_gets_full_fee() {
         &user_client,
         &String::from_str(&env, "Issue"),
         &3u32,
-        &100,
-        &token_address,
+        &100i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -536,13 +607,13 @@ fn test_single_winning_voter_gets_full_fee() {
     client.cast_vote(&dispute_id, &voter2, &VoteChoice::Client, &String::from_str(&env, "r"));
     client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "r"));
 
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // All 3 are winners: 100/3 = 33 each (integer division)
     let reward = client.claim_voter_reward(&dispute_id, &voter1);
     assert_eq!(reward, 33);
 
-    let token_client = token::Client::new(&env, &token_address);
+    let token_client = token::Client::new(&env, &token_id);
     assert_eq!(token_client.balance(&voter1), 33);
 }
 
@@ -550,10 +621,9 @@ fn test_single_winning_voter_gets_full_fee() {
 
 #[test]
 fn test_appeal_by_losing_party() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, _token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
@@ -564,8 +634,9 @@ fn test_appeal_by_losing_party() {
         &user_client,
         &String::from_str(&env, "Quality issue"),
         &3u32,
-        &0,
-        &token_address,
+        &0i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -576,7 +647,7 @@ fn test_appeal_by_losing_party() {
     client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "Agree"));
     client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "Disagree"));
 
-    let result = client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    let result = client.resolve_dispute(&dispute_id, &escrow_id, &false);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 
     // Client (losing party) appeals
@@ -591,10 +662,9 @@ fn test_appeal_by_losing_party() {
 
 #[test]
 fn test_appeal_requires_double_votes() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, _token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
@@ -605,8 +675,9 @@ fn test_appeal_requires_double_votes() {
         &user_client,
         &String::from_str(&env, "Issue"),
         &3u32,
-        &0,
-        &token_address,
+        &0i128,
+        &token_id,
+        &0i128,
     );
 
     // First round: 3 votes needed
@@ -618,7 +689,7 @@ fn test_appeal_requires_double_votes() {
     client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 2"));
     client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "Vote 3"));
 
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Client appeals
     client.raise_appeal(&dispute_id, &user_client);
@@ -639,17 +710,16 @@ fn test_appeal_requires_double_votes() {
     client.cast_vote(&dispute_id, &voter9, &VoteChoice::Freelancer, &String::from_str(&env, "Appeal vote 6"));
 
     // Should succeed with 6 votes
-    let result = client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    let result = client.resolve_dispute(&dispute_id, &escrow_id, &false);
     assert_eq!(result, DisputeStatus::ResolvedForClient);
 }
 
 #[test]
 #[should_panic(expected = "Error(Contract, #10)")]
 fn test_appeal_by_winning_party_fails() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, _token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
@@ -660,8 +730,9 @@ fn test_appeal_by_winning_party_fails() {
         &user_client,
         &String::from_str(&env, "Issue"),
         &3u32,
-        &0,
-        &token_address,
+        &0i128,
+        &token_id,
+        &0i128,
     );
 
     let voter1 = Address::generate(&env);
@@ -672,7 +743,7 @@ fn test_appeal_by_winning_party_fails() {
     client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 2"));
     client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "Vote 3"));
 
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Freelancer (winning party) tries to appeal - should fail
     client.raise_appeal(&dispute_id, &freelancer);
@@ -681,10 +752,9 @@ fn test_appeal_by_winning_party_fails() {
 #[test]
 #[should_panic(expected = "Error(Contract, #9)")]
 fn test_max_appeals_reached() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, _token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
@@ -695,8 +765,9 @@ fn test_max_appeals_reached() {
         &user_client,
         &String::from_str(&env, "Issue"),
         &3u32,
-        &0,
-        &token_address,
+        &0i128,
+        &token_id,
+        &0i128,
     );
 
     // First resolution
@@ -704,7 +775,7 @@ fn test_max_appeals_reached() {
         let voter = Address::generate(&env);
         client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "V1"));
     }
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // First appeal
     client.raise_appeal(&dispute_id, &user_client);
@@ -712,7 +783,7 @@ fn test_max_appeals_reached() {
         let voter = Address::generate(&env);
         client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "Vote"));
     }
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Second appeal
     client.raise_appeal(&dispute_id, &user_client);
@@ -720,7 +791,7 @@ fn test_max_appeals_reached() {
         let voter = Address::generate(&env);
         client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "Vote"));
     }
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Third appeal should fail (max_appeals = 2)
     client.raise_appeal(&dispute_id, &user_client);
@@ -728,10 +799,9 @@ fn test_max_appeals_reached() {
 
 #[test]
 fn test_final_resolution_after_max_appeals() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, _token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
@@ -742,8 +812,9 @@ fn test_final_resolution_after_max_appeals() {
         &user_client,
         &String::from_str(&env, "Issue"),
         &3u32,
-        &0,
-        &token_address,
+        &0i128,
+        &token_id,
+        &0i128,
     );
 
     // First resolution
@@ -751,7 +822,7 @@ fn test_final_resolution_after_max_appeals() {
         let voter = Address::generate(&env);
         client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "Vote"));
     }
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // First appeal
     client.raise_appeal(&dispute_id, &user_client);
@@ -759,7 +830,7 @@ fn test_final_resolution_after_max_appeals() {
         let voter = Address::generate(&env);
         client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "Vote"));
     }
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Second appeal (last one allowed)
     client.raise_appeal(&dispute_id, &user_client);
@@ -769,7 +840,7 @@ fn test_final_resolution_after_max_appeals() {
     }
 
     // This should be final resolution
-    let result = client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    let result = client.resolve_dispute(&dispute_id, &escrow_id, &false);
     assert_eq!(result, DisputeStatus::FinalResolution);
 
     let dispute = client.get_dispute(&dispute_id);
@@ -779,10 +850,9 @@ fn test_final_resolution_after_max_appeals() {
 #[test]
 #[should_panic(expected = "Error(Contract, #11)")]
 fn test_appeal_before_resolution_fails() {
-    let (env, dispute_contract_id, _escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, _escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, _token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
@@ -793,8 +863,9 @@ fn test_appeal_before_resolution_fails() {
         &user_client,
         &String::from_str(&env, "Issue"),
         &3u32,
-        &0,
-        &token_address,
+        &0i128,
+        &token_id,
+        &0i128,
     );
 
     // Try to appeal before any resolution - should fail
@@ -804,10 +875,9 @@ fn test_appeal_before_resolution_fails() {
 #[test]
 #[should_panic(expected = "Error(Contract, #8)")]
 fn test_appeal_after_deadline_fails() {
-    let (env, dispute_contract_id, escrow_contract_id) = setup_env();
-    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
 
-    let (token_address, _token_admin) = create_token(&env);
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
 
@@ -818,8 +888,9 @@ fn test_appeal_after_deadline_fails() {
         &user_client,
         &String::from_str(&env, "Issue"),
         &3u32,
-        &0,
-        &token_address,
+        &0i128,
+        &token_id,
+        &0i128,
     );
 
     // Vote and resolve
@@ -827,7 +898,7 @@ fn test_appeal_after_deadline_fails() {
         let voter = Address::generate(&env);
         client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "Vote"));
     }
-    client.resolve_dispute(&dispute_id, &escrow_contract_id, &false);
+    client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Jump past appeal deadline (100 ledgers)
     env.ledger().with_mut(|li| {

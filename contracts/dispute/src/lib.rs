@@ -24,6 +24,8 @@ pub enum DisputeError {
     NotWinningVoter = 13,
     AlreadyClaimed = 14,
     NoRewardAvailable = 15,
+    NotConfigured = 16,
+    AlreadyConfigured = 17,
 }
 
 #[contracttype]
@@ -66,13 +68,14 @@ pub struct Dispute {
     pub votes_for_client: u32,
     pub votes_for_freelancer: u32,
     pub min_votes: u32,
+    pub token: Address,
+    pub initiator_penalty_stake: i128,
     pub created_at: u64,
     pub appeal_count: u32,
     pub max_appeals: u32,
     pub appeal_deadline: u64,
     pub resolution_timestamp: u64,
     pub dispute_fee: i128,
-    pub token: Address,
     pub malicious: bool,
 }
 
@@ -84,6 +87,9 @@ enum DataKey {
     Votes(u64),
     HasVoted(u64, Address),
     VoterRewarded(u64, Address),
+    Admin,
+    MaliciousThreshold,
+    Configured,
 }
 
 const MIN_TTL_THRESHOLD: u32 = 1_000;
@@ -132,6 +138,82 @@ pub struct DisputeContract;
 
 #[contractimpl]
 impl DisputeContract {
+    /// Initialize the contract with admin and malicious threshold.
+    pub fn initialize(env: Env, admin: Address, threshold: u32) -> Result<(), DisputeError> {
+        if env.storage().instance().has(&DataKey::Configured) {
+            return Err(DisputeError::AlreadyConfigured);
+        }
+
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::MaliciousThreshold, &threshold);
+        env.storage().instance().set(&DataKey::Configured, &true);
+
+        Ok(())
+    }
+
+    /// Update the malicious threshold. Only admin can call.
+    pub fn set_malicious_threshold(env: Env, threshold: u32) -> Result<(), DisputeError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(DisputeError::NotConfigured)?;
+        admin.require_auth();
+
+        env.storage().instance().set(&DataKey::MaliciousThreshold, &threshold);
+
+        Ok(())
+    }
+
+    /// Update the admin address. Only current admin can call.
+    pub fn set_admin(env: Env, new_admin: Address) -> Result<(), DisputeError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(DisputeError::NotConfigured)?;
+        admin.require_auth();
+
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+
+        Ok(())
+    }
+
+    /// Check if a dispute was resolved as malicious.
+    pub fn is_malicious_dispute(env: Env, dispute_id: u64) -> Result<bool, DisputeError> {
+        let dispute: Dispute = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Dispute(dispute_id))
+            .ok_or(DisputeError::DisputeNotFound)?;
+
+        if dispute.status != DisputeStatus::ResolvedForClient
+            && dispute.status != DisputeStatus::ResolvedForFreelancer
+        {
+            return Ok(false);
+        }
+
+        let threshold: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaliciousThreshold)
+            .unwrap_or(80); // Default to 80% if not set
+
+        let total_votes = dispute.votes_for_client + dispute.votes_for_freelancer;
+        if total_votes == 0 {
+            return Ok(false);
+        }
+
+        let votes_against = if dispute.initiator == dispute.client {
+            dispute.votes_for_freelancer
+        } else {
+            dispute.votes_for_client
+        };
+
+        let percentage = (votes_against * 100) / total_votes;
+        Ok(percentage > threshold)
+    }
+
     /// Raise a dispute on a job. Either the client or freelancer can initiate.
     /// The initiator pays a dispute fee held in escrow during voting.
     pub fn raise_dispute(
@@ -144,6 +226,7 @@ impl DisputeContract {
         min_votes: u32,
         dispute_fee: i128,
         token: Address,
+        penalty_stake: i128,
     ) -> Result<u64, DisputeError> {
         initiator.require_auth();
 
@@ -151,10 +234,13 @@ impl DisputeContract {
             return Err(DisputeError::InvalidParty);
         }
 
-        // Hold dispute fee in contract escrow
+        // Hold dispute fee and penalty stake in contract escrow
+        let token_client = token::Client::new(&env, &token);
         if dispute_fee > 0 {
-            let token_client = token::Client::new(&env, &token);
             token_client.transfer(&initiator, &env.current_contract_address(), &dispute_fee);
+        }
+        if penalty_stake > 0 {
+            token_client.transfer(&initiator, &env.current_contract_address(), &penalty_stake);
         }
 
         let mut count: u64 = env
@@ -175,13 +261,14 @@ impl DisputeContract {
             votes_for_client: 0,
             votes_for_freelancer: 0,
             min_votes: if min_votes < 3 { 3 } else { min_votes },
+            token,
+            initiator_penalty_stake: penalty_stake,
             created_at: env.ledger().timestamp(),
             appeal_count: 0,
             max_appeals: 2,
             appeal_deadline: 0,
             resolution_timestamp: 0,
             dispute_fee,
-            token,
             malicious: false,
         };
 
@@ -359,6 +446,50 @@ impl DisputeContract {
                 refund_to,
                 &dispute.dispute_fee,
             );
+        }
+
+        // Handle penalty stake
+        if dispute.initiator_penalty_stake > 0 {
+            let threshold: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::MaliciousThreshold)
+                .unwrap_or(80);
+
+            let total_votes = dispute.votes_for_client + dispute.votes_for_freelancer;
+            let votes_against = if dispute.initiator == dispute.client {
+                dispute.votes_for_freelancer
+            } else {
+                dispute.votes_for_client
+            };
+
+            let is_malicious = if total_votes > 0 {
+                (votes_against * 100) / total_votes > threshold
+            } else {
+                false
+            };
+
+            let token_client = token::Client::new(&env, &dispute.token);
+            if is_malicious {
+                // Slash stake and send to winning party
+                let winner = if dispute.status == DisputeStatus::ResolvedForClient {
+                    dispute.client.clone()
+                } else {
+                    dispute.freelancer.clone()
+                };
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &winner,
+                    &dispute.initiator_penalty_stake,
+                );
+            } else {
+                // Return stake to initiator
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &dispute.initiator,
+                    &dispute.initiator_penalty_stake,
+                );
+            }
         }
 
         env.storage()
