@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Vec,
-    Symbol, vec, IntoVal,
+    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Env, IntoVal,
+    String, Symbol, Vec,
 };
 
 // Import reputation contract types for cross-contract calls
@@ -42,6 +42,26 @@ pub enum DisputeStatus {
     Voting,
     ResolvedForClient,
     ResolvedForFreelancer,
+    RefundedBoth,
+    Escalated,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TieBreakMethod {
+    FavorFreelancer,
+    FavorClient,
+    Escalate,
+    RefundBoth,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DisputeResolution {
+    ClientWins,
+    FreelancerWins,
+    RefundBoth,
+    Escalate,
 }
 
 #[contracttype]
@@ -73,6 +93,7 @@ pub struct Dispute {
     pub votes_for_client: u32,
     pub votes_for_freelancer: u32,
     pub min_votes: u32,
+    pub tie_break_method: TieBreakMethod,
     pub created_at: u64,
     pub excluded_voters: Vec<Address>,
 }
@@ -96,21 +117,27 @@ const MIN_TTL_THRESHOLD: u32 = 1_000;
 const MIN_TTL_EXTEND_TO: u32 = 10_000;
 
 fn bump_dispute_ttl(env: &Env, dispute_id: u64) {
-    env.storage()
-        .persistent()
-        .extend_ttl(&DataKey::Dispute(dispute_id), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        &DataKey::Dispute(dispute_id),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
 }
 
 fn bump_votes_ttl(env: &Env, dispute_id: u64) {
-    env.storage()
-        .persistent()
-        .extend_ttl(&DataKey::Votes(dispute_id), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        &DataKey::Votes(dispute_id),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
 }
 
 fn bump_has_voted_ttl(env: &Env, dispute_id: u64, voter: &Address) {
-    env.storage()
-        .persistent()
-        .extend_ttl(&DataKey::HasVoted(dispute_id, voter.clone()), MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        &DataKey::HasVoted(dispute_id, voter.clone()),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
 }
 
 fn bump_dispute_count_ttl(env: &Env) {
@@ -210,10 +237,16 @@ fn detect_conflicts(
         // Check if job involves dispute client
         if &job.client == client || &job.freelancer == client {
             // Add the other party if not already in conflicts and not the dispute freelancer
-            if &job.client != client && &job.client != freelancer && !conflicts.contains(&job.client) {
+            if &job.client != client
+                && &job.client != freelancer
+                && !conflicts.contains(&job.client)
+            {
                 conflicts.push_back(job.client.clone());
             }
-            if &job.freelancer != client && &job.freelancer != freelancer && !conflicts.contains(&job.freelancer) {
+            if &job.freelancer != client
+                && &job.freelancer != freelancer
+                && !conflicts.contains(&job.freelancer)
+            {
                 conflicts.push_back(job.freelancer.clone());
             }
         }
@@ -221,10 +254,16 @@ fn detect_conflicts(
         // Check if job involves dispute freelancer
         if &job.client == freelancer || &job.freelancer == freelancer {
             // Add the other party if not already in conflicts and not the dispute client
-            if &job.client != freelancer && &job.client != client && !conflicts.contains(&job.client) {
+            if &job.client != freelancer
+                && &job.client != client
+                && !conflicts.contains(&job.client)
+            {
                 conflicts.push_back(job.client.clone());
             }
-            if &job.freelancer != freelancer && &job.freelancer != client && !conflicts.contains(&job.freelancer) {
+            if &job.freelancer != freelancer
+                && &job.freelancer != client
+                && !conflicts.contains(&job.freelancer)
+            {
                 conflicts.push_back(job.freelancer.clone());
             }
         }
@@ -347,6 +386,7 @@ impl DisputeContract {
         initiator: Address,
         reason: String,
         min_votes: u32,
+        tie_break_method: Option<TieBreakMethod>,
     ) -> Result<u64, DisputeError> {
         initiator.require_auth();
 
@@ -383,6 +423,7 @@ impl DisputeContract {
             votes_for_client: 0,
             votes_for_freelancer: 0,
             min_votes: if min_votes < 3 { 3 } else { min_votes },
+            tie_break_method: tie_break_method.unwrap_or(TieBreakMethod::RefundBoth),
             created_at: env.ledger().timestamp(),
             excluded_voters,
         };
@@ -390,9 +431,7 @@ impl DisputeContract {
         env.storage()
             .persistent()
             .set(&DataKey::Dispute(count), &dispute);
-        env.storage()
-            .instance()
-            .set(&DataKey::DisputeCount, &count);
+        env.storage().instance().set(&DataKey::DisputeCount, &count);
         bump_dispute_ttl(&env, count);
         bump_dispute_count_ttl(&env);
         env.storage()
@@ -557,6 +596,7 @@ impl DisputeContract {
 
         if dispute.status == DisputeStatus::ResolvedForClient
             || dispute.status == DisputeStatus::ResolvedForFreelancer
+            || dispute.status == DisputeStatus::RefundedBoth
         {
             return Err(DisputeError::AlreadyResolved);
         }
@@ -566,24 +606,40 @@ impl DisputeContract {
             return Err(DisputeError::NotEnoughVotes);
         }
 
-        dispute.status = if dispute.votes_for_client >= dispute.votes_for_freelancer {
-            DisputeStatus::ResolvedForClient
+        if dispute.votes_for_client > dispute.votes_for_freelancer {
+            dispute.status = DisputeStatus::ResolvedForClient;
+        } else if dispute.votes_for_freelancer > dispute.votes_for_client {
+            dispute.status = DisputeStatus::ResolvedForFreelancer;
         } else {
-            DisputeStatus::ResolvedForFreelancer
+            // Tie-break logic
+            match dispute.tie_break_method {
+                TieBreakMethod::FavorClient => dispute.status = DisputeStatus::ResolvedForClient,
+                TieBreakMethod::FavorFreelancer => {
+                    dispute.status = DisputeStatus::ResolvedForFreelancer
+                }
+                TieBreakMethod::RefundBoth => dispute.status = DisputeStatus::RefundedBoth,
+                TieBreakMethod::Escalate => dispute.status = DisputeStatus::Escalated,
+            }
+        }
+
+        let resolution = match dispute.status {
+            DisputeStatus::ResolvedForClient => DisputeResolution::ClientWins,
+            DisputeStatus::ResolvedForFreelancer => DisputeResolution::FreelancerWins,
+            DisputeStatus::RefundedBoth => DisputeResolution::RefundBoth,
+            _ => DisputeResolution::Escalate,
         };
 
-        let resolved_status = dispute.status.clone();
-        let resolved_for_client = resolved_status == DisputeStatus::ResolvedForClient;
-
-        let _ = env.invoke_contract::<()>(
-            &escrow,
-            &Symbol::new(&env, "resolve_dispute_callback"),
-            vec![
-                &env,
-                dispute.job_id.into_val(&env),
-                resolved_for_client.into_val(&env),
-            ],
-        );
+        if resolution != DisputeResolution::Escalate {
+            let _ = env.invoke_contract::<()>(
+                &escrow,
+                &Symbol::new(&env, "resolve_dispute_callback"),
+                vec![
+                    &env,
+                    dispute.job_id.into_val(&env),
+                    resolution.into_val(&env),
+                ],
+            );
+        }
 
         env.storage()
             .persistent()

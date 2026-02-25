@@ -731,7 +731,7 @@ fn test_badge_timestamp() {
 
     let badges = reputation_client.get_badges(&reviewee);
     assert_eq!(badges.len(), 1);
-    
+
     let badge = badges.get(0).unwrap();
     assert!(badge.awarded_at >= before_timestamp);
 }

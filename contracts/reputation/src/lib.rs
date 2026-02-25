@@ -229,7 +229,7 @@ impl ReputationContract {
         // Check for tier upgrade and award badge if necessary
         let new_avg_rating = (reputation.total_score * 100) / reputation.total_weight;
         let new_tier = calculate_tier(new_avg_rating);
-        
+
         // Get existing badges to check if this tier badge already exists
         let badges_key = DataKey::Badges(reviewee.clone());
         let mut badges: Vec<Badge> = env
@@ -237,10 +237,10 @@ impl ReputationContract {
             .persistent()
             .get(&badges_key)
             .unwrap_or(Vec::new(&env));
-        
+
         // Check if user already has this tier badge
         let has_tier_badge = badges.iter().any(|b| b.badge_type == new_tier);
-        
+
         if !has_tier_badge && new_tier != ReputationTier::None {
             let badge = Badge {
                 badge_type: new_tier.clone(),
@@ -249,7 +249,7 @@ impl ReputationContract {
             badges.push_back(badge);
             env.storage().persistent().set(&badges_key, &badges);
             bump_badges_ttl(&env, &reviewee);
-            
+
             // Emit badge awarded event
             env.events().publish(
                 (symbol_short!("reput"), symbol_short!("badge")),
