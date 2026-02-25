@@ -50,6 +50,16 @@ enum TransactionType {
   DISPUTE_PAYOUT
 }
 
+enum NotificationType {
+  JOB_APPLIED
+  APPLICATION_ACCEPTED
+  MILESTONE_SUBMITTED
+  MILESTONE_APPROVED
+  DISPUTE_RAISED
+  DISPUTE_RESOLVED
+  NEW_MESSAGE
+}
+
 model User {
   id            String   @id @default(cuid())
   walletAddress String   @unique
@@ -82,6 +92,7 @@ model User {
   transactionsFrom Transaction[] @relation("TransactionsFrom")
   transactionsTo   Transaction[] @relation("TransactionsTo")
   attachments      Attachment[]
+  notifications    Notification[]
 }
 
 model Job {
@@ -220,5 +231,21 @@ model Attachment {
   @@index([uploaderId])
   @@index([jobId])
   @@index([disputeId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  read      Boolean          @default(false)
+  metadata  Json?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
   @@index([createdAt])
 }
