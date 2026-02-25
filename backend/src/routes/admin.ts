@@ -13,7 +13,7 @@ router.use(requireAdmin);
 // POST /api/admin/jobs/:id/flag - Flag a job with reason
 router.post("/jobs/:id/flag", async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
         const validatedData = flagJobSchema.parse(req.body);
 
         // Check if job exists
@@ -43,7 +43,7 @@ router.post("/jobs/:id/flag", async (req: AuthRequest, res: Response): Promise<v
         });
     } catch (error) {
         if (error instanceof ZodError) {
-            res.status(400).json({ error: "Validation error", details: error.errors });
+            res.status(400).json({ error: "Validation error", details: error.issues });
             return;
         }
         console.error("Error flagging job:", error);
@@ -54,7 +54,7 @@ router.post("/jobs/:id/flag", async (req: AuthRequest, res: Response): Promise<v
 // POST /api/admin/jobs/:id/dismiss - Remove flag from job
 router.post("/jobs/:id/dismiss", async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
 
         // Check if job exists
         const job = await prisma.job.findUnique({
@@ -90,7 +90,7 @@ router.post("/jobs/:id/dismiss", async (req: AuthRequest, res: Response): Promis
 // POST /api/admin/jobs/:id/remove - Remove/unpublish a job
 router.post("/jobs/:id/remove", async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
 
         // Check if job exists
         const job = await prisma.job.findUnique({
@@ -119,7 +119,7 @@ router.post("/jobs/:id/remove", async (req: AuthRequest, res: Response): Promise
 // POST /api/admin/users/:id/suspend - Suspend a user account
 router.post("/users/:id/suspend", async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
         const validatedData = suspendUserSchema.parse(req.body);
 
         // Check if user exists
@@ -152,7 +152,7 @@ router.post("/users/:id/suspend", async (req: AuthRequest, res: Response): Promi
         });
     } catch (error) {
         if (error instanceof ZodError) {
-            res.status(400).json({ error: "Validation error", details: error.errors });
+            res.status(400).json({ error: "Validation error", details: error.issues });
             return;
         }
         console.error("Error suspending user:", error);
@@ -163,7 +163,7 @@ router.post("/users/:id/suspend", async (req: AuthRequest, res: Response): Promi
 // POST /api/admin/users/:id/restore - Restore a suspended user account
 router.post("/users/:id/restore", async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
 
         // Check if user exists
         const user = await prisma.user.findUnique({
