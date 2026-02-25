@@ -123,6 +123,7 @@ model Milestone {
   createdAt   DateTime        @default(now())
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
 }
 
 model Application {

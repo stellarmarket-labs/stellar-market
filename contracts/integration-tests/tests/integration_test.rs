@@ -218,6 +218,7 @@ fn test_dispute_resolved_for_freelancer() {
         &3,
         &0_i128,
         &token_address,
+        &0_i128,
     );
 
     let dispute = dispute_client.get_dispute(&dispute_id_val);
@@ -229,26 +230,27 @@ fn test_dispute_resolved_for_freelancer() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
+    mint_tokens(&env, &token_address, &admin, &voter1, 10);
+    mint_tokens(&env, &token_address, &admin, &voter2, 10);
+    mint_tokens(&env, &token_address, &admin, &voter3, 10);
+
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter1,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Work looks good to me"),
-    );
+        &String::from_str(&env, "Work looks good to me"), &10i128);
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter2,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Freelancer delivered as promised"),
-    );
+        &String::from_str(&env, "Freelancer delivered as promised"), &10i128);
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter3,
         &VoteChoice::Client,
-        &String::from_str(&env, "Some issues with quality"),
-    );
+        &String::from_str(&env, "Some issues with quality"), &10i128);
 
     let dispute = dispute_client.get_dispute(&dispute_id_val);
     assert_eq!(dispute.votes_for_freelancer, 2);
@@ -323,6 +325,7 @@ fn test_dispute_resolved_for_client() {
         &3,
         &0_i128,
         &token_address,
+        &0_i128,
     );
 
     // Voters side with client
@@ -334,22 +337,19 @@ fn test_dispute_resolved_for_client() {
         &dispute_id_val,
         &voter1,
         &VoteChoice::Client,
-        &String::from_str(&env, "Work incomplete"),
-    );
+        &String::from_str(&env, "Work incomplete"), &0i128);
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter2,
         &VoteChoice::Client,
-        &String::from_str(&env, "Client is right"),
-    );
+        &String::from_str(&env, "Client is right"), &0i128);
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter3,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Looks ok to me"),
-    );
+        &String::from_str(&env, "Looks ok to me"), &0i128);
 
     // First resolution — not final yet (max_appeals=2, appeal_count=0).
     // The escrow callback (which returns funds to client) is only invoked on final resolution.
@@ -591,25 +591,25 @@ fn test_duplicate_vote_on_dispute_fails() {
         &3,
         &0_i128,
         &token_address,
+        &0_i128,
     );
 
     let voter = Address::generate(&env);
+    mint_tokens(&env, &token_address, &admin, &voter, 20);
 
     // First vote succeeds
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter,
         &VoteChoice::Client,
-        &String::from_str(&env, "First vote"),
-    );
+        &String::from_str(&env, "First vote"), &10i128);
 
     // Second vote from same voter should fail
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Trying to vote again"),
-    );
+        &String::from_str(&env, "Trying to vote again"), &10i128);
 }
 
 #[test]
@@ -655,6 +655,7 @@ fn test_dispute_with_all_milestones_approved() {
         &3,
         &0_i128,
         &token_address,
+        &0_i128,
     );
 
     // Vote and resolve for freelancer (so they get the funds)
