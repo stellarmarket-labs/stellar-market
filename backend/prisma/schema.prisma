@@ -42,6 +42,13 @@ enum EscrowStatus {
   DISPUTED
 }
 
+enum TransactionType {
+  DEPOSIT
+  RELEASE
+  REFUND
+  DISPUTE_PAYOUT
+}
+
 model User {
   id            String   @id @default(cuid())
   walletAddress String   @unique
@@ -66,22 +73,9 @@ model User {
   reviewsGiven   Review[]      @relation("ReviewsGiven")
   reviewsReceived Review[]     @relation("ReviewsReceived")
   skills          String[]
-  services        ServiceListing[]
-  savedJobs       SavedJob[]
-}
-
-model ServiceListing {
-  id           String   @id @default(cuid())
-  title        String
-  description  String
-  price        Float
-  category     String
-  freelancerId String
-  skills       String[]
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  freelancer User @relation(fields: [freelancerId], references: [id], onDelete: Cascade)
+  transactionsFrom Transaction[] @relation("TransactionsFrom")
+  transactionsTo   Transaction[] @relation("TransactionsTo")
+  attachments      Attachment[]
 }
 
 model Job {
@@ -106,7 +100,8 @@ model Job {
   applications Application[]
   messages     Message[]
   reviews      Review[]
-  savedBy      SavedJob[]
+  transactions Transaction[]
+  attachments  Attachment[]
 }
 
 model Milestone {
@@ -123,6 +118,7 @@ model Milestone {
   createdAt   DateTime        @default(now())
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
 }
 
 model Application {
@@ -171,14 +167,48 @@ model Review {
   @@unique([jobId, reviewerId])
 }
 
-model SavedJob {
-  id           String   @id @default(cuid())
-  freelancerId String
+model Transaction {
+  id           String          @id @default(cuid())
   jobId        String
+  milestoneId  String?
+  fromAddress  String
+  toAddress    String
+  amount       Float
+  tokenAddress String
+  txHash       String          @unique
+  type         TransactionType
+  createdAt    DateTime        @default(now())
+
+  job       Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  milestone Milestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  from      User       @relation("TransactionsFrom", fields: [fromAddress], references: [walletAddress])
+  to        User       @relation("TransactionsTo", fields: [toAddress], references: [walletAddress])
+
+  @@index([txHash])
+  @@index([jobId])
+  @@index([fromAddress])
+  @@index([toAddress])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  uploaderId   String
+  jobId        String?
+  disputeId    String?
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  url          String
   createdAt    DateTime @default(now())
 
-  freelancer User @relation(fields: [freelancerId], references: [id], onDelete: Cascade)
-  job        Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  uploader User  @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  job      Job?  @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
-  @@unique([freelancerId, jobId])
+  @@index([uploaderId])
+  @@index([jobId])
+  @@index([disputeId])
+  @@index([createdAt])
 }
