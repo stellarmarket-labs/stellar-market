@@ -27,15 +27,15 @@
                   "u64": 1
                 },
                 {
-                  "u32": 4
+                  "u32": 2
                 },
                 {
-                  "string": "Great work!"
+                  "string": "Okay"
                 },
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 10
+                    "lo": 1
                   }
                 }
               ]
@@ -266,7 +266,7 @@
                             "symbol": "badge_type"
                           },
                           "val": {
-                            "u32": 2
+                            "u32": 1
                           }
                         }
                       ]
@@ -330,7 +330,7 @@
                         "symbol": "total_score"
                       },
                       "val": {
-                        "u64": 40
+                        "u64": 2
                       }
                     },
                     {
@@ -338,7 +338,7 @@
                         "symbol": "total_weight"
                       },
                       "val": {
-                        "u64": 10
+                        "u64": 1
                       }
                     },
                     {
@@ -459,7 +459,7 @@
                             "symbol": "comment"
                           },
                           "val": {
-                            "string": "Great work!"
+                            "string": "Okay"
                           }
                         },
                         {
@@ -475,7 +475,7 @@
                             "symbol": "rating"
                           },
                           "val": {
-                            "u32": 4
+                            "u32": 2
                           }
                         },
                         {
@@ -501,7 +501,7 @@
                           "val": {
                             "i128": {
                               "hi": 0,
-                              "lo": 10
+                              "lo": 1
                             }
                           }
                         },
@@ -646,15 +646,15 @@
                   "u64": 1
                 },
                 {
-                  "u32": 4
+                  "u32": 2
                 },
                 {
-                  "string": "Great work!"
+                  "string": "Okay"
                 },
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 10
+                    "lo": 1
                   }
                 }
               ]
@@ -814,7 +814,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "u32": 2
+                  "u32": 1
                 }
               ]
             }
@@ -850,7 +850,7 @@
                   "u64": 1
                 },
                 {
-                  "u32": 4
+                  "u32": 2
                 }
               ]
             }
@@ -895,7 +895,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
               },
               {
-                "symbol": "get_reputation"
+                "symbol": "get_tier"
               }
             ],
             "data": {
@@ -918,44 +918,11 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "get_reputation"
+                "symbol": "get_tier"
               }
             ],
             "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "review_count"
-                  },
-                  "val": {
-                    "u32": 1
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "total_score"
-                  },
-                  "val": {
-                    "u64": 40
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "total_weight"
-                  },
-                  "val": {
-                    "u64": 10
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "user"
-                  },
-                  "val": {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                  }
-                }
-              ]
+              "u32": 1
             }
           }
         }
