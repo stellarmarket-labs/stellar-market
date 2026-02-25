@@ -15,7 +15,9 @@ fn setup_test(env: &Env) -> (DisputeContractClient, Address, Address, Address, A
     client.initialize(&admin, &80);
 
     let token_admin = Address::generate(&env);
-    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
 
     let escrow_contract_id = env.register_contract(None, DummyEscrow);
 
@@ -115,23 +117,29 @@ fn test_vote_and_resolve() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
     client.cast_vote(
         &dispute_id,
         &voter1,
         &VoteChoice::Freelancer,
         &String::from_str(&env, "Work was done"),
+        &10i128,
     );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
     client.cast_vote(
         &dispute_id,
         &voter2,
         &VoteChoice::Freelancer,
         &String::from_str(&env, "Agree with freelancer"),
+        &10i128,
     );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
     client.cast_vote(
         &dispute_id,
         &voter3,
         &VoteChoice::Client,
         &String::from_str(&env, "Incomplete work"),
+        &10i128,
     );
 
     let result = client.resolve_dispute(&dispute_id, &escrow_id, &false);
@@ -139,7 +147,7 @@ fn test_vote_and_resolve() {
 
     // Fee should still be held in contract for voter rewards
     let token_client = token::Client::new(&env, &token_id);
-    assert_eq!(token_client.balance(&client.address), 100);
+    assert_eq!(token_client.balance(&client.address), 130);
 }
 
 #[test]
@@ -173,11 +181,14 @@ fn test_malicious_dispute_penalty() {
 
     // 3 voters: all for client (100% against freelancer)
     for _ in 0..3 {
+        let voter = Address::generate(&env);
+        token_asset_client.mint(&voter, &10);
         client.cast_vote(
             &dispute_id,
-            &Address::generate(&env),
+            &voter,
             &VoteChoice::Client,
             &String::from_str(&env, "Frivolous"),
+            &10i128,
         );
     }
 
@@ -212,11 +223,13 @@ fn test_resolve_without_enough_votes() {
     );
 
     let voter = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter, &10);
     client.cast_vote(
         &dispute_id,
         &voter,
         &VoteChoice::Client,
         &String::from_str(&env, "Reason"),
+        &10i128,
     );
 
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
@@ -252,37 +265,43 @@ fn test_claim_voter_reward_proportional() {
     let voter3 = Address::generate(&env);
 
     // 2 vote for client, 1 for freelancer
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
     client.cast_vote(
         &dispute_id,
         &voter1,
         &VoteChoice::Client,
         &String::from_str(&env, "r1"),
+        &10i128,
     );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
     client.cast_vote(
         &dispute_id,
         &voter2,
         &VoteChoice::Client,
         &String::from_str(&env, "r2"),
+        &10i128,
     );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
     client.cast_vote(
         &dispute_id,
         &voter3,
         &VoteChoice::Freelancer,
         &String::from_str(&env, "r3"),
+        &10i128,
     );
 
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Each winning voter (voter1, voter2) should get 100/2 = 50
     let reward1 = client.claim_voter_reward(&dispute_id, &voter1);
-    assert_eq!(reward1, 50);
+    assert_eq!(reward1, 65);
 
     let reward2 = client.claim_voter_reward(&dispute_id, &voter2);
-    assert_eq!(reward2, 50);
+    assert_eq!(reward2, 65);
 
     let token_client = token::Client::new(&env, &token_id);
-    assert_eq!(token_client.balance(&voter1), 50);
-    assert_eq!(token_client.balance(&voter2), 50);
+    assert_eq!(token_client.balance(&voter1), 65);
+    assert_eq!(token_client.balance(&voter2), 65);
     assert_eq!(token_client.balance(&client.address), 0);
 }
 
@@ -314,23 +333,29 @@ fn test_get_claimable_reward() {
     let voter3 = Address::generate(&env);
     let non_voter = Address::generate(&env);
 
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
     client.cast_vote(
         &dispute_id,
         &voter1,
         &VoteChoice::Client,
         &String::from_str(&env, "r"),
+        &10i128,
     );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
     client.cast_vote(
         &dispute_id,
         &voter2,
         &VoteChoice::Client,
         &String::from_str(&env, "r"),
+        &10i128,
     );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
     client.cast_vote(
         &dispute_id,
         &voter3,
         &VoteChoice::Freelancer,
         &String::from_str(&env, "r"),
+        &10i128,
     );
 
     // Before resolution, should return 0
@@ -339,8 +364,8 @@ fn test_get_claimable_reward() {
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // Winning voter gets 90/2 = 45
-    assert_eq!(client.get_claimable_reward(&dispute_id, &voter1), 45);
-    assert_eq!(client.get_claimable_reward(&dispute_id, &voter2), 45);
+    assert_eq!(client.get_claimable_reward(&dispute_id, &voter1), 60);
+    assert_eq!(client.get_claimable_reward(&dispute_id, &voter2), 60);
     // Losing voter gets 0
     assert_eq!(client.get_claimable_reward(&dispute_id, &voter3), 0);
     // Non-voter gets 0
@@ -379,9 +404,30 @@ fn test_double_claim_prevented() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Client, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Client, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter3, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
 
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
@@ -417,9 +463,30 @@ fn test_losing_voter_cannot_claim() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Client, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Client, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter3, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
 
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
@@ -452,7 +519,14 @@ fn test_claim_before_resolution_fails() {
     );
 
     let voter1 = Address::generate(&env);
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Client, &String::from_str(&env, "r"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
 
     // Try to claim before resolution
     client.claim_voter_reward(&dispute_id, &voter1);
@@ -486,17 +560,38 @@ fn test_malicious_dispute_refunds_winning_party() {
     let voter3 = Address::generate(&env);
 
     // Freelancer wins (dispute was malicious)
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "r"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
 
     let result = client.resolve_dispute(&dispute_id, &escrow_id, &true);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 
-    // Fee refunded to freelancer (winning/victim party)
     let token_client = token::Client::new(&env, &token_id);
     assert_eq!(token_client.balance(&freelancer), 100);
-    assert_eq!(token_client.balance(&client.address), 0);
+    // Voters stakes remain in the contract
+    assert_eq!(token_client.balance(&client.address), 30);
 
     // Dispute marked as malicious
     let dispute = client.get_dispute(&dispute_id);
@@ -504,7 +599,6 @@ fn test_malicious_dispute_refunds_winning_party() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #15)")]
 fn test_claim_reward_on_malicious_dispute_fails() {
     let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
     let client = DisputeContractClient::new(&env, &contract_id);
@@ -531,14 +625,36 @@ fn test_claim_reward_on_malicious_dispute_fails() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "r"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
 
     client.resolve_dispute(&dispute_id, &escrow_id, &true);
 
-    // Winning voter tries to claim on malicious dispute — no reward available
-    client.claim_voter_reward(&dispute_id, &voter1);
+    // Winning voter claims their stake + slashed stake (fee is 0 because malicious)
+    let reward = client.claim_voter_reward(&dispute_id, &voter1);
+    assert_eq!(reward, 15);
 }
 
 #[test]
@@ -565,14 +681,35 @@ fn test_zero_fee_dispute() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Client, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Client, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter3, &VoteChoice::Freelancer, &String::from_str(&env, "r"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
 
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
-    // Claimable reward should be 0
-    assert_eq!(client.get_claimable_reward(&dispute_id, &voter1), 0);
+    // Claimable reward should be 15 (stake + slashed stake)
+    assert_eq!(client.get_claimable_reward(&dispute_id, &voter1), 15);
 }
 
 #[test]
@@ -603,18 +740,39 @@ fn test_single_winning_voter_gets_full_fee() {
     let voter3 = Address::generate(&env);
 
     // All 3 vote for client -> client wins, all 3 share equally
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Client, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Client, &String::from_str(&env, "r"));
-    client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "r"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &10i128,
+    );
 
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
     // All 3 are winners: 100/3 = 33 each (integer division)
     let reward = client.claim_voter_reward(&dispute_id, &voter1);
-    assert_eq!(reward, 33);
+    assert_eq!(reward, 43);
 
     let token_client = token::Client::new(&env, &token_id);
-    assert_eq!(token_client.balance(&voter1), 33);
+    assert_eq!(token_client.balance(&voter1), 43);
 }
 
 // ---- Appeal system tests ----
@@ -643,9 +801,30 @@ fn test_appeal_by_losing_party() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Freelancer, &String::from_str(&env, "Good work"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "Agree"));
-    client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "Disagree"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Good work"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Agree"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Disagree"),
+        &10i128,
+    );
 
     let result = client.resolve_dispute(&dispute_id, &escrow_id, &false);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
@@ -685,9 +864,30 @@ fn test_appeal_requires_double_votes() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 1"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 2"));
-    client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "Vote 3"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Vote 1"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Vote 2"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Vote 3"),
+        &10i128,
+    );
 
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
@@ -702,12 +902,54 @@ fn test_appeal_requires_double_votes() {
     let voter8 = Address::generate(&env);
     let voter9 = Address::generate(&env);
 
-    client.cast_vote(&dispute_id, &voter4, &VoteChoice::Client, &String::from_str(&env, "Appeal vote 1"));
-    client.cast_vote(&dispute_id, &voter5, &VoteChoice::Client, &String::from_str(&env, "Appeal vote 2"));
-    client.cast_vote(&dispute_id, &voter6, &VoteChoice::Client, &String::from_str(&env, "Appeal vote 3"));
-    client.cast_vote(&dispute_id, &voter7, &VoteChoice::Client, &String::from_str(&env, "Appeal vote 4"));
-    client.cast_vote(&dispute_id, &voter8, &VoteChoice::Freelancer, &String::from_str(&env, "Appeal vote 5"));
-    client.cast_vote(&dispute_id, &voter9, &VoteChoice::Freelancer, &String::from_str(&env, "Appeal vote 6"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter4, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter4,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Appeal vote 1"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter5, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter5,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Appeal vote 2"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter6, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter6,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Appeal vote 3"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter7, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter7,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Appeal vote 4"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter8, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter8,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Appeal vote 5"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter9, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter9,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Appeal vote 6"),
+        &10i128,
+    );
 
     // Should succeed with 6 votes
     let result = client.resolve_dispute(&dispute_id, &escrow_id, &false);
@@ -739,9 +981,30 @@ fn test_appeal_by_winning_party_fails() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 1"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 2"));
-    client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "Vote 3"));
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter1, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Vote 1"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter2, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Vote 2"),
+        &10i128,
+    );
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter3, &10);
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Vote 3"),
+        &10i128,
+    );
 
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
@@ -773,7 +1036,14 @@ fn test_max_appeals_reached() {
     // First resolution
     for _i in 0..3 {
         let voter = Address::generate(&env);
-        client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "V1"));
+        token::StellarAssetClient::new(&env, &token_id).mint(&voter, &10);
+        client.cast_vote(
+            &dispute_id,
+            &voter,
+            &VoteChoice::Freelancer,
+            &String::from_str(&env, "V1"),
+            &10i128,
+        );
     }
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
@@ -781,7 +1051,14 @@ fn test_max_appeals_reached() {
     client.raise_appeal(&dispute_id, &user_client);
     for _i in 0..6 {
         let voter = Address::generate(&env);
-        client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "Vote"));
+        token::StellarAssetClient::new(&env, &token_id).mint(&voter, &10);
+        client.cast_vote(
+            &dispute_id,
+            &voter,
+            &VoteChoice::Freelancer,
+            &String::from_str(&env, "Vote"),
+            &10i128,
+        );
     }
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
@@ -789,7 +1066,14 @@ fn test_max_appeals_reached() {
     client.raise_appeal(&dispute_id, &user_client);
     for _i in 0..12 {
         let voter = Address::generate(&env);
-        client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "Vote"));
+        token::StellarAssetClient::new(&env, &token_id).mint(&voter, &10);
+        client.cast_vote(
+            &dispute_id,
+            &voter,
+            &VoteChoice::Freelancer,
+            &String::from_str(&env, "Vote"),
+            &10i128,
+        );
     }
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
@@ -820,7 +1104,14 @@ fn test_final_resolution_after_max_appeals() {
     // First resolution
     for _i in 0..3 {
         let voter = Address::generate(&env);
-        client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "Vote"));
+        token::StellarAssetClient::new(&env, &token_id).mint(&voter, &10);
+        client.cast_vote(
+            &dispute_id,
+            &voter,
+            &VoteChoice::Freelancer,
+            &String::from_str(&env, "Vote"),
+            &10i128,
+        );
     }
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
@@ -828,7 +1119,14 @@ fn test_final_resolution_after_max_appeals() {
     client.raise_appeal(&dispute_id, &user_client);
     for _i in 0..6 {
         let voter = Address::generate(&env);
-        client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "Vote"));
+        token::StellarAssetClient::new(&env, &token_id).mint(&voter, &10);
+        client.cast_vote(
+            &dispute_id,
+            &voter,
+            &VoteChoice::Freelancer,
+            &String::from_str(&env, "Vote"),
+            &10i128,
+        );
     }
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
@@ -836,7 +1134,14 @@ fn test_final_resolution_after_max_appeals() {
     client.raise_appeal(&dispute_id, &user_client);
     for _i in 0..12 {
         let voter = Address::generate(&env);
-        client.cast_vote(&dispute_id, &voter, &VoteChoice::Client, &String::from_str(&env, "Vote"));
+        token::StellarAssetClient::new(&env, &token_id).mint(&voter, &10);
+        client.cast_vote(
+            &dispute_id,
+            &voter,
+            &VoteChoice::Client,
+            &String::from_str(&env, "Vote"),
+            &10i128,
+        );
     }
 
     // This should be final resolution
@@ -896,7 +1201,14 @@ fn test_appeal_after_deadline_fails() {
     // Vote and resolve
     for _i in 0..3 {
         let voter = Address::generate(&env);
-        client.cast_vote(&dispute_id, &voter, &VoteChoice::Freelancer, &String::from_str(&env, "Vote"));
+        token::StellarAssetClient::new(&env, &token_id).mint(&voter, &10);
+        client.cast_vote(
+            &dispute_id,
+            &voter,
+            &VoteChoice::Freelancer,
+            &String::from_str(&env, "Vote"),
+            &10i128,
+        );
     }
     client.resolve_dispute(&dispute_id, &escrow_id, &false);
 
@@ -907,4 +1219,75 @@ fn test_appeal_after_deadline_fails() {
 
     // Try to appeal after deadline - should fail
     client.raise_appeal(&dispute_id, &user_client);
+}
+
+#[test]
+fn test_stake_weighted_resolution() {
+    let (env, contract_id, token_id, _admin, escrow_id) = setup_env();
+    let client = DisputeContractClient::new(&env, &contract_id);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    let token_asset_client = token::StellarAssetClient::new(&env, &token_id);
+    token_asset_client.mint(&user_client, &1000);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Stake weight test"),
+        &3u32,
+        &100i128,
+        &token_id,
+        &0i128,
+    );
+
+    let whale = Address::generate(&env);
+    let minnow1 = Address::generate(&env);
+    let minnow2 = Address::generate(&env);
+
+    token_asset_client.mint(&whale, &100);
+    token_asset_client.mint(&minnow1, &10);
+    token_asset_client.mint(&minnow2, &10);
+
+    // Minorities vote for Client (2 votes, 20 stake)
+    client.cast_vote(
+        &dispute_id,
+        &minnow1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r1"),
+        &10i128,
+    );
+    client.cast_vote(
+        &dispute_id,
+        &minnow2,
+        &VoteChoice::Client,
+        &String::from_str(&env, "r2"),
+        &10i128,
+    );
+
+    // Whale votes for Freelancer (1 vote, 100 stake)
+    client.cast_vote(
+        &dispute_id,
+        &whale,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "r3"),
+        &100i128,
+    );
+
+    assert_eq!(client.get_voter_stake(&dispute_id, &whale), 100i128);
+    assert_eq!(client.get_voter_stake(&dispute_id, &minnow1), 10i128);
+
+    // Freelancer should win because 100 > 20
+    let result = client.resolve_dispute(&dispute_id, &escrow_id, &false);
+    assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
+
+    // Whale reward: stake=100. Fee=100. Slashed=20. Whale gets 100 + 100 + 20 = 220
+    let reward = client.claim_voter_reward(&dispute_id, &whale);
+    assert_eq!(reward, 220);
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&whale), 220);
 }

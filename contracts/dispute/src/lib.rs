@@ -53,6 +53,7 @@ pub struct Vote {
     pub choice: VoteChoice,
     pub reason: String,
     pub timestamp: u64,
+    pub stake_amount: i128,
 }
 
 #[contracttype]
@@ -67,6 +68,8 @@ pub struct Dispute {
     pub status: DisputeStatus,
     pub votes_for_client: u32,
     pub votes_for_freelancer: u32,
+    pub total_stake_for_client: i128,
+    pub total_stake_for_freelancer: i128,
     pub min_votes: u32,
     pub token: Address,
     pub initiator_penalty_stake: i128,
@@ -145,7 +148,9 @@ impl DisputeContract {
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::MaliciousThreshold, &threshold);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaliciousThreshold, &threshold);
         env.storage().instance().set(&DataKey::Configured, &true);
 
         Ok(())
@@ -160,7 +165,9 @@ impl DisputeContract {
             .ok_or(DisputeError::NotConfigured)?;
         admin.require_auth();
 
-        env.storage().instance().set(&DataKey::MaliciousThreshold, &threshold);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaliciousThreshold, &threshold);
 
         Ok(())
     }
@@ -199,19 +206,19 @@ impl DisputeContract {
             .get(&DataKey::MaliciousThreshold)
             .unwrap_or(80); // Default to 80% if not set
 
-        let total_votes = dispute.votes_for_client + dispute.votes_for_freelancer;
-        if total_votes == 0 {
+        let total_stake = dispute.total_stake_for_client + dispute.total_stake_for_freelancer;
+        if total_stake == 0 {
             return Ok(false);
         }
 
-        let votes_against = if dispute.initiator == dispute.client {
-            dispute.votes_for_freelancer
+        let stake_against = if dispute.initiator == dispute.client {
+            dispute.total_stake_for_freelancer
         } else {
-            dispute.votes_for_client
+            dispute.total_stake_for_client
         };
 
-        let percentage = (votes_against * 100) / total_votes;
-        Ok(percentage > threshold)
+        let percentage = (stake_against * 100) / total_stake;
+        Ok(percentage > threshold as i128)
     }
 
     /// Raise a dispute on a job. Either the client or freelancer can initiate.
@@ -260,6 +267,8 @@ impl DisputeContract {
             status: DisputeStatus::Open,
             votes_for_client: 0,
             votes_for_freelancer: 0,
+            total_stake_for_client: 0,
+            total_stake_for_freelancer: 0,
             min_votes: if min_votes < 3 { 3 } else { min_votes },
             token,
             initiator_penalty_stake: penalty_stake,
@@ -299,6 +308,7 @@ impl DisputeContract {
         voter: Address,
         choice: VoteChoice,
         reason: String,
+        stake: i128,
     ) -> Result<(), DisputeError> {
         voter.require_auth();
 
@@ -327,12 +337,18 @@ impl DisputeContract {
             return Err(DisputeError::AlreadyVoted);
         }
 
+        if stake > 0 {
+            let token_client = token::Client::new(&env, &dispute.token);
+            token_client.transfer(&voter, &env.current_contract_address(), &stake);
+        }
+
         // Record vote
         let vote = Vote {
             voter: voter.clone(),
             choice: choice.clone(),
             reason,
             timestamp: env.ledger().timestamp(),
+            stake_amount: stake,
         };
 
         let mut votes: Vec<Vote> = env
@@ -347,8 +363,14 @@ impl DisputeContract {
         bump_votes_ttl(&env, dispute_id);
 
         match choice {
-            VoteChoice::Client => dispute.votes_for_client += 1,
-            VoteChoice::Freelancer => dispute.votes_for_freelancer += 1,
+            VoteChoice::Client => {
+                dispute.votes_for_client += 1;
+                dispute.total_stake_for_client += stake;
+            }
+            VoteChoice::Freelancer => {
+                dispute.votes_for_freelancer += 1;
+                dispute.total_stake_for_freelancer += stake;
+            }
         }
 
         dispute.status = DisputeStatus::Voting;
@@ -397,7 +419,8 @@ impl DisputeContract {
             return Err(DisputeError::NotEnoughVotes);
         }
 
-        let resolved_for_client = dispute.votes_for_client >= dispute.votes_for_freelancer;
+        let resolved_for_client =
+            dispute.total_stake_for_client >= dispute.total_stake_for_freelancer;
 
         // Check if this is the final resolution
         let is_final = dispute.appeal_count >= dispute.max_appeals;
@@ -456,15 +479,15 @@ impl DisputeContract {
                 .get(&DataKey::MaliciousThreshold)
                 .unwrap_or(80);
 
-            let total_votes = dispute.votes_for_client + dispute.votes_for_freelancer;
-            let votes_against = if dispute.initiator == dispute.client {
-                dispute.votes_for_freelancer
+            let total_stake = dispute.total_stake_for_client + dispute.total_stake_for_freelancer;
+            let stake_against = if dispute.initiator == dispute.client {
+                dispute.total_stake_for_freelancer
             } else {
-                dispute.votes_for_client
+                dispute.total_stake_for_client
             };
 
-            let is_malicious = if total_votes > 0 {
-                (votes_against * 100) / total_votes > threshold
+            let is_malicious = if total_stake > 0 {
+                (stake_against * 100) / total_stake > threshold as i128
             } else {
                 false
             };
@@ -514,11 +537,7 @@ impl DisputeContract {
     }
 
     /// Raise an appeal on a resolved dispute. Only the losing party can appeal.
-    pub fn raise_appeal(
-        env: Env,
-        dispute_id: u64,
-        appellant: Address,
-    ) -> Result<(), DisputeError> {
+    pub fn raise_appeal(env: Env, dispute_id: u64, appellant: Address) -> Result<(), DisputeError> {
         appellant.require_auth();
 
         let mut dispute: Dispute = env
@@ -562,11 +581,33 @@ impl DisputeContract {
             return Err(DisputeError::NotLosingParty);
         }
 
+        // Refund previous voters before clearing votes
+        let token_client = token::Client::new(&env, &dispute.token);
+        let votes: Vec<Vote> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Votes(dispute_id))
+            .unwrap_or(Vec::new(&env));
+
+        for vote in votes.iter() {
+            if vote.stake_amount > 0 {
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &vote.voter,
+                    &vote.stake_amount,
+                );
+            }
+            let rewarded_key = DataKey::VoterRewarded(dispute_id, vote.voter.clone());
+            env.storage().persistent().remove(&rewarded_key);
+        }
+
         // Increment appeal count and reset voting
         dispute.appeal_count += 1;
         dispute.status = DisputeStatus::Appealed;
         dispute.votes_for_client = 0;
         dispute.votes_for_freelancer = 0;
+        dispute.total_stake_for_client = 0;
+        dispute.total_stake_for_freelancer = 0;
 
         // Clear previous votes
         env.storage()
@@ -612,15 +653,7 @@ impl DisputeContract {
             return Err(DisputeError::DisputeNotResolved);
         }
 
-        // No rewards if dispute was malicious (fee already refunded)
-        if dispute.malicious {
-            return Err(DisputeError::NoRewardAvailable);
-        }
-
-        // No reward if fee is zero
-        if dispute.dispute_fee <= 0 {
-            return Err(DisputeError::NoRewardAvailable);
-        }
+        // We no longer exit early for malicious or zero fee, because voters still need their stakes back.
 
         // Check voter hasn't already claimed
         let rewarded_key = DataKey::VoterRewarded(dispute_id, voter.clone());
@@ -638,8 +671,8 @@ impl DisputeContract {
         let winning_choice = if dispute.status == DisputeStatus::ResolvedForClient {
             VoteChoice::Client
         } else {
-            // ResolvedForFreelancer or FinalResolution — determine from vote counts
-            if dispute.votes_for_client >= dispute.votes_for_freelancer {
+            // ResolvedForFreelancer or FinalResolution — determine from total stake
+            if dispute.total_stake_for_client >= dispute.total_stake_for_freelancer {
                 VoteChoice::Client
             } else {
                 VoteChoice::Freelancer
@@ -658,17 +691,36 @@ impl DisputeContract {
             return Err(DisputeError::NotWinningVoter);
         }
 
-        // Calculate reward: dispute_fee / winning_vote_count
-        let winning_count = match winning_choice {
-            VoteChoice::Client => dispute.votes_for_client as i128,
-            VoteChoice::Freelancer => dispute.votes_for_freelancer as i128,
+        let winning_stake = match winning_choice {
+            VoteChoice::Client => dispute.total_stake_for_client,
+            VoteChoice::Freelancer => dispute.total_stake_for_freelancer,
         };
 
-        if winning_count == 0 {
+        if winning_stake == 0 {
             return Err(DisputeError::NoRewardAvailable);
         }
 
-        let reward = dispute.dispute_fee / winning_count;
+        let losing_stake = match winning_choice {
+            VoteChoice::Client => dispute.total_stake_for_freelancer,
+            VoteChoice::Freelancer => dispute.total_stake_for_client,
+        };
+
+        let mut voter_stake = 0;
+        for vote in votes.iter() {
+            if vote.voter == voter && vote.choice == winning_choice {
+                voter_stake = vote.stake_amount;
+                break;
+            }
+        }
+
+        let fee_share = if dispute.malicious {
+            0
+        } else {
+            (dispute.dispute_fee * voter_stake) / winning_stake
+        };
+        let slashed_share = (losing_stake * voter_stake) / winning_stake;
+        let reward = voter_stake + fee_share + slashed_share;
+
         if reward <= 0 {
             return Err(DisputeError::NoRewardAvailable);
         }
@@ -701,12 +753,10 @@ impl DisputeContract {
             None => return 0,
         };
 
-        // Must be resolved, not malicious, and have a fee
-        if (dispute.status != DisputeStatus::ResolvedForClient
+        // Must be resolved
+        if dispute.status != DisputeStatus::ResolvedForClient
             && dispute.status != DisputeStatus::ResolvedForFreelancer
-            && dispute.status != DisputeStatus::FinalResolution)
-            || dispute.malicious
-            || dispute.dispute_fee <= 0
+            && dispute.status != DisputeStatus::FinalResolution
         {
             return 0;
         }
@@ -727,7 +777,7 @@ impl DisputeContract {
         let winning_choice = if dispute.status == DisputeStatus::ResolvedForClient {
             VoteChoice::Client
         } else {
-            if dispute.votes_for_client >= dispute.votes_for_freelancer {
+            if dispute.total_stake_for_client >= dispute.total_stake_for_freelancer {
                 VoteChoice::Client
             } else {
                 VoteChoice::Freelancer
@@ -746,16 +796,52 @@ impl DisputeContract {
             return 0;
         }
 
-        let winning_count = match winning_choice {
-            VoteChoice::Client => dispute.votes_for_client as i128,
-            VoteChoice::Freelancer => dispute.votes_for_freelancer as i128,
+        let winning_stake = match winning_choice {
+            VoteChoice::Client => dispute.total_stake_for_client,
+            VoteChoice::Freelancer => dispute.total_stake_for_freelancer,
         };
 
-        if winning_count == 0 {
+        if winning_stake == 0 {
             return 0;
         }
 
-        dispute.dispute_fee / winning_count
+        let losing_stake = match winning_choice {
+            VoteChoice::Client => dispute.total_stake_for_freelancer,
+            VoteChoice::Freelancer => dispute.total_stake_for_client,
+        };
+
+        let mut voter_stake = 0;
+        for vote in votes.iter() {
+            if vote.voter == voter && vote.choice == winning_choice {
+                voter_stake = vote.stake_amount;
+                break;
+            }
+        }
+
+        let fee_share = if dispute.malicious {
+            0
+        } else {
+            (dispute.dispute_fee * voter_stake) / winning_stake
+        };
+        let slashed_share = (losing_stake * voter_stake) / winning_stake;
+        voter_stake + fee_share + slashed_share
+    }
+
+    /// Get a voter's stake for a given dispute.
+    pub fn get_voter_stake(env: Env, dispute_id: u64, voter: Address) -> i128 {
+        let votes: Vec<Vote> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Votes(dispute_id))
+            .unwrap_or(Vec::new(&env));
+
+        for vote in votes.iter() {
+            if vote.voter == voter {
+                return vote.stake_amount;
+            }
+        }
+
+        0
     }
 
     /// Get dispute details.
