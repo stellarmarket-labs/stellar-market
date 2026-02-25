@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validate } from "../middleware/validation";
-import { upload, UPLOAD_DIR, MAX_FILE_SIZE } from "../config/upload";
+import { upload, UPLOAD_DIR, MAX_FILE_SIZE, AVATAR_UPLOAD_DIR } from "../config/upload";
 import { validateFileMimeType, formatFileSize } from "../utils/fileValidation";
 
 const router = Router();
@@ -30,6 +30,20 @@ const getFileSchema = {
     id: z.string(),
   }),
 };
+
+router.get("/avatars/:filename", (req, res) => {
+  const filename = req.params.filename as string;
+  if (!filename || filename.includes("..")) {
+    return res.status(400).json({ error: "Invalid filename" });
+  }
+  const filePath = path.join(AVATAR_UPLOAD_DIR, filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "Avatar not found" });
+  }
+  res.setHeader("Content-Type", filename.endsWith(".png") ? "image/png" : "image/jpeg");
+  const fileStream = fs.createReadStream(filePath);
+  fileStream.pipe(res);
+});
 
 /**
  * POST /api/uploads

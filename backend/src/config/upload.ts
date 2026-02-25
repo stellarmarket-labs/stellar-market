@@ -17,9 +17,20 @@ export const ALLOWED_MIME_TYPES = [
 // Max file size: 10MB
 export const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
-// Upload directory
+const AVATAR_MAX_SIZE = 2 * 1024 * 1024;
+const AVATAR_MIME_TYPES = ["image/jpeg", "image/png"];
+
 const UPLOAD_DIR =
   process.env.UPLOAD_DIR || path.join(__dirname, "../../uploads");
+
+export const AVATAR_UPLOAD_DIR =
+  process.env.AVATAR_UPLOAD_DIR || path.join(UPLOAD_DIR, "avatars");
+
+if (!fs.existsSync(AVATAR_UPLOAD_DIR)) {
+  fs.mkdirSync(AVATAR_UPLOAD_DIR, { recursive: true });
+}
+
+// Upload directory (ensure after AVATAR_UPLOAD_DIR for env)
 
 // Ensure upload directory exists
 if (!fs.existsSync(UPLOAD_DIR)) {
@@ -67,3 +78,27 @@ export const upload = multer({
 });
 
 export { UPLOAD_DIR };
+
+const avatarStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, AVATAR_UPLOAD_DIR);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
+    const ext = path.extname(file.originalname) || (file.mimetype === "image/png" ? ".png" : ".jpg");
+    cb(null, `avatar-${uniqueSuffix}${ext}`);
+  },
+});
+
+const avatarFileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
+  if (!AVATAR_MIME_TYPES.includes(file.mimetype)) {
+    return cb(new Error("Avatar must be JPG or PNG."));
+  }
+  cb(null, true);
+};
+
+export const avatarUpload = multer({
+  storage: avatarStorage,
+  fileFilter: avatarFileFilter,
+  limits: { fileSize: AVATAR_MAX_SIZE },
+});
