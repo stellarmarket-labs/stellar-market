@@ -1,8 +1,9 @@
 import { Router, Response } from "express";
-import { PrismaClient, EscrowStatus } from "@prisma/client";
+import { PrismaClient, EscrowStatus, NotificationType } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { asyncHandler } from "../middleware/error";
 import { ContractService } from "../services/contract.service";
+import { NotificationService } from "../services/notification.service";
 import { config } from "../config";
 
 const router = Router();
@@ -99,22 +100,22 @@ router.post("/confirm-tx", authenticate, asyncHandler(async (req: AuthRequest, r
   if (type === "CREATE_JOB" && jobId && onChainJobId) {
     await prisma.job.update({
       where: { id: jobId },
-      data: { 
+      data: {
         contractJobId: onChainJobId.toString(),
-        escrowStatus: EscrowStatus.UNFUNDED 
+        escrowStatus: EscrowStatus.UNFUNDED
       }
     });
 
     // Update milestones with their on-chain indices (0, 1, 2...)
     const milestones = await prisma.milestone.findMany({
-        where: { jobId },
-        orderBy: { order: "asc" }
+      where: { jobId },
+      orderBy: { order: "asc" }
     });
     for (let i = 0; i < milestones.length; i++) {
-        await prisma.milestone.update({
-            where: { id: milestones[i].id },
-            data: { onChainIndex: i }
-        });
+      await prisma.milestone.update({
+        where: { id: milestones[i].id },
+        data: { onChainIndex: i }
+      });
     }
   } else if (type === "FUND_JOB" && jobId) {
     await prisma.job.update({
@@ -126,18 +127,32 @@ router.post("/confirm-tx", authenticate, asyncHandler(async (req: AuthRequest, r
       where: { id: milestoneId },
       data: { status: "APPROVED" }
     });
-    
+
     // Check if all milestones are approved to update job status
-    const milestone = await prisma.milestone.findUnique({ where: { id: milestoneId } });
+    const milestone = await prisma.milestone.findUnique({
+      where: { id: milestoneId },
+      include: { job: true },
+    });
     const allMilestones = await prisma.milestone.findMany({ where: { jobId: milestone?.jobId } });
     if (allMilestones.every(m => m.status === "APPROVED")) {
-        await prisma.job.update({
-            where: { id: milestone?.jobId },
-            data: { 
-                status: "COMPLETED",
-                escrowStatus: EscrowStatus.COMPLETED
-            }
-        });
+      await prisma.job.update({
+        where: { id: milestone?.jobId },
+        data: {
+          status: "COMPLETED",
+          escrowStatus: EscrowStatus.COMPLETED
+        }
+      });
+    }
+
+    // Notify the freelancer
+    if (milestone && milestone.job.freelancerId) {
+      await NotificationService.sendNotification({
+        userId: milestone.job.freelancerId,
+        type: NotificationType.MILESTONE_APPROVED,
+        title: "Milestone Approved",
+        message: `Your milestone "${milestone.title}" has been approved and funds released!`,
+        metadata: { jobId: milestone.jobId, milestoneId: milestone.id },
+      });
     }
   }
 
