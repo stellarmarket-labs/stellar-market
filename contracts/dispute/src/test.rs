@@ -8,7 +8,7 @@ pub struct DummyEscrow;
 
 #[contractimpl]
 impl DummyEscrow {
-    pub fn resolve_dispute_callback(_env: Env, _job_id: u64, _resolved_for_client: bool) {}
+    pub fn resolve_dispute_callback(_env: Env, _job_id: u64, _resolution: DisputeResolution) {}
 }
 
 // Mock reputation contract for testing
@@ -118,7 +118,7 @@ fn test_is_eligible_voter_high_reputation() {
     client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
 
     let voter = Address::generate(&env);
-    
+
     let is_eligible = client.is_eligible_voter(&voter);
     // Mock returns high reputation for all users
     assert_eq!(is_eligible, true);
@@ -148,11 +148,12 @@ fn test_vote_with_reputation_check() {
         &user_client,
         &String::from_str(&env, "Issue"),
         &3u32,
+        &None,
     );
 
     // Vote with reputation check - should succeed with mock
     let voter = Address::generate(&env);
-    
+
     client.cast_vote(
         &dispute_id,
         &voter,
@@ -182,6 +183,7 @@ fn test_raise_dispute() {
         &user_client,
         &String::from_str(&env, "Work not delivered"),
         &3u32,
+        &None,
     );
 
     assert_eq!(dispute_id, 1);
@@ -215,6 +217,7 @@ fn test_vote_and_resolve() {
         &freelancer,
         &String::from_str(&env, "Payment not released"),
         &3u32,
+        &None,
     );
 
     client.cast_vote(
@@ -261,6 +264,7 @@ fn test_resolve_without_enough_votes() {
         &user_client,
         &String::from_str(&env, "Issue"),
         &3u32,
+        &None,
     );
 
     let voter = Address::generate(&env);
@@ -272,4 +276,279 @@ fn test_resolve_without_enough_votes() {
     );
 
     client.resolve_dispute(&dispute_id, &escrow_contract_id);
+}
+
+#[test]
+fn test_tie_break_favor_client() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+    let voter3 = Address::generate(&env);
+    let voter4 = Address::generate(&env);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &4u32, // min_votes set to 4
+        &Some(TieBreakMethod::FavorClient),
+    );
+
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C2"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter4,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F2"),
+    );
+
+    let status = client.resolve_dispute(&dispute_id, &escrow_contract_id);
+    assert_eq!(status, DisputeStatus::ResolvedForClient);
+}
+
+#[test]
+fn test_tie_break_favor_freelancer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+    let voter3 = Address::generate(&env);
+    let voter4 = Address::generate(&env);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &4u32,
+        &Some(TieBreakMethod::FavorFreelancer),
+    );
+
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C2"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter4,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F2"),
+    );
+
+    let status = client.resolve_dispute(&dispute_id, &escrow_contract_id);
+    assert_eq!(status, DisputeStatus::ResolvedForFreelancer);
+}
+
+#[test]
+fn test_tie_break_refund_both() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+    let voter3 = Address::generate(&env);
+    let voter4 = Address::generate(&env);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &4u32,
+        &Some(TieBreakMethod::RefundBoth),
+    );
+
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C2"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter4,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F2"),
+    );
+
+    let status = client.resolve_dispute(&dispute_id, &escrow_contract_id);
+    assert_eq!(status, DisputeStatus::RefundedBoth);
+}
+
+#[test]
+fn test_tie_break_escalate() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+    let voter3 = Address::generate(&env);
+    let voter4 = Address::generate(&env);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &4u32,
+        &Some(TieBreakMethod::Escalate),
+    );
+
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C2"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter4,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F2"),
+    );
+
+    let status = client.resolve_dispute(&dispute_id, &escrow_contract_id);
+    assert_eq!(status, DisputeStatus::Escalated);
+}
+
+#[test]
+fn test_tie_break_default_refund_both() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+    let voter3 = Address::generate(&env);
+    let voter4 = Address::generate(&env);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &4u32,
+        &None, // Should default to RefundBoth
+    );
+
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C2"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter4,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F2"),
+    );
+
+    let status = client.resolve_dispute(&dispute_id, &escrow_contract_id);
+    assert_eq!(status, DisputeStatus::RefundedBoth);
 }

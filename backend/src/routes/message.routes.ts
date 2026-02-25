@@ -1,8 +1,9 @@
 import { Router, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, NotificationType } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validate } from "../middleware/validation";
 import { asyncHandler } from "../middleware/error";
+import { NotificationService } from "../services/notification.service";
 import {
   createMessageSchema,
   updateMessageSchema,
@@ -83,6 +84,15 @@ router.post(
         sender: { select: { id: true, username: true, avatarUrl: true } },
         receiver: { select: { id: true, username: true, avatarUrl: true } },
       },
+    });
+
+    // Notify the receiver
+    await NotificationService.sendNotification({
+      userId: receiverId,
+      type: NotificationType.NEW_MESSAGE,
+      title: "New Message",
+      message: `You received a new message from ${message.sender.username}`,
+      metadata: { messageId: message.id, jobId: message.jobId },
     });
 
     res.status(201).json(message);

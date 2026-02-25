@@ -552,3 +552,94 @@ fn test_claim_refund_fails_on_cancelled_job() {
     // Should fail — job is already cancelled
     escrow.claim_refund(&job_id, &client);
 }
+
+#[test]
+fn test_resolve_dispute_callback_client_wins() {
+    let env = Env::default();
+    let (escrow, token) = setup_refund_env(&env);
+
+    let client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let milestones = default_milestones(&env);
+
+    let job_id = escrow.create_job(
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+    );
+
+    mint_tokens(&env, &token, &client, 3000);
+    escrow.fund_job(&job_id, &client);
+
+    escrow.resolve_dispute_callback(&job_id, &DisputeResolution::ClientWins);
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Cancelled);
+
+    let token_client = token::Client::new(&env, &token);
+    assert_eq!(token_client.balance(&client), 3000);
+}
+
+#[test]
+fn test_resolve_dispute_callback_freelancer_wins() {
+    let env = Env::default();
+    let (escrow, token) = setup_refund_env(&env);
+
+    let client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let milestones = default_milestones(&env);
+
+    let job_id = escrow.create_job(
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+    );
+
+    mint_tokens(&env, &token, &client, 3000);
+    escrow.fund_job(&job_id, &client);
+
+    escrow.resolve_dispute_callback(&job_id, &DisputeResolution::FreelancerWins);
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Completed);
+
+    let token_client = token::Client::new(&env, &token);
+    assert_eq!(token_client.balance(&freelancer), 3000);
+}
+
+#[test]
+fn test_resolve_dispute_callback_refund_both() {
+    let env = Env::default();
+    let (escrow, token) = setup_refund_env(&env);
+
+    let client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let milestones = default_milestones(&env);
+
+    let job_id = escrow.create_job(
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+    );
+
+    mint_tokens(&env, &token, &client, 3000);
+    escrow.fund_job(&job_id, &client);
+
+    escrow.resolve_dispute_callback(&job_id, &DisputeResolution::RefundBoth);
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Cancelled);
+
+    let token_client = token::Client::new(&env, &token);
+    assert_eq!(token_client.balance(&client), 1500);
+    assert_eq!(token_client.balance(&freelancer), 1500);
+}

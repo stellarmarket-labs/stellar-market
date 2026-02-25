@@ -3,6 +3,8 @@ import { PrismaClient } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validate } from "../middleware/validation";
 import { asyncHandler } from "../middleware/error";
+import { NotificationService } from "../services/notification.service";
+import { NotificationType } from "@prisma/client";
 import {
   createMilestoneSchema,
   updateMilestoneSchema,
@@ -277,6 +279,17 @@ router.patch(
       where: { id },
       data: { status },
     });
+
+    // Notify the client when freelancer submits milestone
+    if (isFreelancer && status === "COMPLETED") {
+      await NotificationService.sendNotification({
+        userId: job.clientId,
+        type: NotificationType.MILESTONE_SUBMITTED,
+        title: "Milestone Submitted",
+        message: `Freelancer submitted milestone: ${milestone.title}`,
+        metadata: { jobId: job.id, milestoneId: id },
+      });
+    }
 
     // Auto-complete job when all milestones are completed
     if (status === "COMPLETED") {

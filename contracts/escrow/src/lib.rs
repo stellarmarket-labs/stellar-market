@@ -35,6 +35,15 @@ pub enum JobStatus {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DisputeResolution {
+    ClientWins,
+    FreelancerWins,
+    RefundBoth,
+    Escalate,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MilestoneStatus {
     Pending,
     InProgress,
@@ -202,10 +211,13 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Called by the dispute contract to resolve a disputed job and distribute funds.
+    /// Uses the full DisputeResolution enum to correctly handle all four outcomes,
+    /// including the zero-remaining edge case where only the job status needs updating.
     pub fn resolve_dispute_callback(
         env: Env,
         job_id: u64,
-        resolved_for_client: bool,
+        resolution: DisputeResolution,
     ) -> Result<(), EscrowError> {
         let mut job: Job = env
             .storage()
@@ -230,19 +242,51 @@ impl EscrowContract {
         let remaining = job.total_amount - approved_amount;
 
         if remaining > 0 {
+            // Funds remain — transfer them according to the resolution outcome.
             let token_client = token::Client::new(&env, &job.token);
-            if resolved_for_client {
-                token_client.transfer(&env.current_contract_address(), &job.client, &remaining);
-                job.status = JobStatus::Cancelled;
-            } else {
-                token_client.transfer(&env.current_contract_address(), &job.freelancer, &remaining);
-                job.status = JobStatus::Completed;
+            match resolution {
+                DisputeResolution::ClientWins => {
+                    token_client.transfer(&env.current_contract_address(), &job.client, &remaining);
+                    job.status = JobStatus::Cancelled;
+                }
+                DisputeResolution::FreelancerWins => {
+                    token_client.transfer(
+                        &env.current_contract_address(),
+                        &job.freelancer,
+                        &remaining,
+                    );
+                    job.status = JobStatus::Completed;
+                }
+                DisputeResolution::RefundBoth => {
+                    let half = remaining / 2;
+                    if half > 0 {
+                        token_client.transfer(&env.current_contract_address(), &job.client, &half);
+                        token_client.transfer(
+                            &env.current_contract_address(),
+                            &job.freelancer,
+                            &(remaining - half),
+                        );
+                    }
+                    job.status = JobStatus::Cancelled;
+                }
+                DisputeResolution::Escalate => {
+                    // No funds transferred; job remains in its current disputed state
+                    // until a higher-level resolution process completes.
+                }
             }
         } else {
-            if resolved_for_client {
-                job.status = JobStatus::Cancelled;
-            } else {
-                job.status = JobStatus::Completed;
+            // All milestones were already paid out — only the job status needs updating.
+            // Use the same resolution mapping for consistency with the funds-present path.
+            match resolution {
+                DisputeResolution::ClientWins | DisputeResolution::RefundBoth => {
+                    job.status = JobStatus::Cancelled;
+                }
+                DisputeResolution::FreelancerWins => {
+                    job.status = JobStatus::Completed;
+                }
+                DisputeResolution::Escalate => {
+                    // Leave status unchanged, same as above.
+                }
             }
         }
 
@@ -250,7 +294,7 @@ impl EscrowContract {
 
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("dispute")),
-            (job_id, resolved_for_client),
+            (job_id, resolution),
         );
 
         Ok(())
