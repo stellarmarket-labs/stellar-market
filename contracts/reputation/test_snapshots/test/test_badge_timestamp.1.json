@@ -27,15 +27,15 @@
                   "u64": 1
                 },
                 {
-                  "u32": 4
+                  "u32": 3
                 },
                 {
-                  "string": "Great work!"
+                  "string": "Good"
                 },
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 10
+                    "lo": 1
                   }
                 }
               ]
@@ -330,7 +330,7 @@
                         "symbol": "total_score"
                       },
                       "val": {
-                        "u64": 40
+                        "u64": 3
                       }
                     },
                     {
@@ -338,7 +338,7 @@
                         "symbol": "total_weight"
                       },
                       "val": {
-                        "u64": 10
+                        "u64": 1
                       }
                     },
                     {
@@ -459,7 +459,7 @@
                             "symbol": "comment"
                           },
                           "val": {
-                            "string": "Great work!"
+                            "string": "Good"
                           }
                         },
                         {
@@ -475,7 +475,7 @@
                             "symbol": "rating"
                           },
                           "val": {
-                            "u32": 4
+                            "u32": 3
                           }
                         },
                         {
@@ -501,7 +501,7 @@
                           "val": {
                             "i128": {
                               "hi": 0,
-                              "lo": 10
+                              "lo": 1
                             }
                           }
                         },
@@ -646,15 +646,15 @@
                   "u64": 1
                 },
                 {
-                  "u32": 4
+                  "u32": 3
                 },
                 {
-                  "string": "Great work!"
+                  "string": "Good"
                 },
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 10
+                    "lo": 1
                   }
                 }
               ]
@@ -850,7 +850,7 @@
                   "u64": 1
                 },
                 {
-                  "u32": 4
+                  "u32": 3
                 }
               ]
             }
@@ -895,7 +895,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
               },
               {
-                "symbol": "get_reputation"
+                "symbol": "get_badges"
               }
             ],
             "data": {
@@ -918,42 +918,30 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "get_reputation"
+                "symbol": "get_badges"
               }
             ],
             "data": {
-              "map": [
+              "vec": [
                 {
-                  "key": {
-                    "symbol": "review_count"
-                  },
-                  "val": {
-                    "u32": 1
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "total_score"
-                  },
-                  "val": {
-                    "u64": 40
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "total_weight"
-                  },
-                  "val": {
-                    "u64": 10
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "user"
-                  },
-                  "val": {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                  }
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "awarded_at"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "badge_type"
+                      },
+                      "val": {
+                        "u32": 2
+                      }
+                    }
+                  ]
                 }
               ]
             }
