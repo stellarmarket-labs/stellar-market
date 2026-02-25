@@ -6,3 +6,4 @@ export * from "./milestone";
 export * from "./message";
 export * from "./review";
 export * from "./common";
+export * from "./savedJob";

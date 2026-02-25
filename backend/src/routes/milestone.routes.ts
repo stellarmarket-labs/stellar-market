@@ -128,7 +128,7 @@ router.get(
     const id = req.params.id as string;
 
     const milestone = await prisma.milestone.findUnique({
-      where: { id },
+      where: { id: id as string },
       include: {
         job: {
           select: {
@@ -176,7 +176,7 @@ router.put(
     }
 
     const milestone = await prisma.milestone.findUnique({
-      where: { id },
+      where: { id: id as string },
       include: { job: true },
     });
 
@@ -190,7 +190,7 @@ router.put(
     }
 
     const updated = await prisma.milestone.update({
-      where: { id },
+      where: { id: id as string },
       data: updateData,
       include: {
         job: { select: { id: true, title: true } },
@@ -210,7 +210,7 @@ router.delete(
     const id = req.params.id as string;
 
     const milestone = await prisma.milestone.findUnique({
-      where: { id },
+      where: { id: id as string },
       include: { job: true },
     });
 
@@ -223,7 +223,7 @@ router.delete(
         .json({ error: "Not authorized to delete this milestone." });
     }
 
-    await prisma.milestone.delete({ where: { id } });
+    await prisma.milestone.delete({ where: { id: id as string } });
     res.json({ message: "Milestone deleted successfully." });
   }),
 );
@@ -241,7 +241,7 @@ router.patch(
     const { status } = req.body;
 
     const milestone = await prisma.milestone.findUnique({
-      where: { id },
+      where: { id: id as string },
       include: { job: true },
     });
 
@@ -274,7 +274,7 @@ router.patch(
     }
 
     const updated = await prisma.milestone.update({
-      where: { id },
+      where: { id: id as string },
       data: { status },
     });
 

@@ -79,99 +79,64 @@ function JobsContent() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold text-dark-heading">Browse Jobs</h1>
-        <button
-          onClick={() => setDrawerOpen(true)}
-          className="lg:hidden flex items-center gap-2 btn-secondary py-2 px-4 relative"
-        >
-          <SlidersHorizontal size={18} />
-          <span>Filters</span>
-          {activeCount > 0 && (
-            <span className="absolute -top-2 -right-2 bg-stellar-blue text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">
-              {activeCount}
-            </span>
-          )}
-        </button>
+      <h1 className="text-3xl font-bold text-theme-heading mb-8">
+        Browse Jobs
+      </h1>
+
+      {/* Search & Filters */}
+      <div className="flex flex-col md:flex-row gap-4 mb-8">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-theme-text" size={18} />
+          <input
+            type="text"
+            placeholder="Search jobs..."
+            className="input-field pl-10"
+            value={search}
+            onChange={(e) => handleSearchChange(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => handleCategoryChange(cat)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                selectedCategory === cat
+                  ? "bg-stellar-blue text-white"
+                  : "bg-theme-card border border-theme-border text-theme-text hover:border-stellar-blue"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-6">
-        <Search
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-dark-text"
-          size={18}
-        />
-        <input
-          type="text"
-          placeholder="Search jobs..."
-          className="input-field pl-10"
-          value={filters.search}
-          onChange={(e) => updateSearch(e.target.value)}
-        />
-      </div>
-
-      {/* Main layout: sidebar + results */}
-      <div className="flex gap-8">
-        <FilterSidebar
-          filters={filters}
-          updateFilter={updateFilter}
-          toggleArrayFilter={toggleArrayFilter}
-          clearAll={clearAll}
-          activeCount={activeCount}
-          isOpen={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-        />
-
-        {/* Results */}
-        <div className="flex-1 min-w-0">
-          {/* Results count */}
-          {!loading && (
-            <p className="text-sm text-dark-text mb-4">
-              Showing {start}
-              {total > 0 && <>&ndash;{end}</>} of {total} jobs
-            </p>
-          )}
-
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="animate-pulse bg-dark-card border border-dark-border rounded-xl h-64"
-                />
-              ))}
-            </div>
-          ) : jobs.length > 0 ? (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {jobs.map((job) => (
-                  <JobCard key={job.id} job={job} />
-                ))}
-              </div>
-              <Pagination
-                page={filters.page}
-                totalPages={totalPages}
-                total={total}
-                limit={JOBS_PER_PAGE}
-                onPageChange={(p) => updateFilter("page", p)}
-              />
-            </>
-          ) : (
-            <div className="text-center py-20">
-              <p className="text-dark-text text-lg mb-2">
-                No jobs found matching your filters.
-              </p>
-              {activeCount > 0 && (
-                <button
-                  onClick={clearAll}
-                  className="text-stellar-blue hover:text-stellar-purple text-sm font-medium transition-colors"
-                >
-                  Clear all filters
-                </button>
-              )}
-            </div>
-          )}
+      {/* Job Listings */}
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="animate-pulse bg-theme-card border border-theme-border rounded-xl h-64" />
+          ))}
+        </div>
+      ) : jobs.length > 0 ? (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {jobs.map((job) => (
+              <JobCard key={job.id} job={job} />
+            ))}
+          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            total={total}
+            limit={JOBS_PER_PAGE}
+            onPageChange={setPage}
+          />
+        </>
+      ) : (
+        <div className="text-center py-20 text-theme-text">
+          No jobs found matching your criteria.
         </div>
       </div>
     </div>

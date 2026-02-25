@@ -8,7 +8,9 @@ import {
   updateJobSchema,
   getJobsQuerySchema,
   getJobByIdParamSchema,
-  updateJobStatusSchema
+  updateJobStatusSchema,
+  getSavedJobsQuerySchema,
+  savedJobParamSchema
 } from "../schemas";
 
 const router = Router();
@@ -81,6 +83,64 @@ router.get("/",
       prisma.job.count({ where }),
     ]);
 
+    let jobsWithSavedStatus = jobs;
+    if (req.userId) {
+      const savedJobIds = await prisma.savedJob.findMany({
+        where: { freelancerId: req.userId },
+        select: { jobId: true }
+      }).then(results => results.map(r => r.jobId));
+      
+      jobsWithSavedStatus = jobs.map(job => ({
+        ...job,
+        isSaved: savedJobIds.includes(job.id)
+      })) as any;
+    }
+
+    res.json({
+      data: jobsWithSavedStatus,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
+  })
+);
+
+// Get saved jobs for authenticated freelancer
+router.get("/saved",
+  authenticate,
+  validate({ query: getSavedJobsQuerySchema }),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const { page, limit } = req.query as any;
+    const skip = (page - 1) * limit;
+
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (!user || user.role !== "FREELANCER") {
+      return res.status(403).json({ error: "Only freelancers can access saved jobs." });
+    }
+
+    const [savedJobs, total] = await Promise.all([
+      prisma.savedJob.findMany({
+        where: { freelancerId: req.userId },
+        include: {
+          job: {
+            include: {
+              client: { select: { id: true, username: true, avatarUrl: true } },
+              _count: { select: { applications: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+      }),
+      prisma.savedJob.count({ where: { freelancerId: req.userId } }),
+    ]);
+
+    const jobs = savedJobs.map(sj => ({
+      ...sj.job,
+      isSaved: true
+    }));
+
     res.json({
       data: jobs,
       total,
@@ -113,7 +173,94 @@ router.get("/:id",
       return res.status(404).json({ error: "Job not found." });
     }
 
-    res.json(job);
+    let isSaved = false;
+    if (req.userId) {
+      const saved = await prisma.savedJob.findUnique({
+        where: {
+          freelancerId_jobId: {
+            freelancerId: req.userId,
+            jobId: id,
+          },
+        },
+      });
+      isSaved = !!saved;
+    }
+
+    res.json({ ...job, isSaved });
+  })
+);
+
+// Save/Bookmark a job
+router.post("/:id/save",
+  authenticate,
+  validate({ params: savedJobParamSchema }),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const jobId = req.params.id as string;
+    
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (!user || user.role !== "FREELANCER") {
+      return res.status(403).json({ error: "Only freelancers can save jobs." });
+    }
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job) {
+      return res.status(404).json({ error: "Job not found." });
+    }
+
+    const existing = await prisma.savedJob.findUnique({
+      where: {
+        freelancerId_jobId: {
+          freelancerId: req.userId!,
+          jobId,
+        },
+      },
+    });
+
+    if (existing) {
+      return res.status(409).json({ error: "Job already saved." });
+    }
+
+    await prisma.savedJob.create({
+      data: {
+        freelancerId: req.userId!,
+        jobId,
+      },
+    });
+
+    res.status(201).json({ message: "Job saved successfully." });
+  })
+);
+
+// Unsave/Remove bookmark
+router.delete("/:id/save",
+  authenticate,
+  validate({ params: savedJobParamSchema }),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const jobId = req.params.id as string;
+
+    const existing = await prisma.savedJob.findUnique({
+      where: {
+        freelancerId_jobId: {
+          freelancerId: req.userId!,
+          jobId,
+        },
+      },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: "Job bookmark not found." });
+    }
+
+    await prisma.savedJob.delete({
+      where: {
+        freelancerId_jobId: {
+          freelancerId: req.userId!,
+          jobId,
+        },
+      },
+    });
+
+    res.json({ message: "Job unsaved successfully." });
   })
 );
 
