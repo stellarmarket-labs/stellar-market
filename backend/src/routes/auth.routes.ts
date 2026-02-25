@@ -154,6 +154,14 @@ router.post(
       return res.status(401).json({ error: "Invalid credentials." });
     }
 
+    // Check if user is suspended
+    if (user.isSuspended) {
+      return res.status(403).json({
+        error: "Account suspended.",
+        reason: user.suspendReason || "Your account has been suspended.",
+      });
+    }
+
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
       return res.status(401).json({ error: "Invalid credentials." });

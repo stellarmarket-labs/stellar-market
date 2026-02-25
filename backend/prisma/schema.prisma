@@ -10,6 +10,7 @@ datasource db {
 enum UserRole {
   CLIENT
   FREELANCER
+  ADMIN
 }
 
 enum JobStatus {
@@ -62,6 +63,11 @@ model User {
   emailVerificationToken String?
   passwordResetToken     String?
   passwordResetExpiry    DateTime?
+  isFlagged              Boolean   @default(false)
+  flagReason             String?
+  isSuspended            Boolean   @default(false)
+  suspendReason          String?
+  suspendedAt            DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -91,6 +97,10 @@ model Job {
   escrowStatus  EscrowStatus @default(UNFUNDED)
   skills       String[]
   deadline     DateTime
+  isFlagged    Boolean   @default(false)
+  flagReason   String?
+  flaggedAt    DateTime?
+  flaggedBy    String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 

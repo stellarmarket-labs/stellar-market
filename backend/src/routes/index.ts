@@ -9,6 +9,7 @@ import milestoneRoutes from "./milestone.routes";
 import escrowRoutes from "./escrow.routes";
 import transactionRoutes from "./transaction.routes";
 import uploadRoutes from "./upload.routes";
+import adminRoutes from "./admin";
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use("/reviews", reviewRoutes);
 router.use("/escrow", escrowRoutes);
 router.use("/transactions", transactionRoutes);
 router.use("/uploads", uploadRoutes);
+router.use("/admin", adminRoutes);
 
 export default router;
