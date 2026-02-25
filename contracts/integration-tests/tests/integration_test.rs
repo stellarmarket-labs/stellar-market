@@ -184,9 +184,6 @@ fn test_dispute_resolved_for_freelancer() {
         &client,
         &String::from_str(&env, "Work quality is not acceptable"),
         &3,
-        &0_i128,
-        &token_address,
-        &0_i128,
     );
 
     let dispute = dispute_client.get_dispute(&dispute_id_val);
@@ -198,44 +195,39 @@ fn test_dispute_resolved_for_freelancer() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
-    mint_tokens(&env, &token_address, &admin, &voter1, 10);
-    mint_tokens(&env, &token_address, &admin, &voter2, 10);
-    mint_tokens(&env, &token_address, &admin, &voter3, 10);
-
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter1,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Work looks good to me"), &10i128);
+        &String::from_str(&env, "Work looks good to me"));
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter2,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Freelancer delivered as promised"), &10i128);
+        &String::from_str(&env, "Freelancer delivered as promised"));
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter3,
         &VoteChoice::Client,
-        &String::from_str(&env, "Some issues with quality"), &10i128);
+        &String::from_str(&env, "Some issues with quality"));
 
     let dispute = dispute_client.get_dispute(&dispute_id_val);
     assert_eq!(dispute.votes_for_freelancer, 2);
     assert_eq!(dispute.votes_for_client, 1);
 
-    // First resolution — not final yet (max_appeals=2, appeal_count=0).
-    // The escrow callback is only invoked after all appeal rounds are exhausted.
-    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id, &false);
+    // Resolution is final in reputation-based voting (no appeals)
+    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 
-    // Funds remain in escrow until the dispute reaches final resolution.
-    assert_eq!(token.balance(&freelancer), 0);
-    assert_eq!(token.balance(&escrow_id), 3_000);
+    // Funds are transferred immediately to freelancer
+    assert_eq!(token.balance(&freelancer), 3_000);
+    assert_eq!(token.balance(&escrow_id), 0);
 
-    // Job remains InProgress until the escrow callback is invoked.
+    // Job is completed
     let job = escrow_client.get_job(&job_id);
-    assert_eq!(job.status, JobStatus::InProgress);
+    assert_eq!(job.status, JobStatus::Completed);
 }
 
 #[test]
@@ -284,9 +276,6 @@ fn test_dispute_resolved_for_client() {
         &client,
         &String::from_str(&env, "Second milestone not delivered properly"),
         &3,
-        &0_i128,
-        &token_address,
-        &0_i128,
     );
 
     // Voters side with client
@@ -298,33 +287,33 @@ fn test_dispute_resolved_for_client() {
         &dispute_id_val,
         &voter1,
         &VoteChoice::Client,
-        &String::from_str(&env, "Work incomplete"), &0i128);
+        &String::from_str(&env, "Work incomplete"));
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter2,
         &VoteChoice::Client,
-        &String::from_str(&env, "Client is right"), &0i128);
+        &String::from_str(&env, "Client is right"));
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter3,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Looks ok to me"), &0i128);
+        &String::from_str(&env, "Looks ok to me"));
 
     // First resolution — not final yet (max_appeals=2, appeal_count=0).
-    // The escrow callback (which returns funds to client) is only invoked on final resolution.
-    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id, &false);
+    // Resolution is final in reputation-based voting (no appeals)
+    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id);
     assert_eq!(result, DisputeStatus::ResolvedForClient);
 
-    // Funds remain in escrow; no transfer yet.
-    assert_eq!(token.balance(&client), 7_000); // 10000 - 3000 (funded); no refund yet
+    // Funds are refunded to client immediately
+    assert_eq!(token.balance(&client), 9_000); // 10000 - 3000 (funded) + 2000 (refund)
     assert_eq!(token.balance(&freelancer), 1_000); // Only first milestone was paid
-    assert_eq!(token.balance(&escrow_id), 2_000); // Second milestone still locked
+    assert_eq!(token.balance(&escrow_id), 0); // All funds distributed
 
-    // Job remains InProgress until the escrow callback is invoked.
+    // Job is cancelled
     let job = escrow_client.get_job(&job_id);
-    assert_eq!(job.status, JobStatus::InProgress);
+    assert_eq!(job.status, JobStatus::Cancelled);
 }
 
 #[test]
@@ -521,27 +510,23 @@ fn test_duplicate_vote_on_dispute_fails() {
         &client,
         &String::from_str(&env, "Issue"),
         &3,
-        &0_i128,
-        &token_address,
-        &0_i128,
     );
 
     let voter = Address::generate(&env);
-    mint_tokens(&env, &token_address, &admin, &voter, 20);
 
     // First vote succeeds
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter,
         &VoteChoice::Client,
-        &String::from_str(&env, "First vote"), &10i128);
+        &String::from_str(&env, "First vote"));
 
     // Second vote from same voter should fail
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Trying to vote again"), &10i128);
+        &String::from_str(&env, "Trying to vote again"));
 }
 
 #[test]
@@ -581,9 +566,6 @@ fn test_dispute_with_all_milestones_approved() {
         &client,
         &String::from_str(&env, "Quality issue"),
         &3,
-        &0_i128,
-        &token_address,
-        &0_i128,
     );
 
     // Vote and resolve for freelancer (so they get the funds)
@@ -591,21 +573,17 @@ fn test_dispute_with_all_milestones_approved() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
-    mint_tokens(&env, &token_address, &admin, &voter1, 10);
-    mint_tokens(&env, &token_address, &admin, &voter2, 10);
-    mint_tokens(&env, &token_address, &admin, &voter3, 10);
+    dispute_client.cast_vote(&dispute_id_val, &voter1, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 1"));
+    dispute_client.cast_vote(&dispute_id_val, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 2"));
+    dispute_client.cast_vote(&dispute_id_val, &voter3, &VoteChoice::Client, &String::from_str(&env, "Vote 3"));
 
-    dispute_client.cast_vote(&dispute_id_val, &voter1, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 1"), &10i128);
-    dispute_client.cast_vote(&dispute_id_val, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "Vote 2"), &10i128);
-    dispute_client.cast_vote(&dispute_id_val, &voter3, &VoteChoice::Client, &String::from_str(&env, "Vote 3"), &10i128);
-
-    // First resolution — not final yet (max_appeals=2, appeal_count=0).
-    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id, &false);
+    // Resolution is final in reputation-based voting (no appeals)
+    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 
-    // Funds remain in escrow; escrow callback not yet invoked.
+    // Funds are transferred immediately to freelancer
     let job = escrow_client.get_job(&job_id);
-    assert_eq!(job.status, JobStatus::InProgress);
-    assert_eq!(token.balance(&freelancer), 0);
-    assert_eq!(token.balance(&escrow_id), 2_000);
+    assert_eq!(job.status, JobStatus::Completed);
+    assert_eq!(token.balance(&freelancer), 2_000);
+    assert_eq!(token.balance(&escrow_id), 0);
 }
