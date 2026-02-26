@@ -80,7 +80,7 @@ pub struct Job {
     pub auto_refund_after: u64,
 }
 
-const JOB_COUNT: &str = "JOB_COUNT";
+const MAX_FEE_BPS: u32 = 1000; // 10%
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -111,7 +111,7 @@ fn require_admin(env: &Env, admin: &Address) -> Result<(), EscrowError> {
     let stored_admin: Address = env
         .storage()
         .instance()
-        .get(&DataKey::Admin)
+        .get(&symbol_short!("ADM"))
         .ok_or(EscrowError::NotAdmin)?;
 
     if admin != &stored_admin {
@@ -142,22 +142,27 @@ pub struct EscrowContract;
 
 #[contractimpl]
 impl EscrowContract {
-    /// Initialize the contract with an admin address.
-    pub fn initialize(env: Env, admin: Address) -> Result<(), EscrowError> {
-        admin.require_auth();
-
-        // Check if already initialized
-        if env.storage().instance().has(&DataKey::Admin) {
-            return Err(EscrowError::NotAdmin);
+    /// Initialize the contract with admin, treasury, and fee basis points.
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        treasury: Address,
+        fee_bps: u32,
+    ) -> Result<(), EscrowError> {
+        if env.storage().instance().has(&symbol_short!("ADM")) {
+            return Err(EscrowError::AlreadyInitialized);
+        }
+        if fee_bps > MAX_FEE_BPS {
+            return Err(EscrowError::InvalidStatus);
         }
 
-        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&symbol_short!("ADM"), &admin);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("TRE"), &treasury);
+        env.storage().instance().set(&symbol_short!("FEE"), &fee_bps);
         env.storage().instance().set(&DataKey::Paused, &false);
         bump_job_count_ttl(&env);
-
-        // Emit event
-        env.events()
-            .publish((symbol_short!("escrow"), symbol_short!("init")), (admin,));
 
         Ok(())
     }
@@ -193,6 +198,38 @@ impl EscrowContract {
             (admin, env.ledger().timestamp()),
         );
 
+        Ok(())
+    }
+
+    /// Set a new fee basis points value (admin only).
+    pub fn set_fee_bps(env: Env, new_fee: u32) -> Result<(), EscrowError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("ADM"))
+            .ok_or(EscrowError::Unauthorized)?;
+        admin.require_auth();
+
+        if new_fee > MAX_FEE_BPS {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        env.storage().instance().set(&symbol_short!("FEE"), &new_fee);
+        Ok(())
+    }
+
+    /// Set a new treasury address (admin only).
+    pub fn set_treasury(env: Env, new_treasury: Address) -> Result<(), EscrowError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("ADM"))
+            .ok_or(EscrowError::Unauthorized)?;
+        admin.require_auth();
+
+        env.storage()
+            .instance()
+            .set(&symbol_short!("TRE"), &new_treasury);
         Ok(())
     }
 
@@ -483,10 +520,31 @@ impl EscrowContract {
 
         // Release payment for this milestone
         let token_client = token::Client::new(&env, &job.token);
+
+        let fee_bps: u32 = env.storage().instance().get(&symbol_short!("FEE")).unwrap_or(0);
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("TRE"))
+            .unwrap_or(env.current_contract_address()); // Fallback to contract itself if not set, though it should be
+
+        let fee_amount = (milestone.amount * fee_bps as i128) / 10_000;
+        let freelancer_amount = milestone.amount - fee_amount;
+
+        if fee_amount > 0 {
+            token_client.transfer(&env.current_contract_address(), &treasury, &fee_amount);
+
+            // Emit fee collected event
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("fee")),
+                (job_id, milestone_id, fee_amount, treasury.clone()),
+            );
+        }
+
         token_client.transfer(
             &env.current_contract_address(),
             &job.freelancer,
-            &milestone.amount,
+            &freelancer_amount,
         );
 
         let updated = Milestone {
@@ -529,6 +587,7 @@ impl EscrowContract {
         client: Address,
     ) -> Result<i128, EscrowError> {
         client.require_auth();
+        require_not_paused(&env)?;
 
         let mut job: Job = env
             .storage()
@@ -577,10 +636,31 @@ impl EscrowContract {
         // Transfer all payments in a single transaction
         if total_released > 0 {
             let token_client = token::Client::new(&env, &job.token);
+
+            let fee_bps: u32 = env.storage().instance().get(&symbol_short!("FEE")).unwrap_or(0);
+            let treasury: Address = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("TRE"))
+                .unwrap_or(env.current_contract_address());
+
+            let fee_amount = (total_released * fee_bps as i128) / 10_000;
+            let freelancer_amount = total_released - fee_amount;
+
+            if fee_amount > 0 {
+                token_client.transfer(&env.current_contract_address(), &treasury, &fee_amount);
+
+                // Emit fee collected event for the batch
+                env.events().publish(
+                    (symbol_short!("escrow"), symbol_short!("fee_batch")),
+                    (job_id, fee_amount, treasury),
+                );
+            }
+
             token_client.transfer(
                 &env.current_contract_address(),
                 &job.freelancer,
-                &total_released,
+                &freelancer_amount,
             );
         }
 
