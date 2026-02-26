@@ -1,7 +1,11 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{symbol_short, testutils::{Address as _, Ledger}, Env, String, Vec};
+use soroban_sdk::{
+    symbol_short,
+    testutils::{Address as _, Ledger},
+    Env, String, Vec,
+};
 use stellar_market_escrow::{EscrowContract, Job, JobStatus};
 
 // The minimum stake required per review (must match lib.rs constant)
@@ -88,7 +92,14 @@ fn test_submit_review_client_reviews_freelancer() {
     let token_addr = create_token(&env, &token_admin);
     mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
 
     reputation_client.submit_review(
         &escrow_id,
@@ -119,9 +130,22 @@ fn test_submit_review_freelancer_reviews_client() {
     let freelancer_addr = Address::generate(&env);
     let token_admin = Address::generate(&env);
     let token_addr = create_token(&env, &token_admin);
-    mint(&env, &token_addr, &token_admin, &freelancer_addr, 100_000_000);
+    mint(
+        &env,
+        &token_addr,
+        &token_admin,
+        &freelancer_addr,
+        100_000_000,
+    );
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
 
     reputation_client.submit_review(
         &escrow_id,
@@ -335,7 +359,14 @@ fn test_job_not_completed() {
     mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
 
     // Job is InProgress, not Completed
-    setup_in_progress_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
+    setup_in_progress_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
 
     reputation_client.submit_review(
         &escrow_id,
@@ -366,7 +397,14 @@ fn test_not_job_participant() {
     let token_addr = create_token(&env, &token_admin);
     mint(&env, &token_addr, &token_admin, &outsider, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
 
     // outsider and another were not part of job 1
     reputation_client.submit_review(
@@ -397,7 +435,14 @@ fn test_reviewer_not_participant_but_reviewee_is() {
     let token_addr = create_token(&env, &token_admin);
     mint(&env, &token_addr, &token_admin, &outsider, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
 
     // outsider tries to review the freelancer — reviewer is not a participant
     reputation_client.submit_review(
@@ -713,7 +758,7 @@ fn test_multiple_tier_badges() {
     assert_eq!(badges.len(), 1);
     assert_eq!(badges.get(0).unwrap().badge_type, ReputationTier::Bronze);
 
-    // Second review: Silver tier 
+    // Second review: Silver tier
     // avg = (2*MIN + 5*MIN) * 100 / (2*MIN) = 350 -> Silver
     reputation_client.submit_review(
         &escrow_id,
@@ -929,7 +974,8 @@ fn test_decay_calculation() {
 
     // Advance 1 year (31,536,000 seconds)
     // 50% decay per year -> weight should be 50% of original, but ratio is the same for a single review
-    env.ledger().with_mut(|l| l.timestamp = start_time + 31_536_000);
+    env.ledger()
+        .with_mut(|l| l.timestamp = start_time + 31_536_000);
     assert_eq!(reputation_client.get_average_rating(&reviewee), 500);
 
     // To test actual decay, add a second review at year 1
@@ -961,7 +1007,8 @@ fn test_decay_calculation() {
     // Weighted score: 0 + 1 * MIN/2 = MIN/2
     // Total weight: MIN/2
     // Avg = 1.0 * 100 = 100
-    env.ledger().with_mut(|l| l.timestamp = start_time + 63_072_000);
+    env.ledger()
+        .with_mut(|l| l.timestamp = start_time + 63_072_000);
     assert_eq!(reputation_client.get_average_rating(&reviewee), 100);
 }
 
@@ -1080,4 +1127,181 @@ fn test_rate_limit_pass_after_time() {
 
     assert_eq!(reputation_client.get_review_count(&reviewee1), 1);
     assert_eq!(reputation_client.get_review_count(&reviewee2), 1);
+}
+
+#[test]
+fn test_register_referral_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+
+    let referrer = Address::generate(&env);
+    let referree = Address::generate(&env);
+
+    // Register referral
+    reputation_client.register_referral(&referree, &referrer);
+
+    // Assert referrer stats reflect the registration
+    let stats = reputation_client.get_referral_stats(&referrer);
+    assert_eq!(stats.total_referrals, 1);
+    assert_eq!(stats.earned_bonus, 0); // No bonus until a job is completed
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #14)")]
+fn test_register_referral_self_referral_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+
+    let user = Address::generate(&env);
+
+    // User tries to refer themselves
+    reputation_client.register_referral(&user, &user);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #13)")]
+fn test_register_referral_already_referred_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+
+    let referrer_1 = Address::generate(&env);
+    let referrer_2 = Address::generate(&env);
+    let referree = Address::generate(&env);
+
+    reputation_client.register_referral(&referree, &referrer_1);
+
+    // Changing referrers is not allowed
+    reputation_client.register_referral(&referree, &referrer_2);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_register_referral_circular_dependency() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    reputation_client.register_referral(&user_b, &user_a);
+
+    // user_b tries to refer user_a
+    reputation_client.register_referral(&user_a, &user_b);
+}
+
+#[test]
+fn test_referral_bonus_granted_on_first_job() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+
+    let admin = Address::generate(&env);
+    reputation_client.initialize(&admin, &0); // Set no decay for simpler testing
+
+    let referrer = Address::generate(&env);
+    let client = Address::generate(&env);
+    let freelancer = Address::generate(&env); // Freelancer will be referred
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+
+    mint(&env, &token_addr, &token_admin, &client, 100_000_000);
+
+    // Register the referral BEFORE the job finishes
+    reputation_client.register_referral(&freelancer, &referrer);
+
+    setup_completed_job(&env, &escrow_id, 1u64, &client, &freelancer, &token_addr);
+
+    // Client submits review. During this submission, the contract hooks `process_referral_bonus`
+    reputation_client.submit_review(
+        &escrow_id,
+        &client,
+        &freelancer,
+        &1u64,
+        &5u32,
+        &String::from_str(&env, "Good job"),
+        &MIN_STAKE,
+    );
+
+    // Check Referrer's Stats
+    let stats = reputation_client.get_referral_stats(&referrer);
+    assert_eq!(stats.total_referrals, 1);
+
+    // Earned bonus = DEFAULT_REFERRAL_BONUS (5) * MIN_STAKE (10_000_000)
+    assert_eq!(stats.earned_bonus, 5 * MIN_STAKE as u64);
+
+    // Check Referrer's Reputation (they should have received the bonus reputation payload natively)
+    let rep = reputation_client.get_reputation(&referrer);
+    assert_eq!(rep.total_score, 5 * MIN_STAKE as u64);
+    assert_eq!(rep.total_weight, MIN_STAKE as u64);
+}
+
+#[test]
+fn test_referral_bonus_not_granted_twice() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+
+    let admin = Address::generate(&env);
+    reputation_client.initialize(&admin, &0);
+
+    let referrer = Address::generate(&env);
+    let client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+
+    mint(&env, &token_addr, &token_admin, &client, 100_000_000);
+    mint(&env, &token_addr, &token_admin, &freelancer, 100_000_000); // So freelancer can review back
+
+    reputation_client.register_referral(&freelancer, &referrer);
+    setup_completed_job(&env, &escrow_id, 1u64, &client, &freelancer, &token_addr);
+
+    // Client submits review -> Process bonus triggers for both client and freelancer
+    reputation_client.submit_review(
+        &escrow_id,
+        &client,
+        &freelancer,
+        &1u64,
+        &5u32,
+        &String::from_str(&env, "First review"),
+        &MIN_STAKE,
+    );
+
+    let initial_stats = reputation_client.get_referral_stats(&referrer);
+
+    // Advance ledger to clear rate limits
+    env.ledger().with_mut(|l| l.sequence_number = 200);
+
+    // Freelancer reviews client on the SAME job (or they do a new job, doesn't matter)
+    reputation_client.submit_review(
+        &escrow_id,
+        &freelancer,
+        &client,
+        &1u64,
+        &4u32,
+        &String::from_str(&env, "Second review"),
+        &MIN_STAKE,
+    );
+
+    // Referrer stats should NOT have increased (bonus paid only once per referred user)
+    let subsequent_stats = reputation_client.get_referral_stats(&referrer);
+    assert_eq!(initial_stats.earned_bonus, subsequent_stats.earned_bonus);
 }
