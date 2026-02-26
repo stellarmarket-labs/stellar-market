@@ -92,6 +92,7 @@ model User {
   suspendedAt            DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
+  availability           Boolean   @default(true)
 
   clientJobs     Job[]         @relation("ClientJobs")
   freelancerJobs Job[]         @relation("FreelancerJobs")
