@@ -1,8 +1,9 @@
 import { Router, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, NotificationType } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validate } from "../middleware/validation";
 import { asyncHandler } from "../middleware/error";
+import { NotificationService } from "../services/notification.service";
 import {
   createMessageSchema,
   updateMessageSchema,
@@ -12,10 +13,60 @@ import {
 } from "../schemas";
 
 const router = Router();
+/**
+ * @swagger
+ * tags:
+ *   name: Messages
+ *   description: Messaging endpoints
+ */
 const prisma = new PrismaClient();
 
 // Send a message
 router.post(
+  /**
+   * @swagger
+   * /messages:
+   *   post:
+   *     summary: Send a message
+   *     tags: [Messages]
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/CreateMessageRequest'
+   *           examples:
+   *             example:
+   *               value:
+   *                 receiverId: "uuid"
+   *                 jobId: "uuid"
+   *                 content: "Hello!"
+   *     responses:
+   *       201:
+   *         description: Message sent
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/MessageResponse'
+   */
+  /**
+   * @swagger
+   * /messages:
+   *   get:
+   *     summary: Get messages
+   *     tags: [Messages]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: List of messages
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/MessagesResponse'
+   */
   "/",
   authenticate,
   validate({ body: createMessageSchema }),
@@ -33,6 +84,15 @@ router.post(
         sender: { select: { id: true, username: true, avatarUrl: true } },
         receiver: { select: { id: true, username: true, avatarUrl: true } },
       },
+    });
+
+    // Notify the receiver
+    await NotificationService.sendNotification({
+      userId: receiverId,
+      type: NotificationType.NEW_MESSAGE,
+      title: "New Message",
+      message: `You received a new message from ${message.sender.username}`,
+      metadata: { messageId: message.id, jobId: message.jobId },
     });
 
     res.status(201).json(message);

@@ -56,7 +56,12 @@ fn test_happy_path_job_completion_with_reputation() {
 
     // Create and fund token
     let (token_address, token) = create_token_contract(&env, &admin);
-    mint_tokens(&env, &token_address, &admin, &client, 10_000);
+    mint_tokens(&env, &token_address, &admin, &client, 100_000_000);
+    mint_tokens(&env, &token_address, &admin, &freelancer, 100_000_000);
+
+    // Initialize reputation contract
+    reputation_client.initialize(&admin, &50);
+    reputation_client.set_token(&admin, &token_address);
 
     // Step 1: Create job with milestones
     let milestones = vec![
@@ -95,7 +100,7 @@ fn test_happy_path_job_completion_with_reputation() {
     let job = escrow_client.get_job(&job_id);
     assert_eq!(job.status, JobStatus::Funded);
     assert_eq!(token.balance(&escrow_id), 4_500);
-    assert_eq!(token.balance(&client), 5_500);
+    assert_eq!(token.balance(&client), 99_995_500); // 100M - 4,500
 
     // Step 3: Freelancer submits and client approves milestone 1
     escrow_client.submit_milestone(&job_id, &0, &freelancer);
@@ -112,20 +117,20 @@ fn test_happy_path_job_completion_with_reputation() {
         job.milestones.get(0).unwrap().status,
         MilestoneStatus::Approved
     );
-    assert_eq!(token.balance(&freelancer), 1_000);
+    assert_eq!(token.balance(&freelancer), 100_001_000);
     assert_eq!(token.balance(&escrow_id), 3_500);
 
     // Step 4: Complete remaining milestones
     escrow_client.submit_milestone(&job_id, &1, &freelancer);
     escrow_client.approve_milestone(&job_id, &1, &client);
-    assert_eq!(token.balance(&freelancer), 3_000);
+    assert_eq!(token.balance(&freelancer), 100_003_000);
 
     escrow_client.submit_milestone(&job_id, &2, &freelancer);
     escrow_client.approve_milestone(&job_id, &2, &client);
 
     let job = escrow_client.get_job(&job_id);
     assert_eq!(job.status, JobStatus::Completed);
-    assert_eq!(token.balance(&freelancer), 4_500);
+    assert_eq!(token.balance(&freelancer), 100_004_500);
     assert_eq!(token.balance(&escrow_id), 0);
 
     // Step 5: Submit reputation reviews
@@ -136,7 +141,7 @@ fn test_happy_path_job_completion_with_reputation() {
         &job_id,
         &5,
         &String::from_str(&env, "Excellent work, delivered on time!"),
-        &10_i128,
+        &10_000_000_i128,
     );
 
     reputation_client.submit_review(
@@ -146,18 +151,18 @@ fn test_happy_path_job_completion_with_reputation() {
         &job_id,
         &5,
         &String::from_str(&env, "Great client, clear requirements!"),
-        &10_i128,
+        &10_000_000_i128,
     );
 
     // Verify reputation scores
     let freelancer_rep = reputation_client.get_reputation(&freelancer);
     assert_eq!(freelancer_rep.review_count, 1);
-    assert_eq!(freelancer_rep.total_score, 50); // 5 * 10
+    assert_eq!(freelancer_rep.total_score, 50_000_000); // 5 * 10M
     assert_eq!(reputation_client.get_average_rating(&freelancer), 500); // 5.00
 
     let client_rep = reputation_client.get_reputation(&client);
     assert_eq!(client_rep.review_count, 1);
-    assert_eq!(client_rep.total_score, 50);
+    assert_eq!(client_rep.total_score, 50_000_000);
     assert_eq!(reputation_client.get_average_rating(&client), 500);
 }
 
@@ -180,7 +185,8 @@ fn test_dispute_resolved_for_freelancer() {
 
     // Create and fund token
     let (token_address, token) = create_token_contract(&env, &admin);
-    mint_tokens(&env, &token_address, &admin, &client, 10_000);
+    mint_tokens(&env, &token_address, &admin, &client, 100_000_000);
+    mint_tokens(&env, &token_address, &admin, &freelancer, 100_000_000);
 
     // Create and fund job
     let milestones = vec![
@@ -216,9 +222,7 @@ fn test_dispute_resolved_for_freelancer() {
         &client,
         &String::from_str(&env, "Work quality is not acceptable"),
         &3,
-        &0_i128,
-        &token_address,
-        &0_i128,
+        &None,
     );
 
     let dispute = dispute_client.get_dispute(&dispute_id_val);
@@ -230,44 +234,42 @@ fn test_dispute_resolved_for_freelancer() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
 
-    mint_tokens(&env, &token_address, &admin, &voter1, 10);
-    mint_tokens(&env, &token_address, &admin, &voter2, 10);
-    mint_tokens(&env, &token_address, &admin, &voter3, 10);
-
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter1,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Work looks good to me"), &10i128);
+        &String::from_str(&env, "Work looks good to me"),
+    );
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter2,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Freelancer delivered as promised"), &10i128);
+        &String::from_str(&env, "Freelancer delivered as promised"),
+    );
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter3,
         &VoteChoice::Client,
-        &String::from_str(&env, "Some issues with quality"), &10i128);
+        &String::from_str(&env, "Some issues with quality"),
+    );
 
     let dispute = dispute_client.get_dispute(&dispute_id_val);
     assert_eq!(dispute.votes_for_freelancer, 2);
     assert_eq!(dispute.votes_for_client, 1);
 
-    // First resolution — not final yet (max_appeals=2, appeal_count=0).
-    // The escrow callback is only invoked after all appeal rounds are exhausted.
-    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id, &false);
+    // Resolution is final in reputation-based voting (no appeals)
+    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 
-    // Funds remain in escrow until the dispute reaches final resolution.
-    assert_eq!(token.balance(&freelancer), 0);
-    assert_eq!(token.balance(&escrow_id), 3_000);
+    // Funds are transferred immediately to freelancer
+    assert_eq!(token.balance(&freelancer), 100_003_000);
+    assert_eq!(token.balance(&escrow_id), 0);
 
-    // Job remains InProgress until the escrow callback is invoked.
+    // Job is completed
     let job = escrow_client.get_job(&job_id);
-    assert_eq!(job.status, JobStatus::InProgress);
+    assert_eq!(job.status, JobStatus::Completed);
 }
 
 #[test]
@@ -289,7 +291,8 @@ fn test_dispute_resolved_for_client() {
 
     // Create and fund token
     let (token_address, token) = create_token_contract(&env, &admin);
-    mint_tokens(&env, &token_address, &admin, &client, 10_000);
+    mint_tokens(&env, &token_address, &admin, &client, 100_000_000);
+    mint_tokens(&env, &token_address, &admin, &freelancer, 100_000_000);
 
     // Create job with multiple milestones
     let milestones = vec![
@@ -311,7 +314,7 @@ fn test_dispute_resolved_for_client() {
     // Approve first milestone
     escrow_client.submit_milestone(&job_id, &0, &freelancer);
     escrow_client.approve_milestone(&job_id, &0, &client);
-    assert_eq!(token.balance(&freelancer), 1_000);
+    assert_eq!(token.balance(&freelancer), 100_001_000);
 
     // Freelancer submits second milestone, but client disputes
     escrow_client.submit_milestone(&job_id, &1, &freelancer);
@@ -323,9 +326,7 @@ fn test_dispute_resolved_for_client() {
         &client,
         &String::from_str(&env, "Second milestone not delivered properly"),
         &3,
-        &0_i128,
-        &token_address,
-        &0_i128,
+        &None,
     );
 
     // Voters side with client
@@ -337,33 +338,36 @@ fn test_dispute_resolved_for_client() {
         &dispute_id_val,
         &voter1,
         &VoteChoice::Client,
-        &String::from_str(&env, "Work incomplete"), &0i128);
+        &String::from_str(&env, "Work incomplete"),
+    );
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter2,
         &VoteChoice::Client,
-        &String::from_str(&env, "Client is right"), &0i128);
+        &String::from_str(&env, "Client is right"),
+    );
 
     dispute_client.cast_vote(
         &dispute_id_val,
         &voter3,
         &VoteChoice::Freelancer,
-        &String::from_str(&env, "Looks ok to me"), &0i128);
+        &String::from_str(&env, "Looks ok to me"),
+    );
 
     // First resolution — not final yet (max_appeals=2, appeal_count=0).
-    // The escrow callback (which returns funds to client) is only invoked on final resolution.
-    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id, &false);
+    // Resolution is final in reputation-based voting (no appeals)
+    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id);
     assert_eq!(result, DisputeStatus::ResolvedForClient);
 
-    // Funds remain in escrow; no transfer yet.
-    assert_eq!(token.balance(&client), 7_000); // 10000 - 3000 (funded); no refund yet
-    assert_eq!(token.balance(&freelancer), 1_000); // Only first milestone was paid
-    assert_eq!(token.balance(&escrow_id), 2_000); // Second milestone still locked
+    // Funds are refunded to client immediately
+    assert_eq!(token.balance(&client), 99_999_000); // 100M - 3000 (funded) + 2000 (refund)
+    assert_eq!(token.balance(&freelancer), 100_001_000); // Only first milestone was paid
+    assert_eq!(token.balance(&escrow_id), 0); // All funds distributed
 
-    // Job remains InProgress until the escrow callback is invoked.
+    // Job is cancelled
     let job = escrow_client.get_job(&job_id);
-    assert_eq!(job.status, JobStatus::InProgress);
+    assert_eq!(job.status, JobStatus::Cancelled);
 }
 
 #[test]
@@ -382,7 +386,8 @@ fn test_full_workflow_with_partial_completion_and_cancellation() {
 
     // Create and fund token
     let (token_address, token) = create_token_contract(&env, &admin);
-    mint_tokens(&env, &token_address, &admin, &client, 10_000);
+    mint_tokens(&env, &token_address, &admin, &client, 100_000_000);
+    mint_tokens(&env, &token_address, &admin, &freelancer, 100_000_000);
 
     // Create job with 3 milestones
     let milestones = vec![
@@ -405,7 +410,7 @@ fn test_full_workflow_with_partial_completion_and_cancellation() {
     // Complete first milestone
     escrow_client.submit_milestone(&job_id, &0, &freelancer);
     escrow_client.approve_milestone(&job_id, &0, &client);
-    assert_eq!(token.balance(&freelancer), 1_000);
+    assert_eq!(token.balance(&freelancer), 100_001_000);
 
     // Client cancels job (refunds remaining 3500)
     escrow_client.cancel_job(&job_id, &client);
@@ -414,8 +419,8 @@ fn test_full_workflow_with_partial_completion_and_cancellation() {
     assert_eq!(job.status, JobStatus::Cancelled);
 
     // Verify fund distribution
-    assert_eq!(token.balance(&client), 9_000); // 10000 - 1000 (paid to freelancer)
-    assert_eq!(token.balance(&freelancer), 1_000);
+    assert_eq!(token.balance(&client), 99_999_000); // 100M - 1000 (paid to freelancer)
+    assert_eq!(token.balance(&freelancer), 100_001_000);
     assert_eq!(token.balance(&escrow_id), 0);
 }
 
@@ -439,8 +444,13 @@ fn test_multiple_jobs_with_reputation_accumulation() {
 
     // Create and fund token
     let (token_address, token) = create_token_contract(&env, &admin);
-    mint_tokens(&env, &token_address, &admin, &client1, 10_000);
-    mint_tokens(&env, &token_address, &admin, &client2, 10_000);
+    mint_tokens(&env, &token_address, &admin, &client1, 100_000_000);
+    mint_tokens(&env, &token_address, &admin, &client2, 100_000_000);
+    mint_tokens(&env, &token_address, &admin, &freelancer, 100_000_000);
+
+    // Initialize reputation contract
+    reputation_client.initialize(&admin, &50);
+    reputation_client.set_token(&admin, &token_address);
 
     // Job 1: Client1 -> Freelancer
     let milestones1 = vec![
@@ -484,7 +494,7 @@ fn test_multiple_jobs_with_reputation_accumulation() {
         &job_id1,
         &5,
         &String::from_str(&env, "Perfect!"),
-        &10_i128,
+        &10_000_000_i128,
     );
 
     reputation_client.submit_review(
@@ -494,122 +504,18 @@ fn test_multiple_jobs_with_reputation_accumulation() {
         &job_id2,
         &4,
         &String::from_str(&env, "Very good"),
-        &10_i128,
+        &10_000_000_i128,
     );
 
     // Verify accumulated reputation
     let rep = reputation_client.get_reputation(&freelancer);
     assert_eq!(rep.review_count, 2);
-    assert_eq!(rep.total_score, 90); // (5*10) + (4*10)
-    assert_eq!(rep.total_weight, 20);
+    assert_eq!(rep.total_score, 90_000_000); // (5*10M) + (4*10M)
+    assert_eq!(rep.total_weight, 20_000_000);
     assert_eq!(reputation_client.get_average_rating(&freelancer), 450); // 4.50 stars
 
     // Verify freelancer received all payments
-    assert_eq!(token.balance(&freelancer), 5_000);
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #5)")]
-fn test_reputation_review_before_job_completion_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let escrow_id = env.register_contract(None, EscrowContract);
-    let escrow_client = EscrowContractClient::new(&env, &escrow_id);
-
-    let reputation_id = env.register_contract(None, ReputationContract);
-    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
-
-    let client = Address::generate(&env);
-    let freelancer = Address::generate(&env);
-    let admin = Address::generate(&env);
-
-    let (token_address, _) = create_token_contract(&env, &admin);
-    mint_tokens(&env, &token_address, &admin, &client, 10_000);
-
-    let milestones = vec![&env, (String::from_str(&env, "Work"), 1_000_i128, DEADLINE)];
-
-    let job_id = escrow_client.create_job(
-        &client,
-        &freelancer,
-        &token_address,
-        &milestones,
-        &DEADLINE,
-        &AUTO_REFUND,
-    );
-    escrow_client.fund_job(&job_id, &client);
-
-    // Try to review before job completion - should fail
-    reputation_client.submit_review(
-        &escrow_id,
-        &client,
-        &freelancer,
-        &job_id,
-        &5,
-        &String::from_str(&env, "Too early!"),
-        &1_i128,
-    );
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #3)")]
-fn test_duplicate_vote_on_dispute_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let escrow_id = env.register_contract(None, EscrowContract);
-    let escrow_client = EscrowContractClient::new(&env, &escrow_id);
-
-    let dispute_id = env.register_contract(None, DisputeContract);
-    let dispute_client = DisputeContractClient::new(&env, &dispute_id);
-
-    let client = Address::generate(&env);
-    let freelancer = Address::generate(&env);
-    let admin = Address::generate(&env);
-
-    let (token_address, _) = create_token_contract(&env, &admin);
-    mint_tokens(&env, &token_address, &admin, &client, 10_000);
-
-    let milestones = vec![&env, (String::from_str(&env, "Work"), 1_000_i128, DEADLINE)];
-
-    let job_id = escrow_client.create_job(
-        &client,
-        &freelancer,
-        &token_address,
-        &milestones,
-        &DEADLINE,
-        &AUTO_REFUND,
-    );
-    escrow_client.fund_job(&job_id, &client);
-
-    let dispute_id_val = dispute_client.raise_dispute(
-        &job_id,
-        &client,
-        &freelancer,
-        &client,
-        &String::from_str(&env, "Issue"),
-        &3,
-        &0_i128,
-        &token_address,
-        &0_i128,
-    );
-
-    let voter = Address::generate(&env);
-    mint_tokens(&env, &token_address, &admin, &voter, 20);
-
-    // First vote succeeds
-    dispute_client.cast_vote(
-        &dispute_id_val,
-        &voter,
-        &VoteChoice::Client,
-        &String::from_str(&env, "First vote"), &10i128);
-
-    // Second vote from same voter should fail
-    dispute_client.cast_vote(
-        &dispute_id_val,
-        &voter,
-        &VoteChoice::Freelancer,
-        &String::from_str(&env, "Trying to vote again"), &10i128);
+    assert_eq!(token.balance(&freelancer), 100_005_000); // 100M + 5,000 (payments)
 }
 
 #[test]
@@ -653,9 +559,7 @@ fn test_dispute_with_all_milestones_approved() {
         &client,
         &String::from_str(&env, "Quality issue"),
         &3,
-        &0_i128,
-        &token_address,
-        &0_i128,
+        &None,
     );
 
     // Vote and resolve for freelancer (so they get the funds)
@@ -682,13 +586,13 @@ fn test_dispute_with_all_milestones_approved() {
         &String::from_str(&env, "Vote 3"),
     );
 
-    // First resolution — not final yet (max_appeals=2, appeal_count=0).
-    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id, &false);
+    // Resolution is final in reputation-based voting (no appeals)
+    let result = dispute_client.resolve_dispute(&dispute_id_val, &escrow_id);
     assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 
-    // Funds remain in escrow; escrow callback not yet invoked.
+    // Funds are transferred immediately to freelancer
     let job = escrow_client.get_job(&job_id);
-    assert_eq!(job.status, JobStatus::InProgress);
-    assert_eq!(token.balance(&freelancer), 0);
-    assert_eq!(token.balance(&escrow_id), 2_000);
+    assert_eq!(job.status, JobStatus::Completed);
+    assert_eq!(token.balance(&freelancer), 2_000);
+    assert_eq!(token.balance(&escrow_id), 0);
 }

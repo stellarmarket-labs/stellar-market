@@ -2,11 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { Clock, DollarSign, ArrowLeft, MessageSquare, ShieldCheck, AlertCircle, Loader2 } from "lucide-react";
+import { Clock, DollarSign, ArrowLeft, MessageSquare, ShieldCheck, AlertCircle, Loader2, CheckCircle } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
 import { useWallet } from "@/context/WalletContext";
+import { useAuth } from "@/context/AuthContext";
 import StatusBadge from "@/components/StatusBadge";
+import ApplyModal from "@/components/ApplyModal";
+import RaiseDisputeModal from "@/components/RaiseDisputeModal";
 import { Job } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
@@ -14,10 +17,14 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 export default function JobDetailPage() {
   const { id } = useParams();
   const { address, signAndBroadcastTransaction } = useWallet();
+  const { user } = useAuth();
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [disputeModalOpen, setDisputeModalOpen] = useState(false);
+  const [hasApplied, setHasApplied] = useState(false);
 
   const fetchJob = useCallback(async () => {
     try {
@@ -111,6 +118,7 @@ export default function JobDetailPage() {
   }
 
   const isClient = address === job.client.walletAddress;
+  const isOwnJob = user?.id === job.client.id || isClient;
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -122,7 +130,7 @@ export default function JobDetailPage() {
       </Link>
 
       {error && (
-        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3 text-red-500">
+        <div className="mb-6 p-4 bg-theme-error/10 border border-theme-error/20 rounded-lg flex items-start gap-3 text-theme-error">
           <AlertCircle className="flex-shrink-0 mt-0.5" size={18} />
           <p className="text-sm">{error}</p>
         </div>
@@ -239,15 +247,38 @@ export default function JobDetailPage() {
                 </button>
             )}
 
-            {!isClient && job.status === "OPEN" && (
-                <button className="btn-primary w-full">Apply for this Job</button>
+            {!isOwnJob && job.status === "OPEN" && (
+              hasApplied ? (
+                <button
+                  className="btn-secondary w-full flex items-center justify-center gap-2 cursor-default opacity-80"
+                  disabled
+                >
+                  <CheckCircle size={16} /> Applied
+                </button>
+              ) : (
+                <button
+                  className="btn-primary w-full"
+                  onClick={() => setApplyModalOpen(true)}
+                >
+                  Apply for this Job
+                </button>
+              )
             )}
             
             {job.escrowStatus === "FUNDED" && (
-                <div className="p-3 bg-stellar-blue/10 border border-stellar-blue/20 rounded-lg text-xs text-stellar-blue flex items-center gap-2">
+                <div className="p-3 bg-stellar-blue/10 border border-stellar-blue/20 rounded-lg text-xs text-stellar-blue flex items-center gap-2 mb-4">
                     <ShieldCheck size={16} />
                     Funds are secured in escrow
                 </div>
+            )}
+
+            {isOwnJob && (job.status === "IN_PROGRESS" || job.status === "COMPLETED") && job.escrowStatus !== "DISPUTED" && (
+                <button
+                  className="btn-secondary w-full flex items-center justify-center gap-2 border-theme-error text-theme-error hover:bg-theme-error/10"
+                  onClick={() => setDisputeModalOpen(true)}
+                >
+                  <AlertCircle size={18} /> Raise Dispute
+                </button>
             )}
           </div>
 
@@ -276,6 +307,27 @@ export default function JobDetailPage() {
           </div>
         </div>
       </div>
+
+      {job.status === "OPEN" && !isOwnJob && (
+        <ApplyModal
+          job={job}
+          isOpen={applyModalOpen}
+          onClose={() => setApplyModalOpen(false)}
+          onSuccess={() => setHasApplied(true)}
+        />
+      )}
+
+      {isOwnJob && (
+        <RaiseDisputeModal
+          job={job}
+          isOpen={disputeModalOpen}
+          onClose={() => setDisputeModalOpen(false)}
+          onSuccess={() => {
+            setDisputeModalOpen(false);
+            fetchJob();
+          }}
+        />
+      )}
     </div>
   );
 }

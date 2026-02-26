@@ -10,6 +10,7 @@ datasource db {
 enum UserRole {
   CLIENT
   FREELANCER
+  ADMIN
 }
 
 enum JobStatus {
@@ -54,6 +55,25 @@ enum VoteChoice {
   FREELANCER
 }
 
+enum NotificationType {
+  JOB_APPLIED
+  APPLICATION_ACCEPTED
+  MILESTONE_SUBMITTED
+  MILESTONE_APPROVED
+  DISPUTE_RAISED
+  DISPUTE_RESOLVED
+  NEW_MESSAGE
+}
+
+enum DisputeStatus {
+  OPEN
+  REVIEWING
+  VOTING
+  RESOLVED_CLIENT
+  RESOLVED_FREELANCER
+  OVERRIDDEN_BY_ADMIN
+}
+
 model User {
   id            String   @id @default(cuid())
   walletAddress String   @unique
@@ -63,12 +83,21 @@ model User {
   bio           String?
   avatarUrl     String?
   role                   UserRole  @default(FREELANCER)
+  twoFactorSecret        String?
+  twoFactorEnabled       Boolean   @default(false)
+  backupCodes            String[]
   emailVerified          Boolean   @default(false)
   emailVerificationToken String?
   passwordResetToken     String?
   passwordResetExpiry    DateTime?
+  isFlagged              Boolean   @default(false)
+  flagReason             String?
+  isSuspended            Boolean   @default(false)
+  suspendReason          String?
+  suspendedAt            DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
+  availability           Boolean   @default(true)
 
   clientJobs     Job[]         @relation("ClientJobs")
   freelancerJobs Job[]         @relation("FreelancerJobs")
@@ -78,10 +107,14 @@ model User {
   reviewsGiven   Review[]      @relation("ReviewsGiven")
   reviewsReceived Review[]     @relation("ReviewsReceived")
   skills          String[]
-  initiatedDisputes Dispute[]  @relation("InitiatedDisputes")
-  clientDisputes    Dispute[]  @relation("ClientDisputes")
-  freelancerDisputes Dispute[] @relation("FreelancerDisputes")
-  disputeVotes      DisputeVote[]
+  transactionsFrom Transaction[] @relation("TransactionsFrom")
+  transactionsTo   Transaction[] @relation("TransactionsTo")
+  attachments      Attachment[]
+  notifications    Notification[]
+  auditLogs      AuditLog[]
+  initiatedDisputes Dispute[]    @relation("DisputeInitiated")
+  respondedDisputes Dispute[]    @relation("DisputeResponded")
+  votesCast        Vote[]        @relation("VotesCast")
 }
 
 model Job {
@@ -97,6 +130,10 @@ model Job {
   escrowStatus  EscrowStatus @default(UNFUNDED)
   skills       String[]
   deadline     DateTime
+  isFlagged    Boolean   @default(false)
+  flagReason   String?
+  flaggedAt    DateTime?
+  flaggedBy    String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -106,7 +143,9 @@ model Job {
   applications Application[]
   messages     Message[]
   reviews      Review[]
-  disputes     Dispute[]
+  transactions Transaction[]
+  attachments  Attachment[]
+  dispute      Dispute?
 }
 
 model Milestone {
@@ -205,4 +244,98 @@ model DisputeVote {
   voter   User    @relation(fields: [voterId], references: [id])
 
   @@unique([disputeId, voterId])
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  uploaderId   String
+  jobId        String?
+  disputeId    String?
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  url          String
+  createdAt    DateTime @default(now())
+
+  uploader User  @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  job      Job?  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  dispute  Dispute? @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([uploaderId])
+  @@index([jobId])
+  @@index([disputeId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  read      Boolean          @default(false)
+  metadata  Json?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  adminId   String
+  action    String
+  target    String
+  metadata  Json?
+  timestamp DateTime @default(now())
+
+  admin     User     @relation(fields: [adminId], references: [id])
+}
+
+model Dispute {
+  id                 String        @id @default(cuid())
+  jobId              String        @unique
+  contractDisputeId  String?       @unique
+  initiatorId        String
+  respondentId       String
+  reason             String
+  status             DisputeStatus @default(OPEN)
+  votesForClient     Int           @default(0)
+  votesForFreelancer Int           @default(0)
+  minVotes           Int           @default(3)
+  escalated          Boolean       @default(false)
+  outcome            String?
+  resolvedAt         DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  job                Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  initiator          User          @relation("DisputeInitiated", fields: [initiatorId], references: [id])
+  respondent         User          @relation("DisputeResponded", fields: [respondentId], references: [id])
+  votes              Vote[]
+  attachments        Attachment[]
+
+  @@index([jobId])
+  @@index([initiatorId])
+  @@index([respondentId])
+  @@index([status])
+}
+
+model Vote {
+  id        String   @id @default(cuid())
+  disputeId String
+  voterId   String
+  choice    String   // "CLIENT" or "FREELANCER"
+  reason    String
+  createdAt DateTime @default(now())
+
+  dispute   Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  voter     User     @relation("VotesCast", fields: [voterId], references: [id])
+
+  @@unique([disputeId, voterId])
+  @@index([disputeId])
+  @@index([voterId])
 }

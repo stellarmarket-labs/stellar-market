@@ -1,29 +1,24 @@
 import { z } from "zod";
 
-export const createDisputeSchema = z.object({
-  jobId: z.string().min(1, "Job ID is required"),
-  reason: z.string().min(10, "Reason must be at least 10 characters").max(1000, "Reason must not exceed 1000 characters"),
+export const raiseDisputeSchema = z.object({
+  jobId: z.string().cuid({ message: "Invalid job ID format" }),
+  reason: z.string().min(10, { message: "Reason must be at least 10 characters long" }),
+  minVotes: z.number().int().min(3).optional().default(3),
 });
 
-export const getDisputeByIdParamSchema = z.object({
-  id: z.string().min(1, "Dispute ID is required"),
-});
-
-export const getDisputesQuerySchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
-  status: z.string().optional(),
-  jobId: z.string().optional(),
-  userId: z.string().optional(),
-});
-
-export const createDisputeVoteSchema = z.object({
-  choice: z.enum(["CLIENT", "FREELANCER"]),
-  reason: z.string().min(10, "Reason must be at least 10 characters").max(500, "Reason must not exceed 500 characters").optional(),
+export const castVoteSchema = z.object({
+  disputeId: z.string().cuid({ message: "Invalid dispute ID format" }),
+  choice: z.enum(["CLIENT", "FREELANCER"], { 
+    message: "Choice must be either CLIENT or FREELANCER" 
+  }),
+  reason: z.string().min(10, { message: "Please provide a reason for your vote" }),
 });
 
 export const resolveDisputeSchema = z.object({
-  resolution: z.string().min(10, "Resolution must be at least 10 characters").max(1000, "Resolution must not exceed 1000 characters"),
-  winningParty: z.enum(["CLIENT", "FREELANCER"]),
-  onChainDisputeId: z.string().optional(),
+  disputeId: z.string().cuid({ message: "Invalid dispute ID format" }),
+});
+
+export const excludeVoterSchema = z.object({
+  disputeId: z.string().cuid({ message: "Invalid dispute ID format" }),
+  voterWallet: z.string().min(56).max(56, { message: "Invalid Stellar address" }),
 });

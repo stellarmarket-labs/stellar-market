@@ -1,8 +1,9 @@
 import { Router, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, NotificationType } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validate } from "../middleware/validation";
 import { asyncHandler } from "../middleware/error";
+import { NotificationService } from "../services/notification.service";
 import {
   createApplicationSchema,
   updateApplicationSchema,
@@ -13,6 +14,12 @@ import {
 } from "../schemas";
 
 const router = Router();
+/**
+ * @swagger
+ * tags:
+ *   name: Applications
+ *   description: Job application endpoints
+ */
 const prisma = new PrismaClient();
 
 // Apply for a job
@@ -60,6 +67,15 @@ router.post(
       include: {
         freelancer: { select: { id: true, username: true, avatarUrl: true } },
       },
+    });
+
+    // Notify the client
+    await NotificationService.sendNotification({
+      userId: job.clientId,
+      type: NotificationType.JOB_APPLIED,
+      title: "New Job Application",
+      message: `${application.freelancer.username} applied to your job: ${job.title}`,
+      metadata: { jobId, applicationId: application.id },
     });
 
     res.status(201).json(application);
@@ -182,6 +198,15 @@ router.put(
           freelancerId: application.freelancerId,
           status: "IN_PROGRESS",
         },
+      });
+
+      // Notify the freelancer
+      await NotificationService.sendNotification({
+        userId: application.freelancerId,
+        type: NotificationType.APPLICATION_ACCEPTED,
+        title: "Application Accepted",
+        message: `Your application for "${application.job.title}" has been accepted!`,
+        metadata: { jobId: application.jobId, applicationId: application.id },
       });
     }
 

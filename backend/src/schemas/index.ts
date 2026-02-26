@@ -6,4 +6,5 @@ export * from "./milestone";
 export * from "./message";
 export * from "./review";
 export * from "./common";
-export * from "./dispute";
+export * from "./notification";
+export * from "./recommendation";

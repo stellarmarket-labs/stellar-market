@@ -1,474 +1,216 @@
-import { Router, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { Router, Request, Response } from "express";
+import { PrismaClient, JobStatus, DisputeStatus } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
-import { validate } from "../middleware/validation";
 import { asyncHandler } from "../middleware/error";
-import {
-  createDisputeSchema,
-  getDisputeByIdParamSchema,
-  getDisputesQuerySchema,
-  createDisputeVoteSchema,
-  resolveDisputeSchema,
-} from "../schemas";
+import { ContractService } from "../services/contract.service";
+import { raiseDisputeSchema, castVoteSchema, resolveDisputeSchema } from "../schemas/dispute";
+import { z } from "zod";
 
 const router = Router();
 const prisma = new PrismaClient();
 
-// Create a new dispute
-router.post(
-  "/",
-  authenticate,
-  validate({ body: createDisputeSchema }),
-  asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { jobId, reason } = req.body;
-    const userId = req.userId!;
+// Get all disputes (for community voters)
+router.get("/", asyncHandler(async (req: Request, res: Response) => {
+  const disputes = await prisma.dispute.findMany({
+    include: {
+      job: { select: { title: true, budget: true } },
+      initiator: { select: { username: true, walletAddress: true, avatarUrl: true } },
+      respondent: { select: { username: true, walletAddress: true, avatarUrl: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  res.json(disputes);
+}));
 
-    // Fetch the job
-    const job = await prisma.job.findUnique({
-      where: { id: jobId },
-      include: { disputes: true },
-    });
+// Get specific dispute details
+router.get("/:id", asyncHandler(async (req: Request, res: Response) => {
+  const dispute = await prisma.dispute.findUnique({
+    where: { id: req.params.id as string },
+    include: {
+      job: { include: { client: true, freelancer: true } },
+      initiator: { select: { username: true, walletAddress: true, id: true, avatarUrl: true } },
+      respondent: { select: { username: true, walletAddress: true, id: true, avatarUrl: true } },
+      votes: { include: { voter: { select: { username: true, walletAddress: true, avatarUrl: true } } } },
+      attachments: true,
+    },
+  });
 
-    if (!job) {
-      return res.status(404).json({ error: "Job not found." });
-    }
+  if (!dispute) return res.status(404).json({ error: "Dispute not found" });
+  res.json(dispute);
+}));
 
-    // Check if user is a party to the job
-    if (job.clientId !== userId && job.freelancerId !== userId) {
-      return res.status(403).json({ error: "Only job parties can create a dispute." });
-    }
+// Request XDR to raise a dispute
+router.post("/init-raise", authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const data = raiseDisputeSchema.parse(req.body);
+  const job = await prisma.job.findUnique({
+    where: { id: data.jobId },
+    include: { client: true, freelancer: true },
+  });
 
-    // Check if freelancer is assigned
-    if (!job.freelancerId) {
-      return res.status(400).json({ error: "Cannot create dispute for a job without an assigned freelancer." });
-    }
+  if (!job || !job.freelancer) {
+    return res.status(404).json({ error: "Job with assigned freelancer not found." });
+  }
 
-    // Check if there's already an open dispute
-    const existingDispute = job.disputes.find(
-      (d) => d.status === "OPEN" || d.status === "VOTING" || d.status === "APPEALED"
-    );
-    if (existingDispute) {
-      return res.status(400).json({ error: "An active dispute already exists for this job." });
-    }
+  if (job.clientId !== req.userId && job.freelancerId !== req.userId) {
+    return res.status(403).json({ error: "Only job participants can raise a dispute." });
+  }
 
-    // Create the dispute
+  if (!job.contractJobId) {
+    return res.status(400).json({ error: "Job isn't initialized on-chain yet." });
+  }
+
+  // Determine initiator and respondent
+  const isClient = job.clientId === req.userId;
+  const initiator = isClient ? job.client : job.freelancer;
+  const respondent = isClient ? job.freelancer : job.client;
+
+  const xdr = await ContractService.buildRaiseDisputeTx(
+    initiator.walletAddress,
+    parseInt(job.contractJobId),
+    job.client.walletAddress,
+    job.freelancer.walletAddress,
+    data.reason,
+    data.minVotes
+  );
+
+  res.json({ xdr, respondentId: respondent.id });
+}));
+
+// Request XDR to cast a vote
+router.post("/init-vote", authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const data = castVoteSchema.parse(req.body);
+  const dispute = await prisma.dispute.findUnique({
+    where: { id: data.disputeId },
+  });
+
+  if (!dispute || !dispute.contractDisputeId) {
+    return res.status(404).json({ error: "On-chain dispute not found." });
+  }
+
+  const voter = await prisma.user.findUnique({ where: { id: req.userId } });
+  if (!voter) return res.status(404).json({ error: "User not found" });
+
+  const choiceEnum = data.choice === "CLIENT" ? 0 : 1;
+  const xdr = await ContractService.buildCastVoteTx(
+    voter.walletAddress,
+    parseInt(dispute.contractDisputeId),
+    choiceEnum,
+    data.reason
+  );
+
+  res.json({ xdr });
+}));
+
+// Request XDR to resolve dispute 
+router.post("/init-resolve", authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const data = resolveDisputeSchema.parse(req.body);
+  const dispute = await prisma.dispute.findUnique({
+    where: { id: data.disputeId }
+  });
+
+  if (!dispute || !dispute.contractDisputeId) {
+    return res.status(404).json({ error: "On-chain dispute not found." });
+  }
+
+  const caller = await prisma.user.findUnique({ where: { id: req.userId } });
+  if (!caller) return res.status(404).json({ error: "User not found" });
+
+  const xdr = await ContractService.buildResolveDisputeTx(
+    caller.walletAddress,
+    parseInt(dispute.contractDisputeId)
+  );
+
+  res.json({ xdr });
+}));
+
+// Confirm transaction and update local database
+router.post("/confirm-tx", authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const schema = z.object({
+    hash: z.string(),
+    type: z.enum(["RAISE_DISPUTE", "CAST_VOTE", "RESOLVE_DISPUTE"]),
+    jobId: z.string().optional(),
+    disputeId: z.string().optional(),
+    onChainDisputeId: z.number().optional(),
+    reason: z.string().optional(),
+    choice: z.string().optional(),
+    respondentId: z.string().optional(),
+  });
+
+  const data = schema.parse(req.body);
+  const verification = await ContractService.verifyTransaction(data.hash);
+  
+  if (!verification.success) {
+    return res.status(400).json({ error: `Transaction failed or not found: ${verification.error}` });
+  }
+
+  if (data.type === "RAISE_DISPUTE" && data.jobId && data.onChainDisputeId && data.respondentId && data.reason) {
     const dispute = await prisma.dispute.create({
       data: {
-        jobId,
-        clientId: job.clientId,
-        freelancerId: job.freelancerId,
-        initiatorId: userId,
-        reason,
-      },
-      include: {
-        job: {
-          select: {
-            id: true,
-            title: true,
-            status: true,
-          },
-        },
-        client: {
-          select: {
-            id: true,
-            username: true,
-            avatarUrl: true,
-          },
-        },
-        freelancer: {
-          select: {
-            id: true,
-            username: true,
-            avatarUrl: true,
-          },
-        },
-        initiator: {
-          select: {
-            id: true,
-            username: true,
-          },
-        },
-        votes: true,
-      },
-    });
-
-    // Update job status to DISPUTED
-    await prisma.job.update({
-      where: { id: jobId },
-      data: { status: "DISPUTED" },
-    });
-
-    res.status(201).json(dispute);
-  })
-);
-
-// Get all disputes with filters and pagination
-router.get(
-  "/",
-  validate({ query: getDisputesQuerySchema }),
-  asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { page, limit, status, jobId, userId } = req.query as any;
-    const skip = (page - 1) * limit;
-
-    const where: any = {};
-
-    if (status) {
-      const statusList = (status as string).split(",").map((s: string) => s.trim());
-      if (statusList.length === 1) {
-        where.status = statusList[0];
-      } else {
-        where.status = { in: statusList };
+        jobId: data.jobId,
+        contractDisputeId: data.onChainDisputeId.toString(),
+        initiatorId: req.userId!,
+        respondentId: data.respondentId,
+        reason: data.reason,
+        status: DisputeStatus.OPEN,
       }
-    }
-
-    if (jobId) {
-      where.jobId = jobId;
-    }
-
-    if (userId) {
-      where.OR = [
-        { clientId: userId },
-        { freelancerId: userId },
-        { initiatorId: userId },
-      ];
-    }
-
-    const [disputes, total] = await Promise.all([
-      prisma.dispute.findMany({
-        where,
-        include: {
-          job: {
-            select: {
-              id: true,
-              title: true,
-              status: true,
-              budget: true,
-            },
-          },
-          client: {
-            select: {
-              id: true,
-              username: true,
-              avatarUrl: true,
-            },
-          },
-          freelancer: {
-            select: {
-              id: true,
-              username: true,
-              avatarUrl: true,
-            },
-          },
-          initiator: {
-            select: {
-              id: true,
-              username: true,
-            },
-          },
-          _count: {
-            select: { votes: true },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-      }),
-      prisma.dispute.count({ where }),
-    ]);
-
-    res.json({
-      data: disputes,
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
     });
-  })
-);
-
-// Get a single dispute by ID
-router.get(
-  "/:id",
-  validate({ params: getDisputeByIdParamSchema }),
-  asyncHandler(async (req: AuthRequest, res: Response) => {
-    const id = req.params.id as string;
-
-    const dispute = await prisma.dispute.findUnique({
-      where: { id },
-      include: {
-        job: {
-          select: {
-            id: true,
-            title: true,
-            description: true,
-            status: true,
-            budget: true,
-            deadline: true,
-          },
-        },
-        client: {
-          select: {
-            id: true,
-            username: true,
-            avatarUrl: true,
-            email: true,
-          },
-        },
-        freelancer: {
-          select: {
-            id: true,
-            username: true,
-            avatarUrl: true,
-            email: true,
-          },
-        },
-        initiator: {
-          select: {
-            id: true,
-            username: true,
-          },
-        },
-        votes: {
-          include: {
-            voter: {
-              select: {
-                id: true,
-                username: true,
-                avatarUrl: true,
-              },
-            },
-          },
-          orderBy: { createdAt: "desc" },
-        },
-      },
+    
+    await prisma.job.update({
+      where: { id: data.jobId },
+      data: { 
+        status: JobStatus.DISPUTED,
+        escrowStatus: "DISPUTED" 
+      }
     });
-
-    if (!dispute) {
-      return res.status(404).json({ error: "Dispute not found." });
-    }
-
-    res.json(dispute);
-  })
-);
-
-// Submit a vote on a dispute
-router.post(
-  "/:id/votes",
-  authenticate,
-  validate({
-    params: getDisputeByIdParamSchema,
-    body: createDisputeVoteSchema,
-  }),
-  asyncHandler(async (req: AuthRequest, res: Response) => {
-    const disputeId = req.params.id as string;
-    const { choice, reason } = req.body;
-    const voterId = req.userId!;
-
-    // Fetch the dispute
-    const dispute = await prisma.dispute.findUnique({
-      where: { id: disputeId },
-      include: {
-        votes: true,
-      },
-    });
-
-    if (!dispute) {
-      return res.status(404).json({ error: "Dispute not found." });
-    }
-
-    // Check if dispute is open for voting
-    if (dispute.status !== "OPEN" && dispute.status !== "VOTING") {
-      return res.status(400).json({ error: "This dispute is not open for voting." });
-    }
-
-    // Check if voter is a job party (they should not be allowed to vote)
-    if (voterId === dispute.clientId || voterId === dispute.freelancerId) {
-      return res.status(403).json({ error: "Job parties cannot vote on their own dispute." });
-    }
-
-    // Check if user has already voted
-    const existingVote = dispute.votes.find((v) => v.voterId === voterId);
-    if (existingVote) {
-      return res.status(400).json({ error: "You have already voted on this dispute." });
-    }
-
-    // Create the vote
-    const vote = await prisma.disputeVote.create({
+    return res.json({ message: "Dispute raised successfully", dispute });
+  } 
+  
+  else if (data.type === "CAST_VOTE" && data.disputeId && data.choice && data.reason) {
+    const vote = await prisma.vote.create({
       data: {
-        disputeId,
-        voterId,
-        choice,
-        reason,
-      },
-      include: {
-        voter: {
-          select: {
-            id: true,
-            username: true,
-            avatarUrl: true,
-          },
-        },
-      },
+        disputeId: data.disputeId,
+        voterId: req.userId!,
+        choice: data.choice,
+        reason: data.reason
+      }
     });
 
-    // Update dispute status to VOTING if it was OPEN
-    if (dispute.status === "OPEN") {
-      await prisma.dispute.update({
-        where: { id: disputeId },
-        data: { status: "VOTING" },
-      });
-    }
-
-    res.status(201).json(vote);
-  })
-);
-
-// Resolve a dispute (admin/system action)
-router.put(
-  "/:id/resolve",
-  authenticate,
-  validate({
-    params: getDisputeByIdParamSchema,
-    body: resolveDisputeSchema,
-  }),
-  asyncHandler(async (req: AuthRequest, res: Response) => {
-    const disputeId = req.params.id as string;
-    const { resolution, winningParty, onChainDisputeId } = req.body;
-
-    // Fetch the dispute
-    const dispute = await prisma.dispute.findUnique({
-      where: { id: disputeId },
-      include: {
-        job: true,
-      },
-    });
-
-    if (!dispute) {
-      return res.status(404).json({ error: "Dispute not found." });
-    }
-
-    // Check if dispute is already resolved
-    if (dispute.status === "RESOLVED") {
-      return res.status(400).json({ error: "This dispute is already resolved." });
-    }
-
-    // Update the dispute
-    const updatedDispute = await prisma.dispute.update({
-      where: { id: disputeId },
+    const isClient = data.choice === "CLIENT";
+    await prisma.dispute.update({
+      where: { id: data.disputeId },
       data: {
-        status: "RESOLVED",
-        resolution,
-        winningParty,
-        resolvedAt: new Date(),
-        onChainDisputeId: onChainDisputeId || dispute.onChainDisputeId,
-      },
-      include: {
-        job: {
-          select: {
-            id: true,
-            title: true,
-            status: true,
-          },
-        },
-        client: {
-          select: {
-            id: true,
-            username: true,
-            avatarUrl: true,
-          },
-        },
-        freelancer: {
-          select: {
-            id: true,
-            username: true,
-            avatarUrl: true,
-          },
-        },
-        votes: {
-          include: {
-            voter: {
-              select: {
-                id: true,
-                username: true,
-                avatarUrl: true,
-              },
-            },
-          },
-        },
-      },
+        votesForClient: isClient ? { increment: 1 } : undefined,
+        votesForFreelancer: !isClient ? { increment: 1 } : undefined,
+        status: DisputeStatus.VOTING
+      }
+    });
+    return res.json({ message: "Vote cast successfully", vote });
+  }
+
+  else if (data.type === "RESOLVE_DISPUTE" && data.disputeId) {
+    const dispute = await prisma.dispute.findUnique({ where: { id: data.disputeId } });
+    if (!dispute) return res.status(404).json({ error: "Dispute not found" });
+
+    const resolvedStatus = dispute.votesForClient >= dispute.votesForFreelancer 
+      ? DisputeStatus.RESOLVED_CLIENT 
+      : DisputeStatus.RESOLVED_FREELANCER;
+
+    await prisma.dispute.update({
+      where: { id: data.disputeId },
+      data: { status: resolvedStatus }
     });
 
-    // Update job status based on resolution
-    // If client wins, job might be cancelled or refunded
-    // If freelancer wins, job might be completed
-    const newJobStatus = winningParty === "FREELANCER" ? "COMPLETED" : "CANCELLED";
+    // We also mark the job back to COMPLETED or leave it as DISPUTED but resolved?
+    // Let's mark it as COMPLETED since the contract releases funds.
     await prisma.job.update({
       where: { id: dispute.jobId },
-      data: { status: newJobStatus },
+      data: { status: JobStatus.COMPLETED, escrowStatus: "COMPLETED" }
     });
 
-    res.json(updatedDispute);
-  })
-);
+    return res.json({ message: "Dispute resolved successfully", status: resolvedStatus });
+  }
 
-// Webhook endpoint for on-chain dispute updates
-router.post(
-  "/webhook/on-chain-update",
-  asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { onChainDisputeId, status, winningParty, signature } = req.body;
-
-    // TODO: Verify webhook signature for security
-    // if (!verifyWebhookSignature(signature, req.body)) {
-    //   return res.status(401).json({ error: "Invalid signature" });
-    // }
-
-    if (!onChainDisputeId) {
-      return res.status(400).json({ error: "onChainDisputeId is required" });
-    }
-
-    // Find dispute by on-chain ID
-    const dispute = await prisma.dispute.findUnique({
-      where: { onChainDisputeId },
-    });
-
-    if (!dispute) {
-      return res.status(404).json({ error: "Dispute not found" });
-    }
-
-    // Map on-chain status
-    const statusMap: Record<string, "OPEN" | "VOTING" | "RESOLVED" | "APPEALED"> = {
-      open: "OPEN",
-      voting: "VOTING",
-      resolved: "RESOLVED",
-      appealed: "APPEALED",
-    };
-
-    const mappedStatus = statusMap[status?.toLowerCase()] || dispute.status;
-
-    // Update dispute
-    const updateData: any = { status: mappedStatus };
-    if (mappedStatus === "RESOLVED") {
-      updateData.resolvedAt = new Date();
-      if (winningParty) {
-        updateData.winningParty = winningParty;
-      }
-    }
-
-    const updated = await prisma.dispute.update({
-      where: { id: dispute.id },
-      data: updateData,
-    });
-
-    // Update job status if resolved
-    if (mappedStatus === "RESOLVED" && winningParty) {
-      const newJobStatus = winningParty === "FREELANCER" ? "COMPLETED" : "CANCELLED";
-      await prisma.job.update({
-        where: { id: dispute.jobId },
-        data: { status: newJobStatus },
-      });
-    }
-
-    res.json({ success: true, dispute: updated });
-  })
-);
+  res.status(400).json({ error: "Invalid confirmation parameters" });
+}));
 
 export default router;
