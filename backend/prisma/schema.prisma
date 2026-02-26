@@ -62,9 +62,11 @@ enum NotificationType {
 
 enum DisputeStatus {
   OPEN
+  REVIEWING
   VOTING
   RESOLVED_CLIENT
   RESOLVED_FREELANCER
+  OVERRIDDEN_BY_ADMIN
 }
 
 model User {
@@ -100,6 +102,7 @@ model User {
   transactionsTo   Transaction[] @relation("TransactionsTo")
   attachments      Attachment[]
   notifications    Notification[]
+  auditLogs      AuditLog[]
   initiatedDisputes Dispute[]    @relation("DisputeInitiated")
   respondedDisputes Dispute[]    @relation("DisputeResponded")
   votesCast        Vote[]        @relation("VotesCast")
@@ -262,6 +265,17 @@ model Notification {
   @@index([createdAt])
 }
 
+model AuditLog {
+  id        String   @id @default(cuid())
+  adminId   String
+  action    String
+  target    String
+  metadata  Json?
+  timestamp DateTime @default(now())
+
+  admin     User     @relation(fields: [adminId], references: [id])
+}
+
 model Dispute {
   id                 String        @id @default(cuid())
   jobId              String        @unique
@@ -273,6 +287,9 @@ model Dispute {
   votesForClient     Int           @default(0)
   votesForFreelancer Int           @default(0)
   minVotes           Int           @default(3)
+  escalated          Boolean       @default(false)
+  outcome            String?
+  resolvedAt         DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
