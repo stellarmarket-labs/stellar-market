@@ -4,7 +4,61 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, String,
     Vec,
 };
-use stellar_market_escrow::{EscrowContractClient, JobStatus};
+mod escrow {
+    use soroban_sdk::{contracttype, Address, String, Vec};
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub enum JobStatus {
+        Created,
+        Funded,
+        InProgress,
+        Completed,
+        Disputed,
+        Cancelled,
+    }
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub enum MilestoneStatus {
+        Pending,
+        InProgress,
+        Submitted,
+        Approved,
+    }
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct Milestone {
+        pub id: u32,
+        pub description: String,
+        pub amount: i128,
+        pub status: MilestoneStatus,
+        pub deadline: u64,
+    }
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct Job {
+        pub id: u64,
+        pub client: Address,
+        pub freelancer: Address,
+        pub token: Address,
+        pub total_amount: i128,
+        pub status: JobStatus,
+        pub milestones: Vec<Milestone>,
+        pub job_deadline: u64,
+        pub auto_refund_after: u64,
+    }
+
+    #[soroban_sdk::contractclient(name = "EscrowContractClient")]
+    #[allow(dead_code)]
+    pub trait EscrowInterface {
+        fn get_job(env: soroban_sdk::Env, job_id: u64) -> Job;
+    }
+}
+
+use escrow::{EscrowContractClient, JobStatus};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -22,9 +76,11 @@ pub enum ReputationError {
     InvalidDecayRate = 10,
     BelowMinStake = 11,
     RateLimitExceeded = 12,
-    AlreadyReferred = 13,
-    SelfReferral = 14,
-    CircularReferral = 15,
+    ContractPaused = 13,
+    NotAdmin = 14,
+    AlreadyReferred = 15,
+    SelfReferral = 16,
+    CircularReferral = 17,
 }
 
 #[contracttype]
@@ -86,10 +142,36 @@ enum DataKey {
     RateLimit,
     LastReviewLedger(Address),
     Token,
+    Paused,
     Referrer(Address),
     ReferralStats(Address),
     BonusPaid(Address),
     ReferralBonus,
+}
+
+fn require_not_paused(env: &Env) -> Result<(), ReputationError> {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        return Err(ReputationError::ContractPaused);
+    }
+    Ok(())
+}
+
+fn require_admin(env: &Env, admin: &Address) -> Result<(), ReputationError> {
+    let stored_admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(ReputationError::NotInitialized)?;
+
+    if admin != &stored_admin {
+        return Err(ReputationError::NotAdmin);
+    }
+    Ok(())
 }
 
 const MIN_REVIEW_STAKE_DEFAULT: i128 = 10_000_000; // 1.0 unit (7 decimals)
@@ -178,6 +260,7 @@ impl ReputationContract {
         stake_weight: i128,
     ) -> Result<(), ReputationError> {
         reviewer.require_auth();
+        require_not_paused(&env)?;
 
         if !(1..=5).contains(&rating) {
             return Err(ReputationError::InvalidRating);
@@ -556,13 +639,57 @@ impl ReputationContract {
         env.storage()
             .instance()
             .set(&DataKey::RateLimit, &RATE_LIMIT_LEDGERS_DEFAULT);
+        env.storage().instance().set(&DataKey::Paused, &false);
         bump_instance_ttl(&env);
         Ok(())
+    }
+
+    /// Pause the contract (admin only).
+    pub fn pause(env: Env, admin: Address) -> Result<(), ReputationError> {
+        admin.require_auth();
+        require_admin(&env, &admin)?;
+
+        env.storage().instance().set(&DataKey::Paused, &true);
+        bump_instance_ttl(&env);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("reput"), symbol_short!("paused")),
+            (admin, env.ledger().timestamp()),
+        );
+
+        Ok(())
+    }
+
+    /// Unpause the contract (admin only).
+    pub fn unpause(env: Env, admin: Address) -> Result<(), ReputationError> {
+        admin.require_auth();
+        require_admin(&env, &admin)?;
+
+        env.storage().instance().set(&DataKey::Paused, &false);
+        bump_instance_ttl(&env);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("reput"), symbol_short!("unpaused")),
+            (admin, env.ledger().timestamp()),
+        );
+
+        Ok(())
+    }
+
+    /// Check if the contract is paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     /// Update the minimum stake requirement for reviews.
     pub fn set_min_stake(env: Env, admin: Address, amount: i128) -> Result<(), ReputationError> {
         admin.require_auth();
+        require_not_paused(&env)?;
         let stored_admin: Address = env
             .storage()
             .instance()
@@ -579,6 +706,7 @@ impl ReputationContract {
     /// Update the rate limit (number of ledgers between reviews).
     pub fn set_rate_limit(env: Env, admin: Address, ledgers: u32) -> Result<(), ReputationError> {
         admin.require_auth();
+        require_not_paused(&env)?;
         let stored_admin: Address = env
             .storage()
             .instance()
@@ -611,6 +739,7 @@ impl ReputationContract {
     /// Set the token used for accountability stake.
     pub fn set_token(env: Env, admin: Address, token: Address) -> Result<(), ReputationError> {
         admin.require_auth();
+        require_not_paused(&env)?;
         let stored_admin: Address = env
             .storage()
             .instance()
@@ -635,6 +764,7 @@ impl ReputationContract {
     /// Set the decay rate for reviews (0-100 percentage per year).
     pub fn set_decay_rate(env: Env, admin: Address, rate: u32) -> Result<(), ReputationError> {
         admin.require_auth();
+        require_not_paused(&env)?;
 
         let stored_admin: Address = env
             .storage()
@@ -645,12 +775,15 @@ impl ReputationContract {
             return Err(ReputationError::Unauthorized);
         }
 
+
         if rate > 100 {
             return Err(ReputationError::InvalidDecayRate);
         }
 
+
         env.storage().instance().set(&DataKey::DecayRate, &rate);
         bump_instance_ttl(&env);
+
 
         // Emit event
         env.events().publish(
@@ -675,6 +808,7 @@ impl ReputationContract {
             1_i128
         };
 
+
         if decay_rate == 0 {
             return initial_weight;
         }
@@ -682,12 +816,15 @@ impl ReputationContract {
         let age_in_seconds = current_time.saturating_sub(review.timestamp);
         let one_year_in_seconds = 31_536_000_u64;
 
+
         let decay_amount = (decay_rate as u64).saturating_mul(age_in_seconds) / one_year_in_seconds;
         let decay_factor = 100_u64.saturating_sub(decay_amount);
+
 
         if decay_factor == 0 {
             return 0;
         }
+
 
         (initial_weight.saturating_mul(decay_factor as i128)) / 100
     }
@@ -698,9 +835,11 @@ impl ReputationContract {
             return Ok(0);
         }
 
+
         let current_time = env.ledger().timestamp();
         let mut total_score: u64 = 0;
         let mut total_weight: u64 = 0;
+
 
         for review in reviews.iter() {
             let effective_weight =
@@ -714,9 +853,11 @@ impl ReputationContract {
             total_weight += weight;
         }
 
+
         if total_weight == 0 {
             return Ok(0); // If completely decayed, acts as no rep
         }
+
 
         Ok((total_score * 100) / total_weight)
     }

@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, String,
-    Symbol, Vec,
+    Vec,
 };
 
 #[contracterror]
@@ -23,6 +23,8 @@ pub enum EscrowError {
     InvalidMilestoneIndex = 12,
     TokenNotAllowed = 13,
     AlreadyInitialized = 14,
+    ContractPaused = 15,
+    NotAdmin = 16,
 }
 
 #[contracttype]
@@ -80,8 +82,42 @@ pub struct Job {
 
 const MAX_FEE_BPS: u32 = 1000; // 10%
 
-fn get_job_key(job_id: u64) -> (Symbol, u64) {
-    (symbol_short!("JOB"), job_id)
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum DataKey {
+    Job(u64),
+    JobCount,
+    Admin,
+    Paused,
+}
+
+fn get_job_key(job_id: u64) -> DataKey {
+    DataKey::Job(job_id)
+}
+
+fn require_not_paused(env: &Env) -> Result<(), EscrowError> {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        return Err(EscrowError::ContractPaused);
+    }
+    Ok(())
+}
+
+fn require_admin(env: &Env, admin: &Address) -> Result<(), EscrowError> {
+    let stored_admin: Address = env
+        .storage()
+        .instance()
+        .get(&symbol_short!("ADM"))
+        .ok_or(EscrowError::NotAdmin)?;
+
+    if admin != &stored_admin {
+        return Err(EscrowError::NotAdmin);
+    }
+    Ok(())
 }
 
 const MIN_TTL_THRESHOLD: u32 = 1_000;
@@ -117,7 +153,7 @@ impl EscrowContract {
             return Err(EscrowError::AlreadyInitialized);
         }
         if fee_bps > MAX_FEE_BPS {
-            return Err(EscrowError::InvalidStatus); // Using InvalidStatus for simplicity, or could add a new error
+            return Err(EscrowError::InvalidStatus);
         }
 
         env.storage().instance().set(&symbol_short!("ADM"), &admin);
@@ -125,6 +161,42 @@ impl EscrowContract {
             .instance()
             .set(&symbol_short!("TRE"), &treasury);
         env.storage().instance().set(&symbol_short!("FEE"), &fee_bps);
+        env.storage().instance().set(&DataKey::Paused, &false);
+        bump_job_count_ttl(&env);
+
+        Ok(())
+    }
+
+    /// Pause the contract (admin only).
+    pub fn pause(env: Env, admin: Address) -> Result<(), EscrowError> {
+        admin.require_auth();
+        require_admin(&env, &admin)?;
+
+        env.storage().instance().set(&DataKey::Paused, &true);
+        bump_job_count_ttl(&env);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("paused")),
+            (admin, env.ledger().timestamp()),
+        );
+
+        Ok(())
+    }
+
+    /// Unpause the contract (admin only).
+    pub fn unpause(env: Env, admin: Address) -> Result<(), EscrowError> {
+        admin.require_auth();
+        require_admin(&env, &admin)?;
+
+        env.storage().instance().set(&DataKey::Paused, &false);
+        bump_job_count_ttl(&env);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("unpaused")),
+            (admin, env.ledger().timestamp()),
+        );
 
         Ok(())
     }
@@ -172,6 +244,7 @@ impl EscrowContract {
         auto_refund_after: u64,
     ) -> Result<u64, EscrowError> {
         client.require_auth();
+        require_not_paused(&env)?;
 
         if job_deadline <= env.ledger().timestamp() {
             return Err(EscrowError::InvalidDeadline);
@@ -180,7 +253,7 @@ impl EscrowContract {
         let mut job_count: u64 = env
             .storage()
             .instance()
-            .get(&symbol_short!("JOB_CNT"))
+            .get(&DataKey::JobCount)
             .unwrap_or(0);
         job_count += 1;
 
@@ -221,9 +294,7 @@ impl EscrowContract {
             .persistent()
             .set(&get_job_key(job_count), &job);
         bump_job_ttl(&env, job_count);
-        env.storage()
-            .instance()
-            .set(&symbol_short!("JOB_CNT"), &job_count);
+        env.storage().instance().set(&DataKey::JobCount, &job_count);
         bump_job_count_ttl(&env);
 
         // Emit event
@@ -238,6 +309,7 @@ impl EscrowContract {
     /// Fund the escrow for a job. The client transfers the total amount to this contract.
     pub fn fund_job(env: Env, job_id: u64, client: Address) -> Result<(), EscrowError> {
         client.require_auth();
+        require_not_paused(&env)?;
 
         let mut job: Job = env
             .storage()
@@ -277,6 +349,8 @@ impl EscrowContract {
         job_id: u64,
         resolution: DisputeResolution,
     ) -> Result<(), EscrowError> {
+        require_not_paused(&env)?;
+        
         let mut job: Job = env
             .storage()
             .persistent()
@@ -366,6 +440,7 @@ impl EscrowContract {
         freelancer: Address,
     ) -> Result<(), EscrowError> {
         freelancer.require_auth();
+        require_not_paused(&env)?;
 
         let mut job: Job = env
             .storage()
@@ -421,6 +496,7 @@ impl EscrowContract {
         client: Address,
     ) -> Result<(), EscrowError> {
         client.require_auth();
+        require_not_paused(&env)?;
 
         let mut job: Job = env
             .storage()
@@ -511,6 +587,7 @@ impl EscrowContract {
         client: Address,
     ) -> Result<i128, EscrowError> {
         client.require_auth();
+        require_not_paused(&env)?;
 
         let mut job: Job = env
             .storage()
@@ -612,6 +689,7 @@ impl EscrowContract {
     /// Cancel the job and refund remaining funds to the client.
     pub fn cancel_job(env: Env, job_id: u64, client: Address) -> Result<(), EscrowError> {
         client.require_auth();
+        require_not_paused(&env)?;
 
         let mut job: Job = env
             .storage()
@@ -660,6 +738,7 @@ impl EscrowContract {
     /// Fails if the freelancer has a pending (submitted) milestone awaiting approval.
     pub fn claim_refund(env: Env, job_id: u64, client: Address) -> Result<(), EscrowError> {
         client.require_auth();
+        require_not_paused(&env)?;
 
         let mut job: Job = env
             .storage()
@@ -738,7 +817,7 @@ impl EscrowContract {
         let count: u64 = env
             .storage()
             .instance()
-            .get(&symbol_short!("JOB_CNT"))
+            .get(&DataKey::JobCount)
             .unwrap_or(0);
         bump_job_count_ttl(&env);
         count
@@ -765,6 +844,8 @@ impl EscrowContract {
         milestone_id: u32,
         new_deadline: u64,
     ) -> Result<(), EscrowError> {
+        require_not_paused(&env)?;
+        
         let mut job: Job = env
             .storage()
             .persistent()

@@ -277,7 +277,7 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "JOB"
+                  "symbol": "Job"
                 },
                 {
                   "u64": 1
@@ -297,7 +297,7 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "JOB"
+                      "symbol": "Job"
                     },
                     {
                       "u64": 1
@@ -488,7 +488,19 @@
                       },
                       {
                         "key": {
-                          "symbol": "JOB_CNT"
+                          "symbol": "TRE"
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "JobCount"
+                            }
+                          ]
                         },
                         "val": {
                           "u64": 1
@@ -496,10 +508,14 @@
                       },
                       {
                         "key": {
-                          "symbol": "TRE"
+                          "vec": [
+                            {
+                              "symbol": "Paused"
+                            }
+                          ]
                         },
                         "val": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                          "bool": false
                         }
                       }
                     ]

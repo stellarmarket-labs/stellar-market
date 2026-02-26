@@ -552,3 +552,242 @@ fn test_tie_break_default_refund_both() {
     let status = client.resolve_dispute(&dispute_id, &escrow_contract_id);
     assert_eq!(status, DisputeStatus::RefundedBoth);
 }
+
+// ── Pause mechanism tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_pause_and_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+
+    // Create a dispute first
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &3u32,
+        &None,
+    );
+    assert_eq!(dispute_id, 1);
+
+    // Pause the contract
+    client.pause(&admin);
+
+    // Unpause the contract
+    client.unpause(&admin);
+
+    // Now raising another dispute should work
+    let dispute_id2 = client.raise_dispute(
+        &2u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue 2"),
+        &3u32,
+        &None,
+    );
+    assert_eq!(dispute_id2, 2);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")] // NotAdmin
+fn test_pause_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+
+    // Try to pause with non-admin address
+    client.pause(&non_admin);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #11)")] // ContractPaused
+fn test_raise_dispute_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+    client.pause(&admin);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &3u32,
+        &None,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #11)")] // ContractPaused
+fn test_cast_vote_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &3u32,
+        &None,
+    );
+
+    client.pause(&admin);
+
+    let voter = Address::generate(&env);
+    client.cast_vote(
+        &dispute_id,
+        &voter,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Vote"),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #11)")] // ContractPaused
+fn test_resolve_dispute_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &3u32,
+        &None,
+    );
+
+    // Add some votes
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+    let voter3 = Address::generate(&env);
+
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Vote 1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Vote 2"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Vote 3"),
+    );
+
+    client.pause(&admin);
+
+    client.resolve_dispute(&dispute_id, &escrow_contract_id);
+}
+
+#[test]
+fn test_read_only_functions_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &3u32,
+        &None,
+    );
+
+    client.pause(&admin);
+
+    // Read-only functions should still work when paused
+    let dispute = client.get_dispute(&dispute_id);
+    assert_eq!(dispute.id, dispute_id);
+
+    let count = client.get_dispute_count();
+    assert_eq!(count, 1);
+
+    let votes = client.get_votes(&dispute_id);
+    assert_eq!(votes.len(), 0);
+
+    let is_excluded = client.is_excluded_voter(&dispute_id, &Address::generate(&env));
+    assert_eq!(is_excluded, false);
+}
