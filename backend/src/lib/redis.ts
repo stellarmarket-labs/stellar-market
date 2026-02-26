@@ -11,9 +11,9 @@ class RedisClient {
       const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
       
       RedisClient.instance = new Redis(redisUrl, {
-        retryDelayOnFailover: 100,
         maxRetriesPerRequest: 3,
         lazyConnect: true,
+        enableReadyCheck: true,
         reconnectOnError: (err) => {
           const targetError = "READONLY";
           return err.message.includes(targetError);
