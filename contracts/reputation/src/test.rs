@@ -2,11 +2,10 @@
 
 use super::*;
 use soroban_sdk::{
-    symbol_short,
     testutils::{Address as _, Ledger},
-    vec, Env, String, Vec,
+    vec, Env, String,
 };
-use stellar_market_escrow::{EscrowContract, Job, JobStatus};
+use stellar_market_escrow::EscrowContract;
 
 // The minimum stake required per review (must match lib.rs constant)
 const MIN_STAKE: i128 = 10_000_000;

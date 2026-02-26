@@ -4,7 +4,61 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, String,
     Vec,
 };
-use stellar_market_escrow::{EscrowContractClient, JobStatus};
+mod escrow {
+    use soroban_sdk::{contracttype, Address, String, Vec};
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub enum JobStatus {
+        Created,
+        Funded,
+        InProgress,
+        Completed,
+        Disputed,
+        Cancelled,
+    }
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub enum MilestoneStatus {
+        Pending,
+        InProgress,
+        Submitted,
+        Approved,
+    }
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct Milestone {
+        pub id: u32,
+        pub description: String,
+        pub amount: i128,
+        pub status: MilestoneStatus,
+        pub deadline: u64,
+    }
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct Job {
+        pub id: u64,
+        pub client: Address,
+        pub freelancer: Address,
+        pub token: Address,
+        pub total_amount: i128,
+        pub status: JobStatus,
+        pub milestones: Vec<Milestone>,
+        pub job_deadline: u64,
+        pub auto_refund_after: u64,
+    }
+
+    #[soroban_sdk::contractclient(name = "EscrowContractClient")]
+    #[allow(dead_code)]
+    pub trait EscrowInterface {
+        fn get_job(env: soroban_sdk::Env, job_id: u64) -> Job;
+    }
+}
+
+use escrow::{EscrowContractClient, JobStatus};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
