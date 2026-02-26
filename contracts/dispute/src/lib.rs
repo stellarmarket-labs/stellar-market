@@ -33,6 +33,8 @@ pub enum DisputeError {
     InsufficientReputation = 8,
     NotInitialized = 9,
     ConflictOfInterest = 10,
+    ContractPaused = 11,
+    NotAdmin = 12,
 }
 
 #[contracttype]
@@ -109,6 +111,32 @@ enum DataKey {
     MinVoterReputation,
     Admin,
     EscrowContract,
+    Paused,
+}
+
+fn require_not_paused(env: &Env) -> Result<(), DisputeError> {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        return Err(DisputeError::ContractPaused);
+    }
+    Ok(())
+}
+
+fn require_admin(env: &Env, admin: &Address) -> Result<(), DisputeError> {
+    let stored_admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(DisputeError::NotInitialized)?;
+
+    if admin != &stored_admin {
+        return Err(DisputeError::NotAdmin);
+    }
+    Ok(())
 }
 
 const MIN_VOTER_REPUTATION: u32 = 300;
@@ -302,6 +330,7 @@ impl DisputeContract {
         env.storage()
             .instance()
             .set(&DataKey::EscrowContract, &escrow_contract);
+        env.storage().instance().set(&DataKey::Paused, &false);
 
         bump_dispute_count_ttl(&env);
 
@@ -314,6 +343,40 @@ impl DisputeContract {
         Ok(())
     }
 
+    /// Pause the contract (admin only).
+    pub fn pause(env: Env, admin: Address) -> Result<(), DisputeError> {
+        admin.require_auth();
+        require_admin(&env, &admin)?;
+
+        env.storage().instance().set(&DataKey::Paused, &true);
+        bump_dispute_count_ttl(&env);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("dispute"), symbol_short!("paused")),
+            (admin, env.ledger().timestamp()),
+        );
+
+        Ok(())
+    }
+
+    /// Unpause the contract (admin only).
+    pub fn unpause(env: Env, admin: Address) -> Result<(), DisputeError> {
+        admin.require_auth();
+        require_admin(&env, &admin)?;
+
+        env.storage().instance().set(&DataKey::Paused, &false);
+        bump_dispute_count_ttl(&env);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("dispute"), symbol_short!("unpaused")),
+            (admin, env.ledger().timestamp()),
+        );
+
+        Ok(())
+    }
+
     /// Set the minimum voter reputation threshold (admin only).
     pub fn set_min_voter_reputation(
         env: Env,
@@ -321,6 +384,7 @@ impl DisputeContract {
         min_reputation: u32,
     ) -> Result<(), DisputeError> {
         admin.require_auth();
+        require_not_paused(&env)?;
 
         let stored_admin: Address = env
             .storage()
@@ -389,6 +453,7 @@ impl DisputeContract {
         tie_break_method: Option<TieBreakMethod>,
     ) -> Result<u64, DisputeError> {
         initiator.require_auth();
+        require_not_paused(&env)?;
 
         if initiator != client && initiator != freelancer {
             return Err(DisputeError::InvalidParty);
@@ -458,6 +523,7 @@ impl DisputeContract {
         reason: String,
     ) -> Result<(), DisputeError> {
         voter.require_auth();
+        require_not_paused(&env)?;
 
         let mut dispute: Dispute = env
             .storage()
@@ -544,6 +610,7 @@ impl DisputeContract {
         voter: Address,
     ) -> Result<(), DisputeError> {
         caller.require_auth();
+        require_not_paused(&env)?;
 
         let mut dispute: Dispute = env
             .storage()
@@ -587,6 +654,8 @@ impl DisputeContract {
         dispute_id: u64,
         escrow: Address,
     ) -> Result<DisputeStatus, DisputeError> {
+        require_not_paused(&env)?;
+        
         let mut dispute: Dispute = env
             .storage()
             .persistent()
@@ -641,7 +710,6 @@ impl DisputeContract {
                     resolution.into_val(&env),
                 ],
             );
-
         }
 
         env.storage()

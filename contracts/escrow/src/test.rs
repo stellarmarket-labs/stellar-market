@@ -643,3 +643,318 @@ fn test_resolve_dispute_callback_refund_both() {
     assert_eq!(token_client.balance(&client), 1500);
     assert_eq!(token_client.balance(&freelancer), 1500);
 }
+
+// ── Pause mechanism tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_initialize() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Verify admin is set
+    // Note: We can't directly check the admin value since it's private,
+    // but we can test pause functionality which requires admin
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #13)")] // NotAdmin
+fn test_pause_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+
+    client.initialize(&admin);
+
+    // Try to pause with non-admin address
+    client.pause(&non_admin);
+}
+
+#[test]
+fn test_pause_and_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Create a job first
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+    assert_eq!(job_id, 1);
+
+    // Pause the contract
+    client.pause(&admin);
+
+    // Try to create another job while paused - should fail
+    // We'll use a separate test for this since we can't catch panics in no_std
+    // This test just verifies pause/unpause functionality works
+
+    // Unpause the contract
+    client.unpause(&admin);
+
+    // Now creating a job should work again
+    let job_id2 = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+    assert_eq!(job_id2, 2);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")] // ContractPaused
+fn test_create_job_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    client.pause(&admin);
+
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+
+    client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")] // ContractPaused
+fn test_fund_job_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+
+    client.pause(&admin);
+
+    client.fund_job(&job_id, &user);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")] // ContractPaused
+fn test_submit_milestone_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+
+    client.fund_job(&job_id, &user);
+    client.pause(&admin);
+
+    client.submit_milestone(&job_id, &0, &freelancer);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")] // ContractPaused
+fn test_approve_milestone_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+
+    client.fund_job(&job_id, &user);
+    client.submit_milestone(&job_id, &0, &freelancer);
+    client.pause(&admin);
+
+    client.approve_milestone(&job_id, &0, &user);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")] // ContractPaused
+fn test_claim_refund_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+
+    client.fund_job(&job_id, &user);
+
+    // Advance time past deadline + grace period
+    env.ledger()
+        .with_mut(|l| l.timestamp = 2500 + GRACE_PERIOD + 1);
+
+    client.pause(&admin);
+
+    client.claim_refund(&job_id, &user);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")] // ContractPaused
+fn test_extend_deadline_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+
+    client.pause(&admin);
+
+    client.extend_deadline(&job_id, &0, &4000_u64);
+}
+
+#[test]
+fn test_read_only_functions_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+
+    client.pause(&admin);
+
+    // Read-only functions should still work when paused
+    let job = client.get_job(&job_id);
+    assert_eq!(job.id, job_id);
+
+    let count = client.get_job_count();
+    assert_eq!(count, 1);
+
+    let overdue = client.is_milestone_overdue(&job_id, &0);
+    assert_eq!(overdue, false);
+}

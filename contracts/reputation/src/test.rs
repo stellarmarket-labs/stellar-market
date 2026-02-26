@@ -1,65 +1,77 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{symbol_short, testutils::{Address as _, Ledger}, Env, String, Vec};
+use soroban_sdk::{
+    symbol_short,
+    testutils::{Address as _, Ledger},
+    vec, Env, String, Vec,
+};
 use stellar_market_escrow::{EscrowContract, Job, JobStatus};
 
 // The minimum stake required per review (must match lib.rs constant)
 const MIN_STAKE: i128 = 10_000_000;
 
-/// Helper: directly write a completed job into the escrow contract's storage,
-/// bypassing the full escrow flow (token transfers, milestone approvals, etc.).
+/// Helper: create a job in the escrow contract and mark it as completed.
+/// This uses the actual escrow contract functions to ensure proper storage.
 fn setup_completed_job(
     env: &Env,
     escrow_id: &Address,
-    job_id: u64,
+    _job_id: u64,
     client: &Address,
     freelancer: &Address,
     token: &Address,
 ) {
-    let job = Job {
-        id: job_id,
-        client: client.clone(),
-        freelancer: freelancer.clone(),
-        token: token.clone(),
-        total_amount: 1000,
-        status: JobStatus::Completed,
-        milestones: Vec::new(env),
-        job_deadline: 0,
-        auto_refund_after: 0,
-    };
-    env.as_contract(escrow_id, || {
-        env.storage()
-            .persistent()
-            .set(&(symbol_short!("JOB"), job_id), &job);
-    });
+    let escrow_client = stellar_market_escrow::EscrowContractClient::new(env, escrow_id);
+
+    // Create a job with one milestone
+    let milestones = vec![
+        env,
+        (String::from_str(env, "Task"), 100_i128, 9999999999u64),
+    ];
+    let job_id = escrow_client.create_job(
+        client,
+        freelancer,
+        token,
+        &milestones,
+        &9999999999u64,
+        &86400u64,
+    );
+
+    // Fund the job
+    escrow_client.fund_job(&job_id, client);
+
+    // Mark the job as completed using the dispute resolution callback
+    escrow_client.resolve_dispute_callback(&job_id, &stellar_market_escrow::DisputeResolution::FreelancerWins);
 }
 
-/// Helper: write an in-progress (non-completed) job into escrow storage.
+/// Helper: create a job in the escrow contract and mark it as in progress.
+/// This uses the actual escrow contract functions to ensure proper storage.
 fn setup_in_progress_job(
     env: &Env,
     escrow_id: &Address,
-    job_id: u64,
+    _job_id: u64,
     client: &Address,
     freelancer: &Address,
     token: &Address,
 ) {
-    let job = Job {
-        id: job_id,
-        client: client.clone(),
-        freelancer: freelancer.clone(),
-        token: token.clone(),
-        total_amount: 1000,
-        status: JobStatus::InProgress,
-        milestones: Vec::new(env),
-        job_deadline: 0,
-        auto_refund_after: 0,
-    };
-    env.as_contract(escrow_id, || {
-        env.storage()
-            .persistent()
-            .set(&(symbol_short!("JOB"), job_id), &job);
-    });
+    let escrow_client = stellar_market_escrow::EscrowContractClient::new(env, escrow_id);
+
+    // Create a job with one milestone
+    let milestones = vec![
+        env,
+        (String::from_str(env, "Task"), 100_i128, 9999999999u64),
+    ];
+    let job_id = escrow_client.create_job(
+        client,
+        freelancer,
+        token,
+        &milestones,
+        &9999999999u64,
+        &86400u64,
+    );
+
+    // Fund the job to move it to Funded status
+    escrow_client.fund_job(&job_id, client);
 }
 
 fn create_token(env: &Env, admin: &Address) -> Address {
@@ -88,7 +100,14 @@ fn test_submit_review_client_reviews_freelancer() {
     let token_addr = create_token(&env, &token_admin);
     mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
 
     reputation_client.submit_review(
         &escrow_id,
@@ -119,9 +138,17 @@ fn test_submit_review_freelancer_reviews_client() {
     let freelancer_addr = Address::generate(&env);
     let token_admin = Address::generate(&env);
     let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
     mint(&env, &token_addr, &token_admin, &freelancer_addr, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
 
     reputation_client.submit_review(
         &escrow_id,
@@ -335,7 +362,14 @@ fn test_job_not_completed() {
     mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
 
     // Job is InProgress, not Completed
-    setup_in_progress_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
+    setup_in_progress_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
 
     reputation_client.submit_review(
         &escrow_id,
@@ -364,9 +398,17 @@ fn test_not_job_participant() {
     let another = Address::generate(&env);
     let token_admin = Address::generate(&env);
     let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
     mint(&env, &token_addr, &token_admin, &outsider, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
 
     // outsider and another were not part of job 1
     reputation_client.submit_review(
@@ -395,9 +437,17 @@ fn test_reviewer_not_participant_but_reviewee_is() {
     let outsider = Address::generate(&env);
     let token_admin = Address::generate(&env);
     let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
     mint(&env, &token_addr, &token_admin, &outsider, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
 
     // outsider tries to review the freelancer — reviewer is not a participant
     reputation_client.submit_review(
@@ -713,7 +763,7 @@ fn test_multiple_tier_badges() {
     assert_eq!(badges.len(), 1);
     assert_eq!(badges.get(0).unwrap().badge_type, ReputationTier::Bronze);
 
-    // Second review: Silver tier 
+    // Second review: Silver tier
     // avg = (2*MIN + 5*MIN) * 100 / (2*MIN) = 350 -> Silver
     reputation_client.submit_review(
         &escrow_id,
@@ -929,13 +979,14 @@ fn test_decay_calculation() {
 
     // Advance 1 year (31,536,000 seconds)
     // 50% decay per year -> weight should be 50% of original, but ratio is the same for a single review
-    env.ledger().with_mut(|l| l.timestamp = start_time + 31_536_000);
+    env.ledger()
+        .with_mut(|l| l.timestamp = start_time + 31_536_000);
     assert_eq!(reputation_client.get_average_rating(&reviewee), 500);
 
     // To test actual decay, add a second review at year 1
     let reviewer2 = Address::generate(&env);
-    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
     mint(&env, &token_addr, &token_admin, &reviewer2, 1_000_000_000);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
 
     // Second review at year 1 with rating 1 (Poor)
     reputation_client.submit_review(
@@ -961,7 +1012,8 @@ fn test_decay_calculation() {
     // Weighted score: 0 + 1 * MIN/2 = MIN/2
     // Total weight: MIN/2
     // Avg = 1.0 * 100 = 100
-    env.ledger().with_mut(|l| l.timestamp = start_time + 63_072_000);
+    env.ledger()
+        .with_mut(|l| l.timestamp = start_time + 63_072_000);
     assert_eq!(reputation_client.get_average_rating(&reviewee), 100);
 }
 
@@ -1080,4 +1132,210 @@ fn test_rate_limit_pass_after_time() {
 
     assert_eq!(reputation_client.get_review_count(&reviewee1), 1);
     assert_eq!(reputation_client.get_review_count(&reviewee2), 1);
+}
+
+// ── Pause mechanism tests ─────────────────────────────────────────────────────
+#[test]
+fn test_pause_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+
+    reputation_client.initialize(&admin, &50u32);
+
+    // Initially not paused
+    assert!(!reputation_client.is_paused());
+
+    // Pause the contract
+    reputation_client.pause(&admin);
+    assert!(reputation_client.is_paused());
+
+    // Unpause the contract
+    reputation_client.unpause(&admin);
+    assert!(!reputation_client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #14)")]
+fn test_pause_non_admin_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+
+    reputation_client.initialize(&admin, &50u32);
+
+    // Non-admin tries to pause - should fail with NotAdmin error (#14)
+    reputation_client.pause(&non_admin);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #14)")]
+fn test_unpause_non_admin_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+
+    reputation_client.initialize(&admin, &50u32);
+
+    // Admin pauses
+    reputation_client.pause(&admin);
+
+    // Non-admin tries to unpause - should fail with NotAdmin error (#14)
+    reputation_client.unpause(&non_admin);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #13)")]
+fn test_submit_review_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+    let client_addr = Address::generate(&env);
+    let freelancer_addr = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
+
+    reputation_client.initialize(&admin, &50u32);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
+
+    // Admin pauses the contract
+    reputation_client.pause(&admin);
+
+    // Try to submit a review while paused - should fail with ContractPaused error (#13)
+    reputation_client.submit_review(
+        &escrow_id,
+        &client_addr,
+        &freelancer_addr,
+        &1u64,
+        &4u32,
+        &String::from_str(&env, "Great work!"),
+        &MIN_STAKE,
+    );
+}
+
+#[test]
+fn test_read_only_functions_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+    let escrow_client = stellar_market_escrow::EscrowContractClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+    let client_addr = Address::generate(&env);
+    let freelancer_addr = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
+
+    reputation_client.initialize(&admin, &50u32);
+    escrow_client.initialize(&admin);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
+
+    // Submit a review first
+    reputation_client.submit_review(
+        &escrow_id,
+        &client_addr,
+        &freelancer_addr,
+        &1u64,
+        &4u32,
+        &String::from_str(&env, "Great work!"),
+        &MIN_STAKE,
+    );
+
+    // Admin pauses the contract
+    reputation_client.pause(&admin);
+
+    // Read-only functions should still work
+    assert!(reputation_client.is_paused());
+    let rep = reputation_client.get_reputation(&freelancer_addr);
+    assert_eq!(rep.review_count, 1);
+    assert_eq!(reputation_client.get_average_rating(&freelancer_addr), 400);
+    assert_eq!(reputation_client.get_review_count(&freelancer_addr), 1);
+    assert_eq!(
+        reputation_client.get_tier(&freelancer_addr),
+        ReputationTier::Silver
+    );
+    assert_eq!(reputation_client.get_min_stake(), MIN_STAKE);
+}
+
+#[test]
+fn test_submit_review_after_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+    let escrow_client = stellar_market_escrow::EscrowContractClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+    let client_addr = Address::generate(&env);
+    let freelancer_addr = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
+
+    reputation_client.initialize(&admin, &50u32);
+    escrow_client.initialize(&admin);
+    setup_completed_job(
+        &env,
+        &escrow_id,
+        1u64,
+        &client_addr,
+        &freelancer_addr,
+        &token_addr,
+    );
+
+    // Admin pauses the contract
+    reputation_client.pause(&admin);
+
+    // Unpause the contract
+    reputation_client.unpause(&admin);
+
+    // Now submit a review - should succeed
+    reputation_client.submit_review(
+        &escrow_id,
+        &client_addr,
+        &freelancer_addr,
+        &1u64,
+        &4u32,
+        &String::from_str(&env, "Great work!"),
+        &MIN_STAKE,
+    );
+
+    let rep = reputation_client.get_reputation(&freelancer_addr);
+    assert_eq!(rep.review_count, 1);
+    assert_eq!(rep.total_score, 4 * MIN_STAKE as u64);
+    assert_eq!(rep.total_weight, MIN_STAKE as u64);
 }

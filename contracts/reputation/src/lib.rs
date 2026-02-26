@@ -1,7 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, String, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, String,
+    Vec,
 };
 use stellar_market_escrow::{EscrowContractClient, JobStatus};
 
@@ -21,6 +22,8 @@ pub enum ReputationError {
     InvalidDecayRate = 10,
     BelowMinStake = 11,
     RateLimitExceeded = 12,
+    ContractPaused = 13,
+    NotAdmin = 14,
 }
 
 #[contracttype]
@@ -75,6 +78,32 @@ enum DataKey {
     RateLimit,
     LastReviewLedger(Address),
     Token,
+    Paused,
+}
+
+fn require_not_paused(env: &Env) -> Result<(), ReputationError> {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        return Err(ReputationError::ContractPaused);
+    }
+    Ok(())
+}
+
+fn require_admin(env: &Env, admin: &Address) -> Result<(), ReputationError> {
+    let stored_admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(ReputationError::NotInitialized)?;
+
+    if admin != &stored_admin {
+        return Err(ReputationError::NotAdmin);
+    }
+    Ok(())
 }
 
 const MIN_REVIEW_STAKE_DEFAULT: i128 = 10_000_000; // 1.0 unit (7 decimals)
@@ -116,7 +145,9 @@ fn bump_badges_ttl(env: &Env, user: &Address) {
 }
 
 fn bump_instance_ttl(env: &Env) {
-    env.storage().instance().extend_ttl(MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+    env.storage()
+        .instance()
+        .extend_ttl(MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
 }
 
 /// Calculate the reputation tier based on average rating score.
@@ -160,6 +191,7 @@ impl ReputationContract {
         stake_weight: i128,
     ) -> Result<(), ReputationError> {
         reviewer.require_auth();
+        require_not_paused(&env)?;
 
         if !(1..=5).contains(&rating) {
             return Err(ReputationError::InvalidRating);
@@ -169,25 +201,43 @@ impl ReputationContract {
         }
 
         // 1. Minimum Stake Check
-        let min_stake = env.storage().instance().get(&DataKey::MinStake).unwrap_or(MIN_REVIEW_STAKE_DEFAULT);
+        let min_stake = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinStake)
+            .unwrap_or(MIN_REVIEW_STAKE_DEFAULT);
         if stake_weight < min_stake {
             return Err(ReputationError::BelowMinStake);
         }
 
         // 2. Rate Limit Check
-        let rate_limit = env.storage().instance().get(&DataKey::RateLimit).unwrap_or(RATE_LIMIT_LEDGERS_DEFAULT);
+        let rate_limit = env
+            .storage()
+            .instance()
+            .get(&DataKey::RateLimit)
+            .unwrap_or(RATE_LIMIT_LEDGERS_DEFAULT);
         if rate_limit > 0 {
             let last_ledger_key = DataKey::LastReviewLedger(reviewer.clone());
-            if let Some(last_ledger) = env.storage().persistent().get::<DataKey, u32>(&last_ledger_key) {
+            if let Some(last_ledger) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, u32>(&last_ledger_key)
+            {
                 let current_ledger = env.ledger().sequence();
                 if current_ledger < last_ledger.saturating_add(rate_limit) {
                     return Err(ReputationError::RateLimitExceeded);
                 }
             }
             let current_ledger = env.ledger().sequence();
-            env.storage().persistent().set(&last_ledger_key, &current_ledger);
+            env.storage()
+                .persistent()
+                .set(&last_ledger_key, &current_ledger);
             // Extend TTL for rate limit data
-            env.storage().persistent().extend_ttl(&last_ledger_key, MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+            env.storage().persistent().extend_ttl(
+                &last_ledger_key,
+                MIN_TTL_THRESHOLD,
+                MIN_TTL_EXTEND_TO,
+            );
         }
 
         // Check if this reviewer already reviewed this user for this job
@@ -332,17 +382,71 @@ impl ReputationContract {
             return Err(ReputationError::InvalidDecayRate);
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::DecayRate, &decay_rate);
-        env.storage().instance().set(&DataKey::MinStake, &MIN_REVIEW_STAKE_DEFAULT);
-        env.storage().instance().set(&DataKey::RateLimit, &RATE_LIMIT_LEDGERS_DEFAULT);
+        env.storage()
+            .instance()
+            .set(&DataKey::DecayRate, &decay_rate);
+        env.storage()
+            .instance()
+            .set(&DataKey::MinStake, &MIN_REVIEW_STAKE_DEFAULT);
+        env.storage()
+            .instance()
+            .set(&DataKey::RateLimit, &RATE_LIMIT_LEDGERS_DEFAULT);
+        env.storage().instance().set(&DataKey::Paused, &false);
         bump_instance_ttl(&env);
         Ok(())
+    }
+
+    /// Pause the contract (admin only).
+    pub fn pause(env: Env, admin: Address) -> Result<(), ReputationError> {
+        admin.require_auth();
+        require_admin(&env, &admin)?;
+
+        env.storage().instance().set(&DataKey::Paused, &true);
+        bump_instance_ttl(&env);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("reput"), symbol_short!("paused")),
+            (admin, env.ledger().timestamp()),
+        );
+
+        Ok(())
+    }
+
+    /// Unpause the contract (admin only).
+    pub fn unpause(env: Env, admin: Address) -> Result<(), ReputationError> {
+        admin.require_auth();
+        require_admin(&env, &admin)?;
+
+        env.storage().instance().set(&DataKey::Paused, &false);
+        bump_instance_ttl(&env);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("reput"), symbol_short!("unpaused")),
+            (admin, env.ledger().timestamp()),
+        );
+
+        Ok(())
+    }
+
+    /// Check if the contract is paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     /// Update the minimum stake requirement for reviews.
     pub fn set_min_stake(env: Env, admin: Address, amount: i128) -> Result<(), ReputationError> {
         admin.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ReputationError::NotInitialized)?;
+        require_not_paused(&env)?;
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ReputationError::NotInitialized)?;
         if admin != stored_admin {
             return Err(ReputationError::Unauthorized);
         }
@@ -354,7 +458,12 @@ impl ReputationContract {
     /// Update the rate limit (number of ledgers between reviews).
     pub fn set_rate_limit(env: Env, admin: Address, ledgers: u32) -> Result<(), ReputationError> {
         admin.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ReputationError::NotInitialized)?;
+        require_not_paused(&env)?;
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ReputationError::NotInitialized)?;
         if admin != stored_admin {
             return Err(ReputationError::Unauthorized);
         }
@@ -365,18 +474,29 @@ impl ReputationContract {
 
     /// Get the current minimum stake requirement.
     pub fn get_min_stake(env: Env) -> i128 {
-        env.storage().instance().get(&DataKey::MinStake).unwrap_or(MIN_REVIEW_STAKE_DEFAULT)
+        env.storage()
+            .instance()
+            .get(&DataKey::MinStake)
+            .unwrap_or(MIN_REVIEW_STAKE_DEFAULT)
     }
 
     /// Get the current rate limit in ledgers.
     pub fn get_rate_limit(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::RateLimit).unwrap_or(RATE_LIMIT_LEDGERS_DEFAULT)
+        env.storage()
+            .instance()
+            .get(&DataKey::RateLimit)
+            .unwrap_or(RATE_LIMIT_LEDGERS_DEFAULT)
     }
 
     /// Set the token used for accountability stake.
     pub fn set_token(env: Env, admin: Address, token: Address) -> Result<(), ReputationError> {
         admin.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ReputationError::NotInitialized)?;
+        require_not_paused(&env)?;
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ReputationError::NotInitialized)?;
         if admin != stored_admin {
             return Err(ReputationError::Unauthorized);
         }
@@ -396,19 +516,24 @@ impl ReputationContract {
     /// Set the decay rate for reviews (0-100 percentage per year).
     pub fn set_decay_rate(env: Env, admin: Address, rate: u32) -> Result<(), ReputationError> {
         admin.require_auth();
-        
-        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ReputationError::NotInitialized)?;
+        require_not_paused(&env)?;
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ReputationError::NotInitialized)?;
         if admin != stored_admin {
             return Err(ReputationError::Unauthorized);
         }
-        
+
         if rate > 100 {
             return Err(ReputationError::InvalidDecayRate);
         }
-        
+
         env.storage().instance().set(&DataKey::DecayRate, &rate);
         bump_instance_ttl(&env);
-        
+
         // Emit event
         env.events().publish(
             (symbol_short!("reput"), symbol_short!("decay_rt")),
@@ -420,28 +545,32 @@ impl ReputationContract {
     /// Calculate effective weight of a review, applying time decay.
     /// Formula: effective_weight = stake_weight * max(0, 100 - decay_rate * age_in_seconds / ONE_YEAR) / 100
     pub fn get_effective_weight(env: Env, review: Review, current_time: u64) -> i128 {
-        let decay_rate: u32 = env.storage().instance().get(&DataKey::DecayRate).unwrap_or(0);
-        
+        let decay_rate: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DecayRate)
+            .unwrap_or(0);
+
         let initial_weight = if review.stake_weight > 0 {
             review.stake_weight
         } else {
             1_i128
         };
-        
+
         if decay_rate == 0 {
             return initial_weight;
         }
 
         let age_in_seconds = current_time.saturating_sub(review.timestamp);
         let one_year_in_seconds = 31_536_000_u64;
-        
+
         let decay_amount = (decay_rate as u64).saturating_mul(age_in_seconds) / one_year_in_seconds;
         let decay_factor = 100_u64.saturating_sub(decay_amount);
-        
+
         if decay_factor == 0 {
             return 0;
         }
-        
+
         (initial_weight.saturating_mul(decay_factor as i128)) / 100
     }
 
@@ -450,13 +579,14 @@ impl ReputationContract {
         if reviews.is_empty() {
             return Ok(0);
         }
-        
+
         let current_time = env.ledger().timestamp();
         let mut total_score: u64 = 0;
         let mut total_weight: u64 = 0;
-        
+
         for review in reviews.iter() {
-            let effective_weight = Self::get_effective_weight(env.clone(), review.clone(), current_time);
+            let effective_weight =
+                Self::get_effective_weight(env.clone(), review.clone(), current_time);
             let weight = if effective_weight > 0 {
                 effective_weight as u64
             } else {
@@ -465,11 +595,11 @@ impl ReputationContract {
             total_score += (review.rating as u64) * weight;
             total_weight += weight;
         }
-        
+
         if total_weight == 0 {
             return Ok(0); // If completely decayed, acts as no rep
         }
-        
+
         Ok((total_score * 100) / total_weight)
     }
 
