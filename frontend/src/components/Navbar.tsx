@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import {
   Menu,
   X,
@@ -12,6 +13,7 @@ import {
   User as UserIcon,
   Settings,
   Search,
+  ShieldCheck,
 } from "lucide-react";
 import axios from "axios";
 import { useState, useRef, useEffect } from "react";
@@ -19,6 +21,7 @@ import { useWallet } from "@/context/WalletContext";
 import { useSocket } from "@/context/SocketContext";
 import { useAuth } from "@/context/AuthContext";
 import ThemeToggleButton from "./ThemeToggleButton";
+import NotificationBell from "./NotificationBell";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 
@@ -55,10 +58,13 @@ function UserMenu({ className }: { className?: string }) {
         >
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex items-center justify-center text-white font-bold text-sm">
             {user.avatarUrl ? (
-              <img
+              <Image
                 src={user.avatarUrl}
                 alt={user.username}
+                width={32}
+                height={32}
                 className="w-full h-full rounded-full object-cover"
+                unoptimized
               />
             ) : (
               user.username.charAt(0).toUpperCase()
@@ -213,6 +219,13 @@ export default function Navbar() {
               Services
             </Link>
             <Link
+              href="/disputes"
+              className="text-theme-text hover:text-theme-heading transition-colors flex items-center gap-2"
+            >
+              <ShieldCheck size={16} />
+              Disputes
+            </Link>
+            <Link
               href="/dashboard"
               className="text-theme-text hover:text-theme-heading transition-colors flex items-center gap-2"
             >
@@ -235,9 +248,10 @@ export default function Navbar() {
               <PenLine size={16} />
               Post a Job
             </Link>
-              <ThemeToggleButton />
-              <UserMenu />
-            </div>
+            <NotificationBell />
+            <ThemeToggleButton />
+            <UserMenu />
+          </div>
 
           <button
             className="md:hidden text-theme-text"
@@ -262,6 +276,12 @@ export default function Navbar() {
               <Search size={18} /> Services
             </Link>
             <Link
+              href="/disputes"
+              className="text-theme-text hover:text-theme-heading flex items-center gap-2"
+            >
+              <ShieldCheck size={18} /> Disputes
+            </Link>
+            <Link
               href="/dashboard"
               className="text-theme-text hover:text-theme-heading flex items-center gap-2"
             >
@@ -281,9 +301,15 @@ export default function Navbar() {
             >
               <PenLine size={18} /> Post a Job
             </Link>
-            <div className="pt-4 border-t border-theme-border flex items-center justify-between">
-              <span className="text-sm font-medium text-theme-text">Theme</span>
-              <ThemeToggleButton />
+            <div className="pt-4 border-t border-theme-border flex items-center justify-between px-2">
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium text-theme-text">Notifications</span>
+                <NotificationBell />
+              </div>
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium text-theme-text">Theme</span>
+                <ThemeToggleButton />
+              </div>
             </div>
             <UserMenu className="w-fit" />
           </div>

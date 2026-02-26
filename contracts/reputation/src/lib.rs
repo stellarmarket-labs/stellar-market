@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, String, Vec,
 };
 use stellar_market_escrow::{EscrowContractClient, JobStatus};
 
@@ -19,6 +19,8 @@ pub enum ReputationError {
     Unauthorized = 8,
     NotInitialized = 9,
     InvalidDecayRate = 10,
+    BelowMinStake = 11,
+    RateLimitExceeded = 12,
 }
 
 #[contracttype]
@@ -69,7 +71,14 @@ enum DataKey {
     Badges(Address),
     Admin,
     DecayRate,
+    MinStake,
+    RateLimit,
+    LastReviewLedger(Address),
+    Token,
 }
+
+const MIN_REVIEW_STAKE_DEFAULT: i128 = 10_000_000; // 1.0 unit (7 decimals)
+const RATE_LIMIT_LEDGERS_DEFAULT: u32 = 120; // ~10 minutes
 
 const MIN_TTL_THRESHOLD: u32 = 1_000;
 const MIN_TTL_EXTEND_TO: u32 = 10_000;
@@ -159,6 +168,28 @@ impl ReputationContract {
             return Err(ReputationError::SelfReview);
         }
 
+        // 1. Minimum Stake Check
+        let min_stake = env.storage().instance().get(&DataKey::MinStake).unwrap_or(MIN_REVIEW_STAKE_DEFAULT);
+        if stake_weight < min_stake {
+            return Err(ReputationError::BelowMinStake);
+        }
+
+        // 2. Rate Limit Check
+        let rate_limit = env.storage().instance().get(&DataKey::RateLimit).unwrap_or(RATE_LIMIT_LEDGERS_DEFAULT);
+        if rate_limit > 0 {
+            let last_ledger_key = DataKey::LastReviewLedger(reviewer.clone());
+            if let Some(last_ledger) = env.storage().persistent().get::<DataKey, u32>(&last_ledger_key) {
+                let current_ledger = env.ledger().sequence();
+                if current_ledger < last_ledger.saturating_add(rate_limit) {
+                    return Err(ReputationError::RateLimitExceeded);
+                }
+            }
+            let current_ledger = env.ledger().sequence();
+            env.storage().persistent().set(&last_ledger_key, &current_ledger);
+            // Extend TTL for rate limit data
+            env.storage().persistent().extend_ttl(&last_ledger_key, MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+        }
+
         // Check if this reviewer already reviewed this user for this job
         let review_key = DataKey::ReviewExists(reviewer.clone(), reviewee.clone(), job_id);
         if env.storage().persistent().has(&review_key) {
@@ -183,6 +214,11 @@ impl ReputationContract {
         if !valid_participants {
             return Err(ReputationError::NotJobParticipant);
         }
+
+        // 3. Accountability Stake Transfer
+        // Transfer stake from reviewer to this contract
+        let token_client = token::Client::new(&env, &job.token);
+        token_client.transfer(&reviewer, &env.current_contract_address(), &stake_weight);
 
         let weight = if stake_weight > 0 {
             stake_weight as u64
@@ -297,8 +333,64 @@ impl ReputationContract {
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::DecayRate, &decay_rate);
+        env.storage().instance().set(&DataKey::MinStake, &MIN_REVIEW_STAKE_DEFAULT);
+        env.storage().instance().set(&DataKey::RateLimit, &RATE_LIMIT_LEDGERS_DEFAULT);
         bump_instance_ttl(&env);
         Ok(())
+    }
+
+    /// Update the minimum stake requirement for reviews.
+    pub fn set_min_stake(env: Env, admin: Address, amount: i128) -> Result<(), ReputationError> {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ReputationError::NotInitialized)?;
+        if admin != stored_admin {
+            return Err(ReputationError::Unauthorized);
+        }
+        env.storage().instance().set(&DataKey::MinStake, &amount);
+        bump_instance_ttl(&env);
+        Ok(())
+    }
+
+    /// Update the rate limit (number of ledgers between reviews).
+    pub fn set_rate_limit(env: Env, admin: Address, ledgers: u32) -> Result<(), ReputationError> {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ReputationError::NotInitialized)?;
+        if admin != stored_admin {
+            return Err(ReputationError::Unauthorized);
+        }
+        env.storage().instance().set(&DataKey::RateLimit, &ledgers);
+        bump_instance_ttl(&env);
+        Ok(())
+    }
+
+    /// Get the current minimum stake requirement.
+    pub fn get_min_stake(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::MinStake).unwrap_or(MIN_REVIEW_STAKE_DEFAULT)
+    }
+
+    /// Get the current rate limit in ledgers.
+    pub fn get_rate_limit(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::RateLimit).unwrap_or(RATE_LIMIT_LEDGERS_DEFAULT)
+    }
+
+    /// Set the token used for accountability stake.
+    pub fn set_token(env: Env, admin: Address, token: Address) -> Result<(), ReputationError> {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ReputationError::NotInitialized)?;
+        if admin != stored_admin {
+            return Err(ReputationError::Unauthorized);
+        }
+        env.storage().instance().set(&DataKey::Token, &token);
+        bump_instance_ttl(&env);
+        Ok(())
+    }
+
+    /// Get the current accountability token address.
+    pub fn get_token(env: Env) -> Result<Address, ReputationError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(ReputationError::NotInitialized)
     }
 
     /// Set the decay rate for reviews (0-100 percentage per year).

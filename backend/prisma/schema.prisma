@@ -60,6 +60,15 @@ enum NotificationType {
   NEW_MESSAGE
 }
 
+enum DisputeStatus {
+  OPEN
+  REVIEWING
+  VOTING
+  RESOLVED_CLIENT
+  RESOLVED_FREELANCER
+  OVERRIDDEN_BY_ADMIN
+}
+
 model User {
   id            String   @id @default(cuid())
   walletAddress String   @unique
@@ -94,6 +103,10 @@ model User {
   transactionsTo   Transaction[] @relation("TransactionsTo")
   attachments      Attachment[]
   notifications    Notification[]
+  auditLogs      AuditLog[]
+  initiatedDisputes Dispute[]    @relation("DisputeInitiated")
+  respondedDisputes Dispute[]    @relation("DisputeResponded")
+  votesCast        Vote[]        @relation("VotesCast")
 }
 
 model Job {
@@ -124,6 +137,7 @@ model Job {
   reviews      Review[]
   transactions Transaction[]
   attachments  Attachment[]
+  dispute      Dispute?
 }
 
 model Milestone {
@@ -228,6 +242,7 @@ model Attachment {
 
   uploader User  @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
   job      Job?  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  dispute  Dispute? @relation(fields: [disputeId], references: [id], onDelete: Cascade)
 
   @@index([uploaderId])
   @@index([jobId])
@@ -249,4 +264,60 @@ model Notification {
 
   @@index([userId])
   @@index([createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  adminId   String
+  action    String
+  target    String
+  metadata  Json?
+  timestamp DateTime @default(now())
+
+  admin     User     @relation(fields: [adminId], references: [id])
+}
+
+model Dispute {
+  id                 String        @id @default(cuid())
+  jobId              String        @unique
+  contractDisputeId  String?       @unique
+  initiatorId        String
+  respondentId       String
+  reason             String
+  status             DisputeStatus @default(OPEN)
+  votesForClient     Int           @default(0)
+  votesForFreelancer Int           @default(0)
+  minVotes           Int           @default(3)
+  escalated          Boolean       @default(false)
+  outcome            String?
+  resolvedAt         DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  job                Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  initiator          User          @relation("DisputeInitiated", fields: [initiatorId], references: [id])
+  respondent         User          @relation("DisputeResponded", fields: [respondentId], references: [id])
+  votes              Vote[]
+  attachments        Attachment[]
+
+  @@index([jobId])
+  @@index([initiatorId])
+  @@index([respondentId])
+  @@index([status])
+}
+
+model Vote {
+  id        String   @id @default(cuid())
+  disputeId String
+  voterId   String
+  choice    String   // "CLIENT" or "FREELANCER"
+  reason    String
+  createdAt DateTime @default(now())
+
+  dispute   Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  voter     User     @relation("VotesCast", fields: [voterId], references: [id])
+
+  @@unique([disputeId, voterId])
+  @@index([disputeId])
+  @@index([voterId])
 }

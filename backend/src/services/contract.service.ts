@@ -123,4 +123,103 @@ export class ContractService {
     }
     return { success: false, error: response.status };
   }
+
+  /**
+   * Builds an un-signed transaction XDR for raising a dispute.
+   */
+  static async buildRaiseDisputeTx(
+    initiatorPublicKey: string,
+    jobId: number,
+    clientPublicKey: string,
+    freelancerPublicKey: string,
+    reason: string,
+    minVotes: number
+  ) {
+    const contract = new Contract(config.stellar.disputeContractId);
+    const account = await server.getAccount(initiatorPublicKey);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase,
+    })
+    .addOperation(
+      contract.call(
+        "raise_dispute",
+        nativeToScVal(BigInt(jobId)),
+        new Address(clientPublicKey).toScVal(),
+        new Address(freelancerPublicKey).toScVal(),
+        new Address(initiatorPublicKey).toScVal(),
+        nativeToScVal(reason),
+        nativeToScVal(minVotes, { type: "u32" })
+      )
+    )
+    .setTimeout(0)
+    .build();
+
+    return tx.toXDR();
+  }
+
+  /**
+   * Builds an un-signed transaction XDR for casting a vote on a dispute.
+   */
+  static async buildCastVoteTx(
+    voterPublicKey: string,
+    disputeId: number,
+    choice: number, // 0 for Client, 1 for Freelancer (based on enum in contract)
+    reason: string
+  ) {
+    const contract = new Contract(config.stellar.disputeContractId);
+    const account = await server.getAccount(voterPublicKey);
+
+    // Soroban enums are typically represented as symbols or integers depending on the SDK mapping
+    // Here we'll map 0 -> 'Client', 1 -> 'Freelancer' for the VoteChoice enum
+    const choiceScVal = xdr.ScVal.scvVec([
+        xdr.ScVal.scvSymbol(choice === 0 ? "Client" : "Freelancer")
+    ]);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase,
+    })
+    .addOperation(
+      contract.call(
+        "cast_vote",
+        nativeToScVal(BigInt(disputeId)),
+        new Address(voterPublicKey).toScVal(),
+        xdr.ScVal.scvSymbol(choice === 0 ? "Client" : "Freelancer"),
+        nativeToScVal(reason)
+      )
+    )
+    .setTimeout(0)
+    .build();
+
+    return tx.toXDR();
+  }
+
+  /**
+   * Builds an un-signed transaction XDR for resolving a dispute.
+   */
+  static async buildResolveDisputeTx(
+    callerPublicKey: string,
+    disputeId: number,
+  ) {
+    const contract = new Contract(config.stellar.disputeContractId);
+    const account = await server.getAccount(callerPublicKey);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase,
+    })
+    .addOperation(
+      contract.call(
+        "resolve_dispute",
+        nativeToScVal(BigInt(disputeId)),
+        new Address(config.stellar.escrowContractId).toScVal()
+      )
+    )
+    .setTimeout(0)
+    .build();
+
+    return tx.toXDR();
+  }
 }

@@ -20,6 +20,9 @@ pub enum EscrowError {
     HasPendingMilestone = 9,
     NoRefundDue = 10,
     GracePeriodNotMet = 11,
+    InvalidMilestoneIndex = 12,
+    TokenNotAllowed = 13,
+    AlreadyInitialized = 14,
 }
 
 #[contracttype]
@@ -420,6 +423,93 @@ impl EscrowContract {
         );
 
         Ok(())
+    }
+
+    /// Client approves multiple milestones at once and releases payments to the freelancer.
+    /// All milestone indices must be in Submitted state before any state changes occur.
+    /// If any index is invalid or not in Submitted state, the entire call reverts.
+    pub fn approve_milestones_batch(
+        env: Env,
+        job_id: u64,
+        milestone_indices: Vec<u32>,
+        client: Address,
+    ) -> Result<i128, EscrowError> {
+        client.require_auth();
+
+        let mut job: Job = env
+            .storage()
+            .persistent()
+            .get(&get_job_key(job_id))
+            .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
+
+        if job.client != client {
+            return Err(EscrowError::Unauthorized);
+        }
+
+        // Validate all milestone indices before making any state changes
+        let mut milestones = job.milestones.clone();
+        let mut total_released: i128 = 0;
+
+        for i in milestone_indices.iter() {
+            let index = i;
+            let milestone = milestones
+                .get(index)
+                .ok_or(EscrowError::MilestoneNotFound)?;
+
+            if milestone.status != MilestoneStatus::Submitted {
+                return Err(EscrowError::InvalidStatus);
+            }
+        }
+
+        // All validations passed - now process the batch atomically
+        for i in milestone_indices.iter() {
+            let index = i;
+            let milestone = milestones.get(index).unwrap();
+
+            // Release payment for this milestone
+            total_released += milestone.amount;
+
+            let updated = Milestone {
+                id: milestone.id,
+                description: milestone.description.clone(),
+                amount: milestone.amount,
+                status: MilestoneStatus::Approved,
+                deadline: milestone.deadline,
+            };
+            milestones.set(index, updated);
+        }
+
+        // Transfer all payments in a single transaction
+        if total_released > 0 {
+            let token_client = token::Client::new(&env, &job.token);
+            token_client.transfer(
+                &env.current_contract_address(),
+                &job.freelancer,
+                &total_released,
+            );
+        }
+
+        job.milestones = milestones.clone();
+
+        // Check if all milestones are approved
+        let all_approved = milestones
+            .iter()
+            .all(|m| m.status == MilestoneStatus::Approved);
+        if all_approved {
+            job.status = JobStatus::Completed;
+        }
+
+        env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
+
+        // Emit batch approval event
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("batch")),
+            (job_id, milestone_indices, total_released),
+        );
+
+        Ok(total_released)
     }
 
     /// Cancel the job and refund remaining funds to the client.

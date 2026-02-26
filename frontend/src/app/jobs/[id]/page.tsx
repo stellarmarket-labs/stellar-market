@@ -9,6 +9,7 @@ import { useWallet } from "@/context/WalletContext";
 import { useAuth } from "@/context/AuthContext";
 import StatusBadge from "@/components/StatusBadge";
 import ApplyModal from "@/components/ApplyModal";
+import RaiseDisputeModal from "@/components/RaiseDisputeModal";
 import { Job } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
@@ -22,6 +23,7 @@ export default function JobDetailPage() {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [disputeModalOpen, setDisputeModalOpen] = useState(false);
   const [hasApplied, setHasApplied] = useState(false);
 
   const fetchJob = useCallback(async () => {
@@ -264,10 +266,19 @@ export default function JobDetailPage() {
             )}
             
             {job.escrowStatus === "FUNDED" && (
-                <div className="p-3 bg-stellar-blue/10 border border-stellar-blue/20 rounded-lg text-xs text-stellar-blue flex items-center gap-2">
+                <div className="p-3 bg-stellar-blue/10 border border-stellar-blue/20 rounded-lg text-xs text-stellar-blue flex items-center gap-2 mb-4">
                     <ShieldCheck size={16} />
                     Funds are secured in escrow
                 </div>
+            )}
+
+            {isOwnJob && (job.status === "IN_PROGRESS" || job.status === "COMPLETED") && job.escrowStatus !== "DISPUTED" && (
+                <button
+                  className="btn-secondary w-full flex items-center justify-center gap-2 border-theme-error text-theme-error hover:bg-theme-error/10"
+                  onClick={() => setDisputeModalOpen(true)}
+                >
+                  <AlertCircle size={18} /> Raise Dispute
+                </button>
             )}
           </div>
 
@@ -303,6 +314,18 @@ export default function JobDetailPage() {
           isOpen={applyModalOpen}
           onClose={() => setApplyModalOpen(false)}
           onSuccess={() => setHasApplied(true)}
+        />
+      )}
+
+      {isOwnJob && (
+        <RaiseDisputeModal
+          job={job}
+          isOpen={disputeModalOpen}
+          onClose={() => setDisputeModalOpen(false)}
+          onSuccess={() => {
+            setDisputeModalOpen(false);
+            fetchJob();
+          }}
         />
       )}
     </div>

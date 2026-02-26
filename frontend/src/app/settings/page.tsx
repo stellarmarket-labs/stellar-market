@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import { useAuth } from "@/context/AuthContext";
@@ -256,12 +257,15 @@ export default function SettingsPage() {
             )}
             {avatarUrl && !errors.avatarUrl && (
               <div className="mt-3 flex items-center gap-3">
-                <img
+                <Image
                   src={avatarUrl}
                   alt="Avatar preview"
+                  width={48}
+                  height={48}
                   className="w-12 h-12 rounded-full object-cover border border-theme-border"
+                  unoptimized
                   onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = "none";
+                    (e.currentTarget as HTMLImageElement).style.display = "none";
                   }}
                 />
                 <span className="text-theme-text text-xs">Preview</span>

@@ -11,6 +11,7 @@ export const config = {
     networkPassphrase: process.env.STELLAR_NETWORK_PASSPHRASE || "Test SDF Network ; September 2015",
     rpcUrl: process.env.STELLAR_RPC_URL || "https://soroban-testnet.stellar.org",
     escrowContractId: process.env.ESCROW_CONTRACT_ID || "",
+    disputeContractId: process.env.DISPUTE_CONTRACT_ID || "",
     nativeTokenId: process.env.NATIVE_TOKEN_ID || "CDLZFC3SYJYDZT7K67VZ75YJBMKBAV27Z6Y6Z6Z6Z6Z6Z6Z6Z6Z6Z6Z6Z", // Native XLM on Testnet
   },
   smtp: {

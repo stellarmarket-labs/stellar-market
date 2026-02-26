@@ -4,6 +4,9 @@ use super::*;
 use soroban_sdk::{symbol_short, testutils::{Address as _, Ledger}, Env, String, Vec};
 use stellar_market_escrow::{EscrowContract, Job, JobStatus};
 
+// The minimum stake required per review (must match lib.rs constant)
+const MIN_STAKE: i128 = 10_000_000;
+
 /// Helper: directly write a completed job into the escrow contract's storage,
 /// bypassing the full escrow flow (token transfers, milestone approvals, etc.).
 fn setup_completed_job(
@@ -12,13 +15,13 @@ fn setup_completed_job(
     job_id: u64,
     client: &Address,
     freelancer: &Address,
+    token: &Address,
 ) {
-    let token = Address::generate(env);
     let job = Job {
         id: job_id,
         client: client.clone(),
         freelancer: freelancer.clone(),
-        token,
+        token: token.clone(),
         total_amount: 1000,
         status: JobStatus::Completed,
         milestones: Vec::new(env),
@@ -39,13 +42,13 @@ fn setup_in_progress_job(
     job_id: u64,
     client: &Address,
     freelancer: &Address,
+    token: &Address,
 ) {
-    let token = Address::generate(env);
     let job = Job {
         id: job_id,
         client: client.clone(),
         freelancer: freelancer.clone(),
-        token,
+        token: token.clone(),
         total_amount: 1000,
         status: JobStatus::InProgress,
         milestones: Vec::new(env),
@@ -59,6 +62,17 @@ fn setup_in_progress_job(
     });
 }
 
+fn create_token(env: &Env, admin: &Address) -> Address {
+    env.register_stellar_asset_contract(admin.clone())
+}
+
+fn mint(env: &Env, token_addr: &Address, admin: &Address, to: &Address, amount: i128) {
+    let token_client = token::StellarAssetClient::new(env, token_addr);
+    token_client.mint(to, &amount);
+    // Also approve reputation contract to receive stake (mock_all_auths handles this)
+    let _ = admin;
+}
+
 #[test]
 fn test_submit_review_client_reviews_freelancer() {
     let env = Env::default();
@@ -70,8 +84,11 @@ fn test_submit_review_client_reviews_freelancer() {
 
     let client_addr = Address::generate(&env);
     let freelancer_addr = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr);
+    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
 
     reputation_client.submit_review(
         &escrow_id,
@@ -80,13 +97,13 @@ fn test_submit_review_client_reviews_freelancer() {
         &1u64,
         &4u32,
         &String::from_str(&env, "Great work!"),
-        &10_i128,
+        &MIN_STAKE,
     );
 
     let rep = reputation_client.get_reputation(&freelancer_addr);
     assert_eq!(rep.review_count, 1);
-    assert_eq!(rep.total_score, 40); // 4 * 10 weight
-    assert_eq!(rep.total_weight, 10);
+    assert_eq!(rep.total_score, 4 * MIN_STAKE as u64);
+    assert_eq!(rep.total_weight, MIN_STAKE as u64);
 }
 
 #[test]
@@ -100,10 +117,12 @@ fn test_submit_review_freelancer_reviews_client() {
 
     let client_addr = Address::generate(&env);
     let freelancer_addr = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &freelancer_addr, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr);
+    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
 
-    // Freelancer reviews the client (reverse direction is also valid)
     reputation_client.submit_review(
         &escrow_id,
         &freelancer_addr,
@@ -111,13 +130,13 @@ fn test_submit_review_freelancer_reviews_client() {
         &1u64,
         &5u32,
         &String::from_str(&env, "Easy to work with"),
-        &5_i128,
+        &MIN_STAKE,
     );
 
     let rep = reputation_client.get_reputation(&client_addr);
     assert_eq!(rep.review_count, 1);
-    assert_eq!(rep.total_score, 25); // 5 * 5 weight
-    assert_eq!(rep.total_weight, 5);
+    assert_eq!(rep.total_score, 5 * MIN_STAKE as u64);
+    assert_eq!(rep.total_weight, MIN_STAKE as u64);
 }
 
 #[test]
@@ -132,12 +151,15 @@ fn test_average_rating() {
     let reviewer1 = Address::generate(&env);
     let reviewer2 = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer1, 100_000_000);
+    mint(&env, &token_addr, &token_admin, &reviewer2, 100_000_000);
 
-    // Two separate completed jobs with different reviewers
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee);
-    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee, &token_addr);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
 
-    // Review 1: 5 stars, weight 10
+    // Review 1: 5 stars, min weight
     reputation_client.submit_review(
         &escrow_id,
         &reviewer1,
@@ -145,10 +167,10 @@ fn test_average_rating() {
         &1u64,
         &5u32,
         &String::from_str(&env, "Excellent"),
-        &10_i128,
+        &MIN_STAKE,
     );
 
-    // Review 2: 3 stars, weight 10
+    // Review 2: 3 stars, min weight
     reputation_client.submit_review(
         &escrow_id,
         &reviewer2,
@@ -156,11 +178,11 @@ fn test_average_rating() {
         &2u64,
         &3u32,
         &String::from_str(&env, "Average"),
-        &10_i128,
+        &MIN_STAKE,
     );
 
     let avg = reputation_client.get_average_rating(&reviewee);
-    // (5*10 + 3*10) * 100 / (10 + 10) = 8000 / 20 = 400 (4.00 stars)
+    // (5*MIN + 3*MIN) * 100 / (MIN + MIN) = 400 (4.00 stars)
     assert_eq!(avg, 400);
     assert_eq!(reputation_client.get_review_count(&reviewee), 2);
 }
@@ -171,7 +193,6 @@ fn test_invalid_rating() {
     let env = Env::default();
     env.mock_all_auths();
 
-    // Rating is validated before the escrow call, so any address suffices here
     let escrow_id = env.register_contract(None, EscrowContract);
     let reputation_id = env.register_contract(None, ReputationContract);
     let reputation_client = ReputationContractClient::new(&env, &reputation_id);
@@ -179,6 +200,7 @@ fn test_invalid_rating() {
     let reviewer = Address::generate(&env);
     let reviewee = Address::generate(&env);
 
+    // Rating is validated first (before stake check), so small weight still triggers #1
     reputation_client.submit_review(
         &escrow_id,
         &reviewer,
@@ -196,17 +218,17 @@ fn test_self_review() {
     let env = Env::default();
     env.mock_all_auths();
 
-    // Self-review is validated before the escrow call
     let escrow_id = env.register_contract(None, EscrowContract);
     let reputation_id = env.register_contract(None, ReputationContract);
     let reputation_client = ReputationContractClient::new(&env, &reputation_id);
 
     let user = Address::generate(&env);
 
+    // Self-review check happens before stake check
     reputation_client.submit_review(
         &escrow_id,
         &user,
-        &user, // Self review
+        &user,
         &1u64,
         &5u32,
         &String::from_str(&env, "I'm great"),
@@ -215,7 +237,31 @@ fn test_self_review() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #7)")]
+#[should_panic(expected = "Error(Contract, #11)")]
+fn test_reject_below_min_stake() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+
+    let reviewer = Address::generate(&env);
+    let reviewee = Address::generate(&env);
+
+    reputation_client.submit_review(
+        &escrow_id,
+        &reviewer,
+        &reviewee,
+        &1u64,
+        &5u32,
+        &String::from_str(&env, "Sneaky low stake"),
+        &(MIN_STAKE - 1), // Just below minimum
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #11)")]
 fn test_job_not_found() {
     let env = Env::default();
     env.mock_all_auths();
@@ -227,7 +273,9 @@ fn test_job_not_found() {
     let reviewer = Address::generate(&env);
     let reviewee = Address::generate(&env);
 
-    // No job set up in escrow — should fail with JobNotFound
+    // BelowMinStake is checked before JobNotFound, so we see #11 here.
+    // To test JobNotFound properly, we need sufficient stake — but there's no token minted,
+    // so the token transfer will fail anyway. This tests the ordering of checks.
     reputation_client.submit_review(
         &escrow_id,
         &reviewer,
@@ -235,7 +283,38 @@ fn test_job_not_found() {
         &99u64,
         &5u32,
         &String::from_str(&env, "Does not exist"),
-        &1_i128,
+        &1_i128, // Below min stake triggers #11 first
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn test_job_not_found_with_valid_stake() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+
+    let reviewer = Address::generate(&env);
+    let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer, 100_000_000);
+
+    // No job set up in escrow — should fail with JobNotFound (#7)
+    // We need a job record to pass the escrow check, but no job exists here.
+    // We use a dummy token for the stake transfer to succeed, but crossing contract
+    // boundary will fail because there's no job.
+    reputation_client.submit_review(
+        &escrow_id,
+        &reviewer,
+        &reviewee,
+        &99u64,
+        &5u32,
+        &String::from_str(&env, "Does not exist"),
+        &MIN_STAKE,
     );
 }
 
@@ -251,9 +330,12 @@ fn test_job_not_completed() {
 
     let client_addr = Address::generate(&env);
     let freelancer_addr = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &client_addr, 100_000_000);
 
     // Job is InProgress, not Completed
-    setup_in_progress_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr);
+    setup_in_progress_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
 
     reputation_client.submit_review(
         &escrow_id,
@@ -262,7 +344,7 @@ fn test_job_not_completed() {
         &1u64,
         &5u32,
         &String::from_str(&env, "Too early"),
-        &1_i128,
+        &MIN_STAKE,
     );
 }
 
@@ -280,8 +362,11 @@ fn test_not_job_participant() {
     let freelancer_addr = Address::generate(&env);
     let outsider = Address::generate(&env);
     let another = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &outsider, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr);
+    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
 
     // outsider and another were not part of job 1
     reputation_client.submit_review(
@@ -291,7 +376,7 @@ fn test_not_job_participant() {
         &1u64,
         &5u32,
         &String::from_str(&env, "Fraudulent review"),
-        &1_i128,
+        &MIN_STAKE,
     );
 }
 
@@ -308,8 +393,11 @@ fn test_reviewer_not_participant_but_reviewee_is() {
     let client_addr = Address::generate(&env);
     let freelancer_addr = Address::generate(&env);
     let outsider = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &outsider, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr);
+    setup_completed_job(&env, &escrow_id, 1u64, &client_addr, &freelancer_addr, &token_addr);
 
     // outsider tries to review the freelancer — reviewer is not a participant
     reputation_client.submit_review(
@@ -319,7 +407,7 @@ fn test_reviewer_not_participant_but_reviewee_is() {
         &1u64,
         &5u32,
         &String::from_str(&env, "I wasn't there"),
-        &1_i128,
+        &MIN_STAKE,
     );
 }
 
@@ -345,8 +433,11 @@ fn test_get_tier_bronze() {
 
     let reviewer = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee, &token_addr);
 
     // Submit review with rating 2 (avg = 200, Bronze tier)
     reputation_client.submit_review(
@@ -356,7 +447,7 @@ fn test_get_tier_bronze() {
         &1u64,
         &2u32,
         &String::from_str(&env, "Okay"),
-        &1_i128,
+        &MIN_STAKE,
     );
 
     let tier = reputation_client.get_tier(&reviewee);
@@ -374,8 +465,11 @@ fn test_get_tier_silver() {
 
     let reviewer = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee, &token_addr);
 
     // Submit review with rating 4 (avg = 400, Silver tier)
     reputation_client.submit_review(
@@ -385,7 +479,7 @@ fn test_get_tier_silver() {
         &1u64,
         &4u32,
         &String::from_str(&env, "Good"),
-        &1_i128,
+        &MIN_STAKE,
     );
 
     let tier = reputation_client.get_tier(&reviewee);
@@ -404,12 +498,15 @@ fn test_get_tier_gold() {
     let reviewer1 = Address::generate(&env);
     let reviewer2 = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer1, 100_000_000);
+    mint(&env, &token_addr, &token_admin, &reviewer2, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee);
-    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee, &token_addr);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
 
-    // Two 5-star reviews with weight 10 each
-    // avg = (5*10 + 5*10) * 100 / 20 = 500 (Gold tier)
+    // Two 5-star reviews with equal weight -> avg = 500 (Gold tier)
     reputation_client.submit_review(
         &escrow_id,
         &reviewer1,
@@ -417,7 +514,7 @@ fn test_get_tier_gold() {
         &1u64,
         &5u32,
         &String::from_str(&env, "Excellent"),
-        &10_i128,
+        &MIN_STAKE,
     );
 
     reputation_client.submit_review(
@@ -427,7 +524,7 @@ fn test_get_tier_gold() {
         &2u64,
         &5u32,
         &String::from_str(&env, "Perfect"),
-        &10_i128,
+        &MIN_STAKE,
     );
 
     let tier = reputation_client.get_tier(&reviewee);
@@ -447,14 +544,18 @@ fn test_get_tier_platinum() {
     let reviewer2 = Address::generate(&env);
     let reviewer3 = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer1, 100_000_000);
+    mint(&env, &token_addr, &token_admin, &reviewer2, 100_000_000);
+    mint(&env, &token_addr, &token_admin, &reviewer3, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee);
-    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee);
-    setup_completed_job(&env, &escrow_id, 3u64, &reviewer3, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee, &token_addr);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
+    setup_completed_job(&env, &escrow_id, 3u64, &reviewer3, &reviewee, &token_addr);
 
-    // Three 5-star reviews with high weight
-    // avg = (5*20 + 5*20 + 5*20) * 100 / 60 = 500 (Gold)
-    // To get Platinum (700+), we need higher weighted average
+    // Three 5-star reviews -> avg = 500 (Gold)
+    // Platinum (700+) is impossible with max rating 5 * 100 = 500
     reputation_client.submit_review(
         &escrow_id,
         &reviewer1,
@@ -462,7 +563,7 @@ fn test_get_tier_platinum() {
         &1u64,
         &5u32,
         &String::from_str(&env, "Outstanding"),
-        &100_i128,
+        &MIN_STAKE,
     );
 
     reputation_client.submit_review(
@@ -472,7 +573,7 @@ fn test_get_tier_platinum() {
         &2u64,
         &5u32,
         &String::from_str(&env, "Exceptional"),
-        &100_i128,
+        &MIN_STAKE,
     );
 
     reputation_client.submit_review(
@@ -482,16 +583,13 @@ fn test_get_tier_platinum() {
         &3u64,
         &5u32,
         &String::from_str(&env, "World-class"),
-        &100_i128,
+        &MIN_STAKE,
     );
 
     let avg = reputation_client.get_average_rating(&reviewee);
-    assert_eq!(avg, 500); // Still Gold, need better strategy for Platinum
+    assert_eq!(avg, 500);
 
-    // For Platinum, we need avg >= 700, which means rating * 100 >= 700
-    // This is impossible with max rating of 5 (5 * 100 = 500)
-    // Let's adjust: the tier thresholds should be based on the scaled rating (rating * 100)
-    // So 700+ would require impossible ratings. Let's verify current tier is Gold.
+    // Platinum requires avg >= 700, impossible with max rating = 5 (5*100=500). Current tier: Gold.
     let tier = reputation_client.get_tier(&reviewee);
     assert_eq!(tier, ReputationTier::Gold);
 }
@@ -507,8 +605,11 @@ fn test_badge_awarded_on_tier_crossing() {
 
     let reviewer = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee, &token_addr);
 
     // Submit review that crosses into Bronze tier
     reputation_client.submit_review(
@@ -518,7 +619,7 @@ fn test_badge_awarded_on_tier_crossing() {
         &1u64,
         &2u32,
         &String::from_str(&env, "Decent"),
-        &1_i128,
+        &MIN_STAKE,
     );
 
     let badges = reputation_client.get_badges(&reviewee);
@@ -538,9 +639,13 @@ fn test_badge_not_duplicated() {
     let reviewer1 = Address::generate(&env);
     let reviewer2 = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer1, 100_000_000);
+    mint(&env, &token_addr, &token_admin, &reviewer2, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee);
-    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee, &token_addr);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
 
     // First review: Bronze tier (rating 2)
     reputation_client.submit_review(
@@ -550,7 +655,7 @@ fn test_badge_not_duplicated() {
         &1u64,
         &2u32,
         &String::from_str(&env, "Okay"),
-        &1_i128,
+        &MIN_STAKE,
     );
 
     // Second review: Still Bronze tier (avg = (2 + 2) / 2 = 2 = 200)
@@ -561,7 +666,7 @@ fn test_badge_not_duplicated() {
         &2u64,
         &2u32,
         &String::from_str(&env, "Okay again"),
-        &1_i128,
+        &MIN_STAKE,
     );
 
     let badges = reputation_client.get_badges(&reviewee);
@@ -583,10 +688,15 @@ fn test_multiple_tier_badges() {
     let reviewer2 = Address::generate(&env);
     let reviewer3 = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer1, 100_000_000);
+    mint(&env, &token_addr, &token_admin, &reviewer2, 100_000_000);
+    mint(&env, &token_addr, &token_admin, &reviewer3, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee);
-    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee);
-    setup_completed_job(&env, &escrow_id, 3u64, &reviewer3, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee, &token_addr);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
+    setup_completed_job(&env, &escrow_id, 3u64, &reviewer3, &reviewee, &token_addr);
 
     // First review: Bronze tier (rating 2, avg = 200)
     reputation_client.submit_review(
@@ -596,14 +706,15 @@ fn test_multiple_tier_badges() {
         &1u64,
         &2u32,
         &String::from_str(&env, "Okay"),
-        &1_i128,
+        &MIN_STAKE,
     );
 
     let badges = reputation_client.get_badges(&reviewee);
     assert_eq!(badges.len(), 1);
     assert_eq!(badges.get(0).unwrap().badge_type, ReputationTier::Bronze);
 
-    // Second review: Silver tier (rating 5, avg = (2 + 5) / 2 = 3.5 = 350)
+    // Second review: Silver tier 
+    // avg = (2*MIN + 5*MIN) * 100 / (2*MIN) = 350 -> Silver
     reputation_client.submit_review(
         &escrow_id,
         &reviewer2,
@@ -611,7 +722,7 @@ fn test_multiple_tier_badges() {
         &2u64,
         &5u32,
         &String::from_str(&env, "Great improvement"),
-        &1_i128,
+        &MIN_STAKE,
     );
 
     let badges = reputation_client.get_badges(&reviewee);
@@ -619,8 +730,8 @@ fn test_multiple_tier_badges() {
     assert_eq!(badges.get(0).unwrap().badge_type, ReputationTier::Bronze);
     assert_eq!(badges.get(1).unwrap().badge_type, ReputationTier::Silver);
 
-    // Third review: Gold tier (rating 5, avg = (2 + 5 + 5) / 3 = 4 = 400 -> wait, that's still Silver)
-    // Need higher average for Gold (500+), so use weight
+    // Third review with same weight and rating 5:
+    // avg = (2 + 5 + 5) * MIN * 100 / (3 * MIN) = 1200 / 3 = 400 -> still Silver
     reputation_client.submit_review(
         &escrow_id,
         &reviewer3,
@@ -628,12 +739,11 @@ fn test_multiple_tier_badges() {
         &3u64,
         &5u32,
         &String::from_str(&env, "Excellent"),
-        &10_i128,
+        &MIN_STAKE,
     );
 
-    // avg = (2*1 + 5*1 + 5*10) * 100 / (1 + 1 + 10) = 5700 / 12 = 475 (still Silver)
     let avg = reputation_client.get_average_rating(&reviewee);
-    assert!(avg < 500); // Verify it's still Silver
+    assert!(avg < 500); // Still Silver
 
     let badges = reputation_client.get_badges(&reviewee);
     assert_eq!(badges.len(), 2); // Still Bronze and Silver
@@ -651,9 +761,13 @@ fn test_tier_downgrade_no_badge_removal() {
     let reviewer1 = Address::generate(&env);
     let reviewer2 = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer1, 100_000_000);
+    mint(&env, &token_addr, &token_admin, &reviewer2, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee);
-    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee, &token_addr);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
 
     // First review: Silver tier (rating 4, avg = 400)
     reputation_client.submit_review(
@@ -663,7 +777,7 @@ fn test_tier_downgrade_no_badge_removal() {
         &1u64,
         &4u32,
         &String::from_str(&env, "Good"),
-        &1_i128,
+        &MIN_STAKE,
     );
 
     let badges = reputation_client.get_badges(&reviewee);
@@ -671,7 +785,7 @@ fn test_tier_downgrade_no_badge_removal() {
     assert_eq!(badges.get(0).unwrap().badge_type, ReputationTier::Silver);
 
     // Second review: Low rating brings average down to Bronze
-    // avg = (4 + 1) / 2 = 2.5 = 250 (Bronze)
+    // avg = (4*M + 1*M) * 100 / (2*M) = 250 (Bronze)
     reputation_client.submit_review(
         &escrow_id,
         &reviewer2,
@@ -679,7 +793,7 @@ fn test_tier_downgrade_no_badge_removal() {
         &2u64,
         &1u32,
         &String::from_str(&env, "Poor"),
-        &1_i128,
+        &MIN_STAKE,
     );
 
     let tier = reputation_client.get_tier(&reviewee);
@@ -714,8 +828,11 @@ fn test_badge_timestamp() {
 
     let reviewer = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer, 100_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee, &token_addr);
 
     let before_timestamp = env.ledger().timestamp();
 
@@ -726,7 +843,7 @@ fn test_badge_timestamp() {
         &1u64,
         &3u32,
         &String::from_str(&env, "Good"),
-        &1_i128,
+        &MIN_STAKE,
     );
 
     let badges = reputation_client.get_badges(&reviewee);
@@ -771,25 +888,28 @@ fn test_set_decay_rate_invalid() {
 fn test_decay_calculation() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let escrow_id = env.register_contract(None, EscrowContract);
     let reputation_id = env.register_contract(None, ReputationContract);
     let reputation_client = ReputationContractClient::new(&env, &reputation_id);
     let admin = Address::generate(&env);
-    
+
     // Set decay rate to 50% per year
     reputation_client.initialize(&admin, &50u32);
 
     let reviewer = Address::generate(&env);
     let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer, 1_000_000_000);
 
-    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee);
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee, &token_addr);
 
     // Initial timestamp: day 0
     let start_time = 1_000_000;
     env.ledger().with_mut(|l| l.timestamp = start_time);
 
-    // Review with weight 100, rating 5
+    // Review with weight MIN_STAKE, rating 5
     reputation_client.submit_review(
         &escrow_id,
         &reviewer,
@@ -797,30 +917,27 @@ fn test_decay_calculation() {
         &1u64,
         &5u32,
         &String::from_str(&env, "Great"),
-        &100_i128,
+        &MIN_STAKE,
     );
 
-    // At day 0 (no decay), effective weight should be full
-    // avg = 5 * 100 / 100 = 5.0 (500)
+    // At day 0 (no decay), avg = 500
     assert_eq!(reputation_client.get_average_rating(&reviewee), 500);
 
-    // Advance 1 day (86400 seconds)
-    // 50% decay per year (31,536,000s). 1 day is a tiny fraction.
+    // Advance 1 day (86400 seconds) — negligible decay
     env.ledger().with_mut(|l| l.timestamp = start_time + 86400);
-    // Weight should be almost 100, rating still 5.0
     assert_eq!(reputation_client.get_average_rating(&reviewee), 500);
 
     // Advance 1 year (31,536,000 seconds)
-    // 50% decay per year -> weight should be 50
-    // Rating should still be 5.0 because the only review's weight decays, but the score ratio is the same
+    // 50% decay per year -> weight should be 50% of original, but ratio is the same for a single review
     env.ledger().with_mut(|l| l.timestamp = start_time + 31_536_000);
     assert_eq!(reputation_client.get_average_rating(&reviewee), 500);
-    
-    // To actually test that weight decayed, we need to add a second review.
+
+    // To test actual decay, add a second review at year 1
     let reviewer2 = Address::generate(&env);
-    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee);
-    
-    // Second review at year 1 with weight 100, rating 1 (Poor)
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
+    mint(&env, &token_addr, &token_admin, &reviewer2, 1_000_000_000);
+
+    // Second review at year 1 with rating 1 (Poor)
     reputation_client.submit_review(
         &escrow_id,
         &reviewer2,
@@ -828,21 +945,139 @@ fn test_decay_calculation() {
         &2u64,
         &1u32,
         &String::from_str(&env, "Terrible now"),
-        &100_i128,
+        &MIN_STAKE,
     );
 
-    // Now, Review 1 (5 stars) has weight 50 (decayed by 50%). Review 2 (1 star) has weight 100.
-    // Total weight: 150
-    // Weighted score: 5 * 50 + 1 * 100 = 250 + 100 = 350
-    // Avg = 350 / 150 = 2.333... -> 233
+    // Review 1 (5 stars) has 50% weight decay. Review 2 (1 star) has full weight.
+    // effective_w1 = MIN_STAKE/2, effective_w2 = MIN_STAKE
+    // Weighted score: 5 * (MIN/2) + 1 * MIN = 2.5*MIN + MIN = 3.5*MIN
+    // Total weight: MIN/2 + MIN = 1.5*MIN
+    // Avg = 3.5/1.5 * 100 = 233
     assert_eq!(reputation_client.get_average_rating(&reviewee), 233);
-    
-    // Advance to year 2 (63,072,000 seconds from start)
+
+    // Advance to year 2
     // Review 1 is 2 years old -> 100% decayed (weight 0)
-    // Review 2 is 1 year old -> 50% decayed (weight 50)
-    // Total weight: 50
-    // Weighted score: 1 * 50 = 50
-    // Avg = 50 / 50 = 1.0 -> 100
+    // Review 2 is 1 year old -> 50% decayed (weight MIN/2)
+    // Weighted score: 0 + 1 * MIN/2 = MIN/2
+    // Total weight: MIN/2
+    // Avg = 1.0 * 100 = 100
     env.ledger().with_mut(|l| l.timestamp = start_time + 63_072_000);
     assert_eq!(reputation_client.get_average_rating(&reviewee), 100);
+}
+
+#[test]
+fn test_get_set_min_stake() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+
+    reputation_client.initialize(&admin, &50u32);
+
+    // Default min stake
+    assert_eq!(reputation_client.get_min_stake(), MIN_STAKE);
+
+    // Update min stake
+    let new_stake = 20_000_000_i128;
+    reputation_client.set_min_stake(&admin, &new_stake);
+    assert_eq!(reputation_client.get_min_stake(), new_stake);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")]
+fn test_reject_rate_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+
+    reputation_client.initialize(&admin, &50u32);
+
+    let reviewer = Address::generate(&env);
+    let reviewee1 = Address::generate(&env);
+    let reviewee2 = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer, 1_000_000_000);
+
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee1, &token_addr);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer, &reviewee2, &token_addr);
+
+    // First review succeeds
+    reputation_client.submit_review(
+        &escrow_id,
+        &reviewer,
+        &reviewee1,
+        &1u64,
+        &5u32,
+        &String::from_str(&env, "First"),
+        &MIN_STAKE,
+    );
+
+    // Second review in same ledger -> RateLimitExceeded (#12)
+    reputation_client.submit_review(
+        &escrow_id,
+        &reviewer,
+        &reviewee2,
+        &2u64,
+        &5u32,
+        &String::from_str(&env, "Second"),
+        &MIN_STAKE,
+    );
+}
+
+#[test]
+fn test_rate_limit_pass_after_time() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let reputation_client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+
+    reputation_client.initialize(&admin, &50u32);
+
+    let reviewer = Address::generate(&env);
+    let reviewee1 = Address::generate(&env);
+    let reviewee2 = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer, 1_000_000_000);
+
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee1, &token_addr);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer, &reviewee2, &token_addr);
+
+    // First review at ledger 0
+    reputation_client.submit_review(
+        &escrow_id,
+        &reviewer,
+        &reviewee1,
+        &1u64,
+        &5u32,
+        &String::from_str(&env, "First"),
+        &MIN_STAKE,
+    );
+
+    // Advance ledger past rate limit (120 ledgers)
+    env.ledger().with_mut(|l| l.sequence_number = 200);
+
+    // Now the second review should succeed
+    reputation_client.submit_review(
+        &escrow_id,
+        &reviewer,
+        &reviewee2,
+        &2u64,
+        &4u32,
+        &String::from_str(&env, "Second"),
+        &MIN_STAKE,
+    );
+
+    assert_eq!(reputation_client.get_review_count(&reviewee1), 1);
+    assert_eq!(reputation_client.get_review_count(&reviewee2), 1);
 }

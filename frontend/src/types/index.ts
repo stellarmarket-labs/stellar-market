@@ -6,6 +6,7 @@ export interface User {
   bio?: string;
   avatarUrl?: string;
   role: "CLIENT" | "FREELANCER";
+  skills?: string[];
   averageRating?: number;
   reviewCount?: number;
 }
@@ -28,6 +29,8 @@ export interface Job {
   description: string;
   budget: number;
   category: string;
+  skills: string[];
+  deadline: string;
   status: "OPEN" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED" | "DISPUTED";
   client: User;
   freelancer?: User;
@@ -36,6 +39,10 @@ export interface Job {
   escrowStatus: "UNFUNDED" | "FUNDED" | "COMPLETED" | "CANCELLED" | "DISPUTED";
   createdAt: string;
   _count?: { applications: number };
+}
+
+export interface RecommendedJob extends Job {
+  relevanceScore: number;
 }
 
 export interface Application {
@@ -107,4 +114,53 @@ export interface Conversation {
   job: { id: string; title: string } | null;
   lastMessage: Message;
   unreadCount: number;
+}
+
+export type NotificationType =
+  | "JOB_APPLIED"
+  | "APPLICATION_ACCEPTED"
+  | "MILESTONE_SUBMITTED"
+  | "MILESTONE_APPROVED"
+  | "DISPUTE_RAISED"
+  | "DISPUTE_RESOLVED"
+  | "NEW_MESSAGE";
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  read: boolean;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface Vote {
+  id: string;
+  disputeId: string;
+  voterId: string;
+  choice: "CLIENT" | "FREELANCER";
+  reason: string;
+  createdAt: string;
+  voter: User;
+}
+
+export interface Dispute {
+  id: string;
+  jobId: string;
+  contractDisputeId?: string;
+  initiatorId: string;
+  respondentId: string;
+  reason: string;
+  status: "OPEN" | "VOTING" | "RESOLVED_CLIENT" | "RESOLVED_FREELANCER";
+  votesForClient: number;
+  votesForFreelancer: number;
+  minVotes: number;
+  createdAt: string;
+  updatedAt: string;
+  job: Job;
+  initiator: User;
+  respondent: User;
+  votes: Vote[];
 }

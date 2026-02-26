@@ -643,3 +643,185 @@ fn test_resolve_dispute_callback_refund_both() {
     assert_eq!(token_client.balance(&client), 1500);
     assert_eq!(token_client.balance(&freelancer), 1500);
 }
+
+// ── Batch Milestone Approval Tests ─────────────────────────────────────────────
+
+#[test]
+fn test_approve_milestones_batch_happy_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let escrow = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(admin.clone());
+    let client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, 2000_u64),
+        (String::from_str(&env, "Task 2"), 1500_i128, 3000_u64),
+        (String::from_str(&env, "Task 3"), 2000_i128, 4000_u64),
+    ];
+
+    let job_id = escrow.create_job(
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &5000_u64,
+        &GRACE_PERIOD,
+    );
+
+    // Mint and fund tokens
+    mint_tokens(&env, &token, &client, 4500);
+    escrow.fund_job(&job_id, &client);
+
+    // Submit multiple milestones
+    escrow.submit_milestone(&job_id, &0, &freelancer);
+    escrow.submit_milestone(&job_id, &1, &freelancer);
+    escrow.submit_milestone(&job_id, &2, &freelancer);
+
+    // Approve all milestones in batch
+    let indices = vec![&env, 0_u32, 1_u32, 2_u32];
+    let total_released = escrow.approve_milestones_batch(&job_id, &indices, &client);
+
+    // Verify total released
+    assert_eq!(total_released, 4500);
+
+    // Verify all milestones are approved
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Completed);
+    assert_eq!(job.milestones.get(0).unwrap().status, MilestoneStatus::Approved);
+    assert_eq!(job.milestones.get(1).unwrap().status, MilestoneStatus::Approved);
+    assert_eq!(job.milestones.get(2).unwrap().status, MilestoneStatus::Approved);
+}
+
+#[test]
+fn test_approve_milestones_batch_partial_invalid() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let escrow = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(admin.clone());
+    let client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, 2000_u64),
+        (String::from_str(&env, "Task 2"), 1500_i128, 3000_u64),
+    ];
+
+    let job_id = escrow.create_job(
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &5000_u64,
+        &GRACE_PERIOD,
+    );
+
+    // Mint and fund tokens
+    mint_tokens(&env, &token, &client, 2500);
+    escrow.fund_job(&job_id, &client);
+
+    // Submit only the first milestone
+    escrow.submit_milestone(&job_id, &0, &freelancer);
+
+    // Try to approve both milestones in batch (second one is not Submitted)
+    // This should fail with InvalidStatus
+    let indices = vec![&env, 0_u32, 1_u32];
+    let result = escrow.try_approve_milestones_batch(&job_id, &indices, &client);
+    assert!(result.is_err());
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #2)")] // Unauthorized
+fn test_approve_milestones_batch_unauthorized_caller() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let escrow = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(admin.clone());
+    let client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let unauthorized = Address::generate(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, 2000_u64),
+    ];
+
+    let job_id = escrow.create_job(
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &5000_u64,
+        &GRACE_PERIOD,
+    );
+
+    // Mint and fund tokens
+    mint_tokens(&env, &token, &client, 1000);
+    escrow.fund_job(&job_id, &client);
+
+    // Submit the milestone
+    escrow.submit_milestone(&job_id, &0, &freelancer);
+
+    // Try to approve with unauthorized caller
+    let indices = vec![&env, 0_u32];
+    escrow.approve_milestones_batch(&job_id, &indices, &unauthorized);
+}
+
+#[test]
+fn test_approve_milestones_batch_non_existent_index() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let escrow = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(admin.clone());
+    let client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, 2000_u64),
+    ];
+
+    let job_id = escrow.create_job(
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &5000_u64,
+        &GRACE_PERIOD,
+    );
+
+    // Mint and fund tokens
+    mint_tokens(&env, &token, &client, 1000);
+    escrow.fund_job(&job_id, &client);
+
+    // Submit the milestone
+    escrow.submit_milestone(&job_id, &0, &freelancer);
+
+    // Try to approve non-existent milestone index
+    let indices = vec![&env, 99_u32]; // Non-existent index
+    let result = escrow.try_approve_milestones_batch(&job_id, &indices, &client);
+    assert!(result.is_err());
+}
