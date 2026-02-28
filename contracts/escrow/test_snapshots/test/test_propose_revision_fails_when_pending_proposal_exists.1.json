@@ -71,12 +71,12 @@
                     {
                       "vec": [
                         {
-                          "string": "Task 1"
+                          "string": "Initial"
                         },
                         {
                           "i128": {
                             "hi": 0,
-                            "lo": 100
+                            "lo": 1000
                           }
                         },
                         {
@@ -106,42 +106,68 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "create_job",
+              "function_name": "propose_revision",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                },
-                {
-                  "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                  "u64": 1
                 },
                 {
                   "vec": [
                     {
-                      "vec": [
+                      "map": [
                         {
-                          "string": "Task 1"
-                        },
-                        {
-                          "i128": {
-                            "hi": 0,
-                            "lo": 100
+                          "key": {
+                            "symbol": "amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 1200
+                            }
                           }
                         },
                         {
-                          "u64": 1000000
+                          "key": {
+                            "symbol": "deadline"
+                          },
+                          "val": {
+                            "u64": 1000000
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "description"
+                          },
+                          "val": {
+                            "string": "New"
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "id"
+                          },
+                          "val": {
+                            "u32": 0
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "status"
+                          },
+                          "val": {
+                            "vec": [
+                              {
+                                "symbol": "Pending"
+                              }
+                            ]
+                          }
                         }
                       ]
                     }
                   ]
-                },
-                {
-                  "u64": 1000000
-                },
-                {
-                  "u64": 604800
                 }
               ]
             }
@@ -155,7 +181,7 @@
   "ledger": {
     "protocol_version": 21,
     "sequence_number": 0,
-    "timestamp": 1000,
+    "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -315,7 +341,7 @@
                                 "val": {
                                   "i128": {
                                     "hi": 0,
-                                    "lo": 100
+                                    "lo": 1000
                                   }
                                 }
                               },
@@ -332,7 +358,7 @@
                                   "symbol": "description"
                                 },
                                 "val": {
-                                  "string": "Task 1"
+                                  "string": "Initial"
                                 }
                               },
                               {
@@ -387,7 +413,7 @@
                       "val": {
                         "i128": {
                           "hi": 0,
-                          "lo": 100
+                          "lo": 1000
                         }
                       }
                     }
@@ -407,10 +433,10 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "Job"
+                  "symbol": "RevisionProposal"
                 },
                 {
-                  "u64": 2
+                  "u64": 1
                 }
               ]
             },
@@ -427,10 +453,10 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "Job"
+                      "symbol": "RevisionProposal"
                     },
                     {
-                      "u64": 2
+                      "u64": 1
                     }
                   ]
                 },
@@ -439,47 +465,15 @@
                   "map": [
                     {
                       "key": {
-                        "symbol": "auto_refund_after"
+                        "symbol": "created_at"
                       },
                       "val": {
-                        "u64": 604800
+                        "u64": 0
                       }
                     },
                     {
                       "key": {
-                        "symbol": "client"
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "freelancer"
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "id"
-                      },
-                      "val": {
-                        "u64": 2
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "job_deadline"
-                      },
-                      "val": {
-                        "u64": 1000000
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "milestones"
+                        "symbol": "new_milestones"
                       },
                       "val": {
                         "vec": [
@@ -492,7 +486,7 @@
                                 "val": {
                                   "i128": {
                                     "hi": 0,
-                                    "lo": 100
+                                    "lo": 1200
                                   }
                                 }
                               },
@@ -509,7 +503,7 @@
                                   "symbol": "description"
                                 },
                                 "val": {
-                                  "string": "Task 1"
+                                  "string": "New"
                                 }
                               },
                               {
@@ -539,33 +533,33 @@
                     },
                     {
                       "key": {
+                        "symbol": "new_total"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1200
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "proposer"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "status"
                       },
                       "val": {
                         "vec": [
                           {
-                            "symbol": "Created"
+                            "symbol": "Pending"
                           }
                         ]
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "token"
-                      },
-                      "val": {
-                        "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "total_amount"
-                      },
-                      "val": {
-                        "i128": {
-                          "hi": 0,
-                          "lo": 100
-                        }
                       }
                     }
                   ]
@@ -609,7 +603,7 @@
                           ]
                         },
                         "val": {
-                          "u64": 2
+                          "u64": 1
                         }
                       }
                     ]
@@ -1173,12 +1167,12 @@
                     {
                       "vec": [
                         {
-                          "string": "Task 1"
+                          "string": "Initial"
                         },
                         {
                           "i128": {
                             "hi": 0,
-                            "lo": 100
+                            "lo": 1000
                           }
                         },
                         {
@@ -1272,7 +1266,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "create_job"
+                "symbol": "propose_revision"
               }
             ],
             "data": {
@@ -1281,36 +1275,62 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                },
-                {
-                  "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                  "u64": 1
                 },
                 {
                   "vec": [
                     {
-                      "vec": [
+                      "map": [
                         {
-                          "string": "Task 1"
-                        },
-                        {
-                          "i128": {
-                            "hi": 0,
-                            "lo": 100
+                          "key": {
+                            "symbol": "amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 1200
+                            }
                           }
                         },
                         {
-                          "u64": 1000000
+                          "key": {
+                            "symbol": "deadline"
+                          },
+                          "val": {
+                            "u64": 1000000
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "description"
+                          },
+                          "val": {
+                            "string": "New"
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "id"
+                          },
+                          "val": {
+                            "u32": 0
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "status"
+                          },
+                          "val": {
+                            "vec": [
+                              {
+                                "symbol": "Pending"
+                              }
+                            ]
+                          }
                         }
                       ]
                     }
                   ]
-                },
-                {
-                  "u64": 1000000
-                },
-                {
-                  "u64": 604800
                 }
               ]
             }
@@ -1328,22 +1348,22 @@
           "v0": {
             "topics": [
               {
-                "symbol": "escrow"
-              },
-              {
-                "symbol": "created"
+                "symbol": "revision_proposed"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "u64": 2
+                  "u64": 1
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1200
+                  }
                 }
               ]
             }
@@ -1364,12 +1384,10 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "create_job"
+                "symbol": "propose_revision"
               }
             ],
-            "data": {
-              "u64": 2
-            }
+            "data": "void"
           }
         }
       },
@@ -1390,10 +1408,74 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "get_job_count"
+                "symbol": "propose_revision"
               }
             ],
-            "data": "void"
+            "data": {
+              "vec": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
+                  "u64": 1
+                },
+                {
+                  "vec": [
+                    {
+                      "map": [
+                        {
+                          "key": {
+                            "symbol": "amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 1200
+                            }
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "deadline"
+                          },
+                          "val": {
+                            "u64": 1000000
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "description"
+                          },
+                          "val": {
+                            "string": "New"
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "id"
+                          },
+                          "val": {
+                            "u32": 0
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "status"
+                          },
+                          "val": {
+                            "vec": [
+                              {
+                                "symbol": "Pending"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
           }
         }
       },
@@ -1411,11 +1493,160 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "get_job_count"
+                "symbol": "propose_revision"
               }
             ],
             "data": {
-              "u64": 2
+              "error": {
+                "contract": 17
+              }
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 17
+                }
+              }
+            ],
+            "data": {
+              "string": "escalating Ok(ScErrorType::Contract) frame-exit to Err"
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 17
+                }
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "string": "contract call failed"
+                },
+                {
+                  "symbol": "propose_revision"
+                },
+                {
+                  "vec": [
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                    },
+                    {
+                      "u64": 1
+                    },
+                    {
+                      "vec": [
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1200
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "deadline"
+                              },
+                              "val": {
+                                "u64": 1000000
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "description"
+                              },
+                              "val": {
+                                "string": "New"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "id"
+                              },
+                              "val": {
+                                "u32": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "status"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "symbol": "Pending"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 17
+                }
+              }
+            ],
+            "data": {
+              "string": "escalating error to panic"
             }
           }
         }

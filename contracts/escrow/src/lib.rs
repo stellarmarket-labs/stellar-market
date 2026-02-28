@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, String,
-    Vec,
+    Symbol, Vec,
 };
 
 #[contracterror]
@@ -25,6 +25,20 @@ pub enum EscrowError {
     AlreadyInitialized = 14,
     ContractPaused = 15,
     NotAdmin = 16,
+    /// A revision proposal already exists for this job in Pending status.
+    RevisionProposalAlreadyExists = 17,
+    /// No revision proposal exists for this job.
+    RevisionProposalNotFound = 18,
+    /// The caller is not authorized to perform this action on the proposal.
+    NotAuthorizedForProposalAction = 19,
+    /// The proposal is not in Pending status and cannot be acted upon.
+    ProposalNotPending = 20,
+    /// Insufficient funds to cover the increased total.
+    InsufficientTopUp = 21,
+    /// The proposed new_total does not match the sum of milestone amounts.
+    ProposalTotalMismatch = 22,
+    /// The proposed milestone list is empty.
+    EmptyMilestonesProposed = 23,
 }
 
 #[contracttype]
@@ -56,6 +70,20 @@ pub enum MilestoneStatus {
     Approved,
 }
 
+/// Represents the lifecycle state of a revision proposal.
+/// A proposal begins as Pending and transitions to either Accepted or Rejected.
+/// Only one transition is permitted — a resolved proposal cannot be re-opened.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProposalStatus {
+    /// The proposal has been submitted and is awaiting a response from the opposing party.
+    Pending,
+    /// The opposing party has accepted the proposal. Job milestones and escrow have been updated.
+    Accepted,
+    /// The opposing party has rejected the proposal. No changes were made to the job.
+    Rejected,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Milestone {
@@ -82,6 +110,17 @@ pub struct Job {
 
 const MAX_FEE_BPS: u32 = 1000; // 10%
 
+/// A formal proposal to revise the milestones and total budget of an active job.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RevisionProposal {
+    pub proposer: Address,
+    pub new_milestones: Vec<Milestone>,
+    pub new_total: i128,
+    pub status: ProposalStatus,
+    pub created_at: u64,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum DataKey {
@@ -89,6 +128,7 @@ enum DataKey {
     JobCount,
     Admin,
     Paused,
+    RevisionProposal(u64),
 }
 
 fn get_job_key(job_id: u64) -> DataKey {
@@ -801,6 +841,302 @@ impl EscrowContract {
         Ok(())
     }
 
+    // ============================================================
+    // JOB REVISION AND SCOPE RENEGOTIATION
+    // ============================================================
+    // These functions implement a formal proposal flow for revising
+    // job milestones and budget after a job has been funded.
+    //
+    // Flow:
+    //   Either party → propose_revision()  → stores Pending proposal
+    //   Other party  → accept_revision()   → updates job + adjusts escrow
+    //   Other party  → reject_revision()   → cancels proposal, no changes
+    //
+    // Security invariants:
+    //   - Proposer cannot accept or reject their own proposal
+    //   - Only one Pending proposal per job at any time
+    //   - All token movements use checked arithmetic
+    //   - Escrow balance always reflects the current agreed total
+    // ============================================================
+
+    /// Proposes a revision to the milestones and total budget of an active job.
+    ///
+    /// # Authorization
+    /// Callable by either the job's client or the job's freelancer.
+    /// The caller must authenticate via `caller.require_auth()`.
+    ///
+    /// # Arguments
+    /// * `caller` — The address proposing the revision (must be client or freelancer)
+    /// * `job_id` — The unique identifier of the job to revise
+    /// * `new_milestones` — The proposed replacement milestone set (must be non-empty)
+    ///
+    /// # Behavior
+    /// - Computes `new_total` as the sum of all amounts in `new_milestones`
+    /// - Stores the proposal under `DataKey::RevisionProposal(job_id)`
+    /// - Only one Pending proposal may exist per job — fails if one already exists
+    /// - Does not modify the job's existing milestones or total until acceptance
+    ///
+    /// # Errors
+    /// * `JobNotFound` — if the job does not exist (use existing error variant)
+    /// * `NotAuthorizedForProposalAction` — if caller is neither client nor freelancer
+    /// * `RevisionProposalAlreadyExists` — if a Pending proposal already exists
+    /// * `EmptyMilestonesProposed` — if new_milestones is empty
+    /// * `ProposalTotalMismatch` — if sum of milestone amounts does not equal computed new_total
+    pub fn propose_revision(
+        env: Env,
+        caller: Address,
+        job_id: u64,
+        new_milestones: Vec<Milestone>,
+    ) -> Result<(), EscrowError> {
+        caller.require_auth();
+
+        // 1. Load the job
+        let job: Job = env
+            .storage()
+            .persistent()
+            .get(&get_job_key(job_id))
+            .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
+
+        // 2. Verify caller is a party to this job
+        if caller != job.client && caller != job.freelancer {
+            return Err(EscrowError::NotAuthorizedForProposalAction);
+        }
+
+        // 3. Assert no existing Pending proposal
+        if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, RevisionProposal>(&DataKey::RevisionProposal(job_id))
+        {
+            if existing.status == ProposalStatus::Pending {
+                return Err(EscrowError::RevisionProposalAlreadyExists);
+            }
+        }
+
+        // 4. Validate non-empty milestones
+        if new_milestones.is_empty() {
+            return Err(EscrowError::EmptyMilestonesProposed);
+        }
+
+        // 5. Compute new_total as the sum of all milestone amounts
+        // Use checked arithmetic — no overflow permitted
+        let new_total: i128 = new_milestones
+            .iter()
+            .try_fold(0i128, |acc, m| acc.checked_add(m.amount))
+            .ok_or(EscrowError::ProposalTotalMismatch)?;
+
+        if new_total <= 0 {
+            return Err(EscrowError::ProposalTotalMismatch);
+        }
+
+        // 6. Construct and store the proposal
+        let proposal = RevisionProposal {
+            proposer: caller.clone(),
+            new_milestones,
+            new_total,
+            status: ProposalStatus::Pending,
+            created_at: env.ledger().timestamp(),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::RevisionProposal(job_id), &proposal);
+        // Extend TTL
+        env.storage().persistent().extend_ttl(
+            &DataKey::RevisionProposal(job_id),
+            MIN_TTL_THRESHOLD,
+            MIN_TTL_EXTEND_TO,
+        );
+
+        // 7. Emit event
+        env.events().publish(
+            (Symbol::new(&env, "revision_proposed"),),
+            (job_id, caller, new_total),
+        );
+
+        Ok(())
+    }
+
+    /// Accepts a pending revision proposal, updating the job's milestones and adjusting escrow.
+    ///
+    /// # Authorization
+    /// Callable ONLY by the party who did NOT propose the revision.
+    /// The proposer cannot accept their own proposal.
+    ///
+    /// # Arguments
+    /// * `caller` — The non-proposing party (client or freelancer)
+    /// * `job_id` — The job whose proposal is being accepted
+    ///
+    /// # Behavior
+    /// ## If new_total > old_total (budget increase):
+    ///   - The difference is required from the client as a top-up
+    ///   - Caller (if client) must have pre-authorized the token transfer
+    ///   - The contract transfers (new_total - old_total) from client to itself
+    ///
+    /// ## If new_total < old_total (budget decrease):
+    ///   - The difference is refunded to the client immediately
+    ///   - The contract transfers (old_total - new_total) from itself to client
+    ///
+    /// ## If new_total == old_total (no budget change):
+    ///   - Only milestone structure changes — no token movement occurs
+    ///
+    /// # Errors
+    /// * `RevisionProposalNotFound` — if no proposal exists for this job
+    /// * `ProposalNotPending` — if the proposal is not in Pending status
+    /// * `NotAuthorizedForProposalAction` — if caller is the proposer or not a party
+    /// * `InsufficientTopUp` — if new_total > old_total and top-up transfer fails
+    pub fn accept_revision(env: Env, caller: Address, job_id: u64) -> Result<(), EscrowError> {
+        caller.require_auth();
+
+        // 1. Load job
+        let mut job: Job = env
+            .storage()
+            .persistent()
+            .get(&get_job_key(job_id))
+            .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
+
+        // 2. Load proposal — must exist and be Pending
+        let mut proposal = env
+            .storage()
+            .persistent()
+            .get::<DataKey, RevisionProposal>(&DataKey::RevisionProposal(job_id))
+            .ok_or(EscrowError::RevisionProposalNotFound)?;
+
+        if proposal.status != ProposalStatus::Pending {
+            return Err(EscrowError::ProposalNotPending);
+        }
+
+        // 3. Verify caller is a party and is NOT the proposer
+        if caller != job.client && caller != job.freelancer {
+            return Err(EscrowError::NotAuthorizedForProposalAction);
+        }
+        if caller == proposal.proposer {
+            return Err(EscrowError::NotAuthorizedForProposalAction);
+        }
+
+        // 4. Compute balance delta
+        let old_total = job.total_amount;
+        let new_total = proposal.new_total;
+        let delta = new_total - old_total; // positive = increase, negative = decrease, zero = unchanged
+
+        // 5. Handle escrow balance adjustment
+        let token_client = token::Client::new(&env, &job.token);
+
+        if delta > 0 {
+            // Budget increased — require client to top up the difference
+            token_client.transfer(
+                &job.client,                     // from: client
+                &env.current_contract_address(), // to: this contract
+                &delta,
+            );
+        } else if delta < 0 {
+            // Budget decreased — refund the absolute difference to client
+            let refund_amount = delta.checked_abs().ok_or(EscrowError::InsufficientTopUp)?;
+            token_client.transfer(
+                &env.current_contract_address(), // from: this contract
+                &job.client,                     // to: client
+                &refund_amount,
+            );
+        }
+        // delta == 0: no token movement needed
+
+        // 6. Update job milestones and total
+        job.milestones = proposal.new_milestones.clone();
+        job.total_amount = new_total;
+
+        // 7. Persist updated job
+        env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
+
+        // 8. Update proposal status to Accepted
+        proposal.status = ProposalStatus::Accepted;
+        env.storage()
+            .persistent()
+            .set(&DataKey::RevisionProposal(job_id), &proposal);
+
+        // 9. Emit event
+        env.events().publish(
+            (Symbol::new(&env, "revision_accepted"),),
+            (job_id, caller, new_total, delta),
+        );
+
+        Ok(())
+    }
+
+    /// Rejects a pending revision proposal. No changes are made to the job or escrow.
+    ///
+    /// # Authorization
+    /// Callable ONLY by the party who did NOT propose the revision.
+    /// The proposer cannot reject their own proposal.
+    ///
+    /// # Arguments
+    /// * `caller` — The non-proposing party
+    /// * `job_id` — The job whose proposal is being rejected
+    ///
+    /// # Behavior
+    /// - Sets proposal status to Rejected
+    /// - Job milestones, total, and escrow balance remain completely unchanged
+    /// - After rejection, a new proposal may be submitted by either party
+    ///
+    /// # Errors
+    /// * `RevisionProposalNotFound` — if no proposal exists
+    /// * `ProposalNotPending` — if the proposal is not Pending
+    /// * `NotAuthorizedForProposalAction` — if caller is the proposer or not a party
+    pub fn reject_revision(env: Env, caller: Address, job_id: u64) -> Result<(), EscrowError> {
+        caller.require_auth();
+
+        // 1. Load job
+        let job: Job = env
+            .storage()
+            .persistent()
+            .get(&get_job_key(job_id))
+            .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
+
+        // 2. Load and validate proposal
+        let mut proposal = env
+            .storage()
+            .persistent()
+            .get::<DataKey, RevisionProposal>(&DataKey::RevisionProposal(job_id))
+            .ok_or(EscrowError::RevisionProposalNotFound)?;
+
+        if proposal.status != ProposalStatus::Pending {
+            return Err(EscrowError::ProposalNotPending);
+        }
+
+        // 3. Verify caller is a party and NOT the proposer
+        if caller != job.client && caller != job.freelancer {
+            return Err(EscrowError::NotAuthorizedForProposalAction);
+        }
+        if caller == proposal.proposer {
+            return Err(EscrowError::NotAuthorizedForProposalAction);
+        }
+
+        // 4. Mark proposal as Rejected — job and escrow unchanged
+        proposal.status = ProposalStatus::Rejected;
+        env.storage()
+            .persistent()
+            .set(&DataKey::RevisionProposal(job_id), &proposal);
+
+        // 5. Emit event
+        env.events()
+            .publish((Symbol::new(&env, "revision_rejected"),), (job_id, caller));
+
+        Ok(())
+    }
+
+    /// Returns the current revision proposal for the given job, if one exists.
+    /// Returns None if no proposal has been submitted or if the last proposal was resolved.
+    ///
+    /// # Arguments
+    /// * `job_id` — The job to query
+    pub fn get_revision_proposal(env: Env, job_id: u64) -> Option<RevisionProposal> {
+        env.storage()
+            .persistent()
+            .get::<DataKey, RevisionProposal>(&DataKey::RevisionProposal(job_id))
+    }
     /// Get job details by ID.
     pub fn get_job(env: Env, job_id: u64) -> Result<Job, EscrowError> {
         let job: Job = env
