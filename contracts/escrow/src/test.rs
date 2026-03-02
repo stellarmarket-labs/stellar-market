@@ -187,13 +187,13 @@ fn test_is_milestone_overdue() {
     );
 
     // not overdue initially
-    assert_eq!(client.is_milestone_overdue(&job_id, &0), false);
+    assert!(!client.is_milestone_overdue(&job_id, &0));
 
     // fast forward past deadline
     env.ledger().with_mut(|l| l.timestamp = 2500);
 
     // overdue now
-    assert_eq!(client.is_milestone_overdue(&job_id, &0), true);
+    assert!(client.is_milestone_overdue(&job_id, &0));
 }
 
 #[test]

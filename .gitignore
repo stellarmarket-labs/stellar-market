@@ -35,3 +35,10 @@ coverage/
 # Misc
 *.swp
 *.swo
+
+# Documentation files (generated)
+backend/DISPUTE_*.md
+backend/IMPLEMENTATION_COMPLETE.md
+COMMIT_SUMMARY.txt
+DEPLOYMENT_READY.md
+QUALITY_REPORT.md

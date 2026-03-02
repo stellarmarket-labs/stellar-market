@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use super::*;
 use soroban_sdk::{contract, contractimpl, testutils::Address as _, Env, String};
 
