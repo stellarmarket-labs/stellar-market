@@ -4,6 +4,7 @@ import { Response, Router } from "express";
 import {
   createReviewSchema,
   getReviewByIdParamSchema,
+  getReviewsByUserParamSchema,
   getReviewsQuerySchema,
   updateReviewSchema
 } from "../schemas";
@@ -149,7 +150,7 @@ router.post("/",
 
 // Get reviews for a user
 router.get("/user/:userId",
-  validate({ params: getReviewByIdParamSchema }),
+  validate({ params: getReviewsByUserParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const userId = req.params.userId as string;
     const reviews = await prisma.review.findMany({

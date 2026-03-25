@@ -30,3 +30,7 @@ export const getReviewsQuerySchema = paginationSchema.extend({
 export const getReviewByIdParamSchema = z.object({
   id: z.string().uuid(),
 });
+
+export const getReviewsByUserParamSchema = z.object({
+  userId: z.string().min(1, "User ID is required"),
+});
