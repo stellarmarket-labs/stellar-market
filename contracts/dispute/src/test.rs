@@ -203,9 +203,13 @@ fn test_vote_and_resolve() {
     let client = DisputeContractClient::new(&env, &dispute_contract_id);
 
     let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
 
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
     let voter1 = Address::generate(&env);
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
@@ -253,9 +257,13 @@ fn test_resolve_without_enough_votes() {
     let client = DisputeContractClient::new(&env, &dispute_contract_id);
 
     let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
 
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -286,9 +294,13 @@ fn test_tie_break_favor_client() {
     let dispute_contract_id = env.register_contract(None, DisputeContract);
     let client = DisputeContractClient::new(&env, &dispute_contract_id);
     let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
 
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
     let voter1 = Address::generate(&env);
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
@@ -341,9 +353,13 @@ fn test_tie_break_favor_freelancer() {
     let dispute_contract_id = env.register_contract(None, DisputeContract);
     let client = DisputeContractClient::new(&env, &dispute_contract_id);
     let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
 
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
     let voter1 = Address::generate(&env);
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
@@ -396,9 +412,13 @@ fn test_tie_break_refund_both() {
     let dispute_contract_id = env.register_contract(None, DisputeContract);
     let client = DisputeContractClient::new(&env, &dispute_contract_id);
     let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
 
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
     let voter1 = Address::generate(&env);
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
@@ -451,9 +471,13 @@ fn test_tie_break_escalate() {
     let dispute_contract_id = env.register_contract(None, DisputeContract);
     let client = DisputeContractClient::new(&env, &dispute_contract_id);
     let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
 
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
     let voter1 = Address::generate(&env);
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
@@ -506,9 +530,13 @@ fn test_tie_break_default_refund_both() {
     let dispute_contract_id = env.register_contract(None, DisputeContract);
     let client = DisputeContractClient::new(&env, &dispute_contract_id);
     let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
 
     let user_client = Address::generate(&env);
     let freelancer = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
     let voter1 = Address::generate(&env);
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
@@ -551,6 +579,43 @@ fn test_tie_break_default_refund_both() {
 
     let status = client.resolve_dispute(&dispute_id, &escrow_contract_id);
     assert_eq!(status, DisputeStatus::RefundedBoth);
+}
+
+// ── Graceful degradation without reputation system ────────────────────────────
+
+#[test]
+fn test_vote_without_reputation_contract() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &contract_id);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    // Raise a dispute WITHOUT calling initialize (no reputation contract)
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &3u32,
+        &None,
+    );
+
+    // Voting should succeed — reputation check is skipped when not configured
+    let voter = Address::generate(&env);
+    client.cast_vote(
+        &dispute_id,
+        &voter,
+        &VoteChoice::Client,
+        &String::from_str(&env, "Reason"),
+    );
+
+    let dispute = client.get_dispute(&dispute_id);
+    assert_eq!(dispute.votes_for_client, 1);
 }
 
 // ── Pause mechanism tests ─────────────────────────────────────────────────────

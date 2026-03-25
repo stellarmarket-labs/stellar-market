@@ -172,6 +172,46 @@ router.get("/",
   })
 );
 
+// Get jobs for the authenticated user (client or freelancer)
+router.get("/mine",
+  authenticate,
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const { page = 1, limit = 10, status } = req.query as any;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const where: any = {
+      OR: [
+        { clientId: req.userId },
+        { freelancerId: req.userId },
+      ],
+    };
+    if (status) where.status = status;
+
+    const [jobs, total] = await Promise.all([
+      prisma.job.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: "desc" },
+        include: {
+          client: { select: { id: true, username: true, avatarUrl: true } },
+          freelancer: { select: { id: true, username: true, avatarUrl: true } },
+          milestones: true,
+          _count: { select: { applications: true } },
+        },
+      }),
+      prisma.job.count({ where }),
+    ]);
+
+    res.json({
+      data: jobs,
+      total,
+      page: Number(page),
+      totalPages: Math.ceil(total / Number(limit))
+    });
+  })
+);
+
 // Get a single job by ID
 router.get("/:id",
   validate({ params: getJobByIdParamSchema }),

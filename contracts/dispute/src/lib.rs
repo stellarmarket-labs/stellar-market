@@ -442,6 +442,7 @@ impl DisputeContract {
     }
 
     /// Raise a dispute on a job. Either the client or freelancer can initiate.
+    #[allow(clippy::too_many_arguments)]
     pub fn raise_dispute(
         env: Env,
         job_id: u64,
@@ -514,7 +515,9 @@ impl DisputeContract {
     }
 
     /// Cast a vote on a dispute. Voters cannot be the client or freelancer.
-    /// Voters must have sufficient reputation to participate (if reputation system is initialized).
+    /// If the reputation system is initialized, voters must meet the minimum
+    /// reputation threshold. When no reputation contract is configured, voting
+    /// proceeds without a reputation check to allow graceful degradation.
     pub fn cast_vote(
         env: Env,
         dispute_id: u64,
@@ -655,7 +658,7 @@ impl DisputeContract {
         escrow: Address,
     ) -> Result<DisputeStatus, DisputeError> {
         require_not_paused(&env)?;
-        
+
         let mut dispute: Dispute = env
             .storage()
             .persistent()
