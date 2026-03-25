@@ -4,6 +4,7 @@ import { Response, Router } from "express";
 import {
   createReviewSchema,
   getReviewByIdParamSchema,
+  getReviewsByUserParamSchema,
   getReviewsQuerySchema,
   updateReviewSchema
 } from "../schemas";
@@ -121,6 +122,14 @@ router.post("/",
       return res.status(403).json({ error: "Not authorized to review this job." });
     }
 
+    // Prevent duplicate reviews for the same job
+    const existing = await prisma.review.findUnique({
+      where: { jobId_reviewerId: { jobId, reviewerId: req.userId! } },
+    });
+    if (existing) {
+      return res.status(409).json({ error: "You have already reviewed this job." });
+    }
+
     const review = await prisma.$transaction(async (tx) => {
       const createdReview = await tx.review.create({
         data: {
@@ -149,7 +158,7 @@ router.post("/",
 
 // Get reviews for a user
 router.get("/user/:userId",
-  validate({ params: getReviewByIdParamSchema }),
+  validate({ params: getReviewsByUserParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const userId = req.params.userId as string;
     const reviews = await prisma.review.findMany({
