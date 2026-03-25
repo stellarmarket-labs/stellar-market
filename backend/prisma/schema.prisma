@@ -62,11 +62,8 @@ enum NotificationType {
 
 enum DisputeStatus {
   OPEN
-  REVIEWING
-  VOTING
-  RESOLVED_CLIENT
-  RESOLVED_FREELANCER
-  OVERRIDDEN_BY_ADMIN
+  IN_PROGRESS
+  RESOLVED
 }
 
 model User {
@@ -110,8 +107,9 @@ model User {
   notifications     Notification[]
   auditLogs         AuditLog[]
   initiatedDisputes Dispute[]      @relation("DisputeInitiated")
-  respondedDisputes Dispute[]      @relation("DisputeResponded")
-  votesCast         Vote[]         @relation("VotesCast")
+  clientDisputes    Dispute[]      @relation("DisputeClient")
+  freelancerDisputes Dispute[]     @relation("DisputeFreelancer")
+  votesCast         DisputeVote[]  @relation("VotesCast")
 }
 
 model Job {
@@ -283,39 +281,38 @@ model AuditLog {
 }
 
 model Dispute {
-  id                 String        @id @default(cuid())
-  jobId              String        @unique
-  contractDisputeId  String?       @unique
-  initiatorId        String
-  respondentId       String
-  reason             String
-  status             DisputeStatus @default(OPEN)
-  votesForClient     Int           @default(0)
-  votesForFreelancer Int           @default(0)
-  minVotes           Int           @default(3)
-  escalated          Boolean       @default(false)
-  outcome            String?
-  resolvedAt         DateTime?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  id                String        @id @default(cuid())
+  jobId             String        @unique
+  onChainDisputeId  String?       @unique
+  clientId          String
+  freelancerId      String
+  initiatorId       String
+  reason            String
+  status            DisputeStatus @default(OPEN)
+  outcome           String?
+  resolvedAt        DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
-  job         Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  initiator   User         @relation("DisputeInitiated", fields: [initiatorId], references: [id])
-  respondent  User         @relation("DisputeResponded", fields: [respondentId], references: [id])
-  votes       Vote[]
-  attachments Attachment[]
+  job          Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  client       User           @relation("DisputeClient", fields: [clientId], references: [id])
+  freelancer   User           @relation("DisputeFreelancer", fields: [freelancerId], references: [id])
+  initiator    User           @relation("DisputeInitiated", fields: [initiatorId], references: [id])
+  votes        DisputeVote[]
+  attachments  Attachment[]
 
   @@index([jobId])
+  @@index([clientId])
+  @@index([freelancerId])
   @@index([initiatorId])
-  @@index([respondentId])
   @@index([status])
 }
 
-model Vote {
+model DisputeVote {
   id        String   @id @default(cuid())
   disputeId String
   voterId   String
-  choice    String // "CLIENT" or "FREELANCER"
+  choice    String   // "CLIENT" or "FREELANCER"
   reason    String
   createdAt DateTime @default(now())
 
