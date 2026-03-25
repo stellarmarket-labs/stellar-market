@@ -16,6 +16,7 @@ jest.mock("@/context/AuthContext", () => ({
   }),
 }));
 
+
 // ─── Mock SocketContext ───────────────────────────────────────────────────────
 const mockSocketHandlers: Record<string, ((...args: any[]) => void)[]> = {};
 const mockSocket = {
