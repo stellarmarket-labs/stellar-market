@@ -75,7 +75,9 @@ jest.mock("../../utils/token", () => ({
 
 import authRoutes from "../auth.routes";
 
-const { __mockPrisma: mockPrisma } = jest.requireMock("@prisma/client") as any;
+const { __mockPrisma: mockPrisma } = jest.requireMock(
+  "@prisma/client",
+) as any;
 
 const app = express();
 app.use(express.json());
@@ -108,10 +110,7 @@ describe("POST /auth/register - Role Selection", () => {
       .send({ ...basePayload, role: "FREELANCER" });
 
     expect(res.status).toBe(201);
-    expect(res.body).toHaveProperty(
-      "message",
-      "Verification email sent. Please check your inbox.",
-    );
+    expect(res.body.user.role).toBe("FREELANCER");
     expect(mockPrisma.user.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -136,10 +135,7 @@ describe("POST /auth/register - Role Selection", () => {
       .send({ ...basePayload, role: "CLIENT" });
 
     expect(res.status).toBe(201);
-    expect(res.body).toHaveProperty(
-      "message",
-      "Verification email sent. Please check your inbox.",
-    );
+    expect(res.body.user.role).toBe("CLIENT");
     expect(mockPrisma.user.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -159,13 +155,12 @@ describe("POST /auth/register - Role Selection", () => {
       role: "FREELANCER",
     });
 
-    const res = await request(app).post("/auth/register").send(basePayload); // no role field
+    const res = await request(app)
+      .post("/auth/register")
+      .send(basePayload); // no role field
 
     expect(res.status).toBe(201);
-    expect(res.body).toHaveProperty(
-      "message",
-      "Verification email sent. Please check your inbox.",
-    );
+    expect(res.body.user.role).toBe("FREELANCER");
     expect(mockPrisma.user.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -183,7 +178,7 @@ describe("POST /auth/register - Role Selection", () => {
     expect(res.status).toBe(400);
   });
 
-  it("should return verification message in the API response", async () => {
+  it("should return the role in the API response", async () => {
     mockPrisma.user.findFirst.mockResolvedValue(null);
     mockPrisma.user.create.mockResolvedValue({
       id: "user4",
@@ -198,11 +193,7 @@ describe("POST /auth/register - Role Selection", () => {
       .send({ ...basePayload, role: "CLIENT" });
 
     expect(res.status).toBe(201);
-    expect(res.body).toHaveProperty(
-      "message",
-      "Verification email sent. Please check your inbox.",
-    );
-    expect(res.body).not.toHaveProperty("token");
-    expect(res.body).not.toHaveProperty("user");
+    expect(res.body.user).toHaveProperty("role", "CLIENT");
+    expect(res.body).toHaveProperty("token");
   });
 });

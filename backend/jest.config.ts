@@ -9,7 +9,6 @@ const config: Config = {
     "^@/(.*)$": "<rootDir>/src/$1",
   },
   clearMocks: true,
-  transformIgnorePatterns: ["node_modules/(?!(@scure|otplib|@otplib)/)"],
 };
 
 export default config;

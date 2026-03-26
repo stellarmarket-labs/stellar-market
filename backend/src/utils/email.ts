@@ -35,7 +35,7 @@ export async function sendVerificationEmail(
   to: string,
   token: string,
 ): Promise<void> {
-  const verifyUrl = `${config.frontendUrl}/auth/verify-email/${token}`;
+  const verifyUrl = `${config.frontendUrl}/auth/verify-email?token=${token}`;
 
   await transporter.sendMail({
     from: config.smtp.from,
@@ -46,7 +46,6 @@ export async function sendVerificationEmail(
       <p>Thank you for registering on StellarMarket.</p>
       <p>Click the link below to verify your email address.</p>
       <p><a href="${verifyUrl}">Verify Email</a></p>
-      <p>If you did not create this account, please ignore this email.</p>
     `,
   });
 }

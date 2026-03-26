@@ -122,10 +122,6 @@ router.post(
 
     const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
 
-    // Generate email verification token
-    const rawToken = generateToken();
-    const hashedToken = hashToken(rawToken);
-
     const user = await prisma.user.create({
       data: {
         walletAddress: stellarAddress,
@@ -133,17 +129,22 @@ router.post(
         username: name,
         password: hashedPassword,
         role: role ?? "FREELANCER",
-        emailVerificationToken: hashedToken,
       },
     });
 
-    // Send verification email
-    if (email) {
-      await sendVerificationEmail(email, rawToken);
-    }
+    const token = jwt.sign({ userId: user.id }, config.jwtSecret, {
+      expiresIn: "7d",
+    });
 
     res.status(201).json({
-      message: "Verification email sent. Please check your inbox.",
+      user: {
+        id: user.id,
+        walletAddress: user.walletAddress,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
+      token,
     });
   }),
 );
@@ -172,14 +173,6 @@ router.post(
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
       return res.status(401).json({ error: "Invalid credentials." });
-    }
-
-    // Check if email is verified
-    if (!user.emailVerified) {
-      return res.status(403).json({
-        error: "Email not verified.",
-        message: "Please verify your email before logging in.",
-      });
     }
 
     if (user.twoFactorEnabled) {
@@ -276,9 +269,7 @@ router.post(
     }
 
     if (!user.twoFactorSecret) {
-      return res
-        .status(400)
-        .json({ error: "2FA setup not initiated. Call /2fa/setup first." });
+      return res.status(400).json({ error: "2FA setup not initiated. Call /2fa/setup first." });
     }
 
     const secret = decrypt(user.twoFactorSecret);
@@ -313,15 +304,10 @@ router.post(
     }
 
     if (!user.password) {
-      return res
-        .status(400)
-        .json({ error: "Password not set for this account." });
+      return res.status(400).json({ error: "Password not set for this account." });
     }
 
-    const validPassword = await bcrypt.compare(
-      req.body.password,
-      user.password,
-    );
+    const validPassword = await bcrypt.compare(req.body.password, user.password);
     if (!validPassword) {
       return res.status(401).json({ error: "Invalid password." });
     }
@@ -348,23 +334,16 @@ router.post(
 
     let decoded: { userId: string; purpose?: string };
     try {
-      decoded = jwt.verify(tempToken, config.jwtSecret) as {
-        userId: string;
-        purpose?: string;
-      };
+      decoded = jwt.verify(tempToken, config.jwtSecret) as { userId: string; purpose?: string };
     } catch {
-      return res
-        .status(401)
-        .json({ error: "Invalid or expired temporary token." });
+      return res.status(401).json({ error: "Invalid or expired temporary token." });
     }
 
     if (decoded.purpose !== "2fa_pending") {
       return res.status(401).json({ error: "Invalid token type." });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-    });
+    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
     if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
       return res.status(401).json({ error: "Invalid request." });
     }
@@ -436,9 +415,7 @@ router.post(
 
     // Always return success to prevent email enumeration
     if (!user) {
-      return res.json({
-        message: "If the email exists, a reset link has been sent.",
-      });
+      return res.json({ message: "If the email exists, a reset link has been sent." });
     }
 
     const rawToken = generateToken();
@@ -521,47 +498,6 @@ router.post(
     await sendVerificationEmail(user.email, rawToken);
 
     res.json({ message: "Verification email sent." });
-  }),
-);
-
-// Resend verification email — public endpoint (for users who haven't logged in yet)
-router.post(
-  "/resend-verification",
-  validate({ body: forgotPasswordSchema }), // Reuse schema that validates email
-  asyncHandler(async (req: Request, res: Response) => {
-    const { email } = req.body;
-
-    const user = await prisma.user.findUnique({ where: { email } });
-
-    // Always return success to prevent email enumeration
-    if (!user) {
-      return res.json({
-        message:
-          "If the email exists and is unverified, a verification link has been sent.",
-      });
-    }
-
-    if (user.emailVerified) {
-      return res.json({
-        message:
-          "If the email exists and is unverified, a verification link has been sent.",
-      });
-    }
-
-    const rawToken = generateToken();
-    const hashed = hashToken(rawToken);
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { emailVerificationToken: hashed },
-    });
-
-    await sendVerificationEmail(email, rawToken);
-
-    res.json({
-      message:
-        "If the email exists and is unverified, a verification link has been sent.",
-    });
   }),
 );
 
