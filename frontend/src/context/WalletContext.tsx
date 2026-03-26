@@ -25,7 +25,13 @@ interface WalletState {
   disconnect: () => void;
   signAndBroadcastTransaction: (
     xdr: string
-  ) => Promise<{ hash: string; success: boolean; error?: string }>;
+  ) => Promise<{
+    hash: string;
+    success: boolean;
+    error?: string;
+    resultXdr?: string;
+    resultMetaXdr?: string;
+  }>;
 }
 
 const WalletContext = createContext<WalletState | undefined>(undefined);
@@ -166,6 +172,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
             return {
               success: true,
               hash: sendResponse.hash,
+              resultXdr: statusResponse.resultXdr,
+              resultMetaXdr: statusResponse.resultMetaXdr,
             };
           }
           

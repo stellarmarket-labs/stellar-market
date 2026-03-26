@@ -11,6 +11,7 @@ import StatusBadge from "@/components/StatusBadge";
 import ApplyModal from "@/components/ApplyModal";
 import RaiseDisputeModal from "@/components/RaiseDisputeModal";
 import { Job, Application } from "@/types";
+import { parseJobIdFromResult } from "@/utils/stellar";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
@@ -131,18 +132,24 @@ export default function JobDetailPage() {
       if (!txResult.success) {
         throw new Error(txResult.error || "Transaction failed");
       }
-
       // 3. Confirm with backend
-      // Note: For CREATE_JOB, we ideally need the on-chain job ID from events, 
-      // but here we simplify or assume the backend can extract it or use a count.
-      // In this contract, job IDs are sequential. Our backend confirm-tx needs to know this.
+      let onChainJobId: number | undefined;
+      if (action === "init") {
+        try {
+          onChainJobId = parseJobIdFromResult(txResult);
+        } catch (parseErr) {
+          console.error("Failed to parse on-chain job ID:", parseErr);
+          throw new Error("Transaction succeeded, but failed to retrieve job ID. Please contact support.");
+        }
+      }
+
       await axios.post(`${API_URL}/escrow/confirm-tx`, {
         hash: txResult.hash,
         type,
         jobId: id,
         milestoneId,
         newDeadline: action === "extend-deadline" ? extendDeadlineDate[milestoneId!] : undefined,
-        onChainJobId: 1, // Simplified for this task: in production, parse resultXdr or events
+        onChainJobId: onChainJobId || 1, // Fallback to 1 for non-init actions where it's not needed, or as last resort
       }, {
         headers: { Authorization: `Bearer ${token}` },
       });
