@@ -625,6 +625,37 @@ fn test_freelancer_can_propose_revision() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_propose_revision_fails_for_disputed_job() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, client, freelancer, token, _) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD);
+
+    env.as_contract(&contract.address, || {
+        let key = crate::DataKey::Job(job_id);
+        let mut job: crate::Job = env.storage().persistent().get(&key).unwrap();
+        job.status = JobStatus::Disputed;
+        env.storage().persistent().set(&key, &job);
+    });
+
+    let new_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Revised"),
+            amount: 1200,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+        },
+    ];
+
+    contract.propose_revision(&client, &job_id, &new_milestones);
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #19)")]
 fn test_propose_revision_fails_for_non_party() {
     let env = Env::default();
@@ -1692,4 +1723,78 @@ fn test_fee_cap_enforcement() {
     escrow.initialize(&admin, &treasury, &0, &604800u64);
     let result = escrow.try_set_fee_bps(&1001);
     assert!(result.is_err());
+}
+
+/// Verifies that fund_job rejects a job whose stored total_amount is LESS than
+/// the sum of its milestone amounts (underfunding). Uses InvalidAmount (#24).
+#[test]
+#[should_panic(expected = "Error(Contract, #24)")]
+fn test_fund_job_underfunding_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let escrow = EscrowContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+
+    // Two milestones summing to 100
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Phase 1"), 60_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Phase 2"), 40_i128, JOB_DEADLINE),
+    ];
+
+    let job_id = escrow.create_job(&user, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD);
+
+    // Corrupt total_amount to 50 — less than the milestone sum of 100
+    env.as_contract(&contract_id, || {
+        let key = crate::DataKey::Job(job_id);
+        let mut job: crate::Job = env.storage().persistent().get(&key).unwrap();
+        job.total_amount = 50;
+        env.storage().persistent().set(&key, &job);
+    });
+
+    // Must fail with InvalidAmount
+    escrow.fund_job(&job_id, &user);
+}
+
+/// Verifies that fund_job rejects a job whose stored total_amount is MORE than
+/// the sum of its milestone amounts (overfunding). Uses InvalidAmount (#24).
+#[test]
+#[should_panic(expected = "Error(Contract, #24)")]
+fn test_fund_job_overfunding_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let escrow = EscrowContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+
+    // Two milestones summing to 100
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Phase 1"), 60_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Phase 2"), 40_i128, JOB_DEADLINE),
+    ];
+
+    let job_id = escrow.create_job(&user, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD);
+
+    // Corrupt total_amount to 150 — more than the milestone sum of 100
+    env.as_contract(&contract_id, || {
+        let key = crate::DataKey::Job(job_id);
+        let mut job: crate::Job = env.storage().persistent().get(&key).unwrap();
+        job.total_amount = 150;
+        env.storage().persistent().set(&key, &job);
+    });
+
+    // Must fail with InvalidAmount
+    escrow.fund_job(&job_id, &user);
 }

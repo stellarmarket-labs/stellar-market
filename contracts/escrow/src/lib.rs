@@ -39,6 +39,8 @@ pub enum EscrowError {
     ProposalTotalMismatch = 22,
     /// The proposed milestone list is empty.
     EmptyMilestonesProposed = 23,
+    /// The job's stored total_amount does not equal the sum of its milestone amounts.
+    InvalidAmount = 24,
 }
 
 #[contracttype]
@@ -371,6 +373,18 @@ impl EscrowContract {
         }
         if job.status != JobStatus::Created {
             return Err(EscrowError::AlreadyFunded);
+        }
+
+        // Validate that total_amount matches the sum of stored milestone amounts.
+        // Guards against any inconsistency between the two fields (e.g. from a
+        // revision path bug) that would leave milestones unpayable or trap surplus funds.
+        let milestone_sum: i128 = job
+            .milestones
+            .iter()
+            .try_fold(0i128, |acc, m| acc.checked_add(m.amount))
+            .ok_or(EscrowError::InvalidAmount)?;
+        if job.total_amount != milestone_sum {
+            return Err(EscrowError::InvalidAmount);
         }
 
         let token_client = token::Client::new(&env, &job.token);
@@ -909,6 +923,12 @@ impl EscrowContract {
         // 2. Verify caller is a party to this job
         if caller != job.client && caller != job.freelancer {
             return Err(EscrowError::NotAuthorizedForProposalAction);
+        }
+
+        // Freeze revisions while a dispute is active so later dispute
+        // resolution still operates on the original milestone set and total.
+        if job.status == JobStatus::Disputed {
+            return Err(EscrowError::InvalidStatus);
         }
 
         // 3. Assert no existing Pending proposal, allowing overwrite of expired ones

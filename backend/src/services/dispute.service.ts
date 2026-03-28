@@ -1,7 +1,11 @@
-// @ts-nocheck
-import { PrismaClient, DisputeStatus, JobStatus } from "@prisma/client";
+/**
+ * Dispute Management Service
+ * Handles dispute creation, voting, resolution, and webhook processing
+ */
+import { PrismaClient, DisputeStatus, JobStatus, EscrowStatus } from "@prisma/client";
+import { createError } from "../middleware/error";
 
-const prisma: any = new PrismaClient();
+const prisma = new PrismaClient();
 
 export class DisputeService {
   /**
@@ -19,18 +23,27 @@ export class DisputeService {
     });
 
     if (!job) {
-      throw new Error("Job not found");
+      throw createError("Job not found", 404);
     }
 
     if (!job.freelancer) {
-      throw new Error(
+      throw createError(
         "Job must have an assigned freelancer to raise a dispute",
+        400,
       );
     }
 
     // Verify initiator is a participant
     if (job.clientId !== initiatorId && job.freelancerId !== initiatorId) {
-      throw new Error("Only job participants can raise a dispute");
+      throw createError("Not a participant of this job", 403);
+    }
+
+    // Verify the job is in a disputable state (ACTIVE/IN_PROGRESS or FUNDED)
+    const isDisputableStatus = job.status === JobStatus.IN_PROGRESS;
+    const isDisputableEscrow = job.escrowStatus === EscrowStatus.FUNDED;
+
+    if (!isDisputableStatus && !isDisputableEscrow) {
+      throw createError("Job is not in a disputable state", 400);
     }
 
     // Check for existing dispute
@@ -39,7 +52,7 @@ export class DisputeService {
     });
 
     if (existingDispute) {
-      throw new Error("A dispute already exists for this job");
+      throw createError("A dispute already exists for this job", 400);
     }
 
     // Create dispute
@@ -232,6 +245,7 @@ export class DisputeService {
 
   /**
    * Cast a vote on a dispute
+   * Validates voter eligibility and prevents duplicate votes
    */
   static async castVote(
     disputeId: string,
