@@ -8,9 +8,16 @@ import {
   updateJobSchema,
   getJobsQuerySchema,
   getJobByIdParamSchema,
-  updateJobStatusSchema
+  updateJobStatusSchema,
 } from "../schemas";
-import { cache, invalidateCache, invalidateCacheKey, generateJobsCacheKey, generateJobCacheKey, generateJobOnChainStatusCacheKey } from "../lib/cache";
+import {
+  cache,
+  invalidateCache,
+  invalidateCacheKey,
+  generateJobsCacheKey,
+  generateJobCacheKey,
+  generateJobOnChainStatusCacheKey,
+} from "../lib/cache";
 import { ContractService } from "../services/contract.service";
 
 const router = Router();
@@ -23,7 +30,8 @@ const router = Router();
 const prisma = new PrismaClient();
 
 // Get all jobs with optional filters and pagination
-router.get("/",
+router.get(
+  "/",
   /**
    * @swagger
    * /jobs:
@@ -78,8 +86,20 @@ router.get("/",
    */
   validate({ query: getJobsQuerySchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { page, limit, search, skill, skills, status, minBudget, maxBudget, clientId, sort, postedAfter } = req.query as any;
-    
+    const {
+      page,
+      limit,
+      search,
+      skill,
+      skills,
+      status,
+      minBudget,
+      maxBudget,
+      clientId,
+      sort,
+      postedAfter,
+    } = req.query as any;
+
     // Generate cache key based on query parameters
     const cacheKey = generateJobsCacheKey({
       page,
@@ -92,7 +112,7 @@ router.get("/",
       maxBudget,
       clientId,
       sort,
-      postedAfter
+      postedAfter,
     });
 
     // Cache for 60 seconds
@@ -109,14 +129,18 @@ router.get("/",
       }
 
       if (skills) {
-        const skillList = (skills as string).split(",").map((s: string) => s.trim());
+        const skillList = (skills as string)
+          .split(",")
+          .map((s: string) => s.trim());
         where.skills = { hasSome: skillList };
       } else if (skill) {
         where.skills = { has: skill };
       }
 
       if (status) {
-        const statusList = (status as string).split(",").map((s: string) => s.trim());
+        const statusList = (status as string)
+          .split(",")
+          .map((s: string) => s.trim());
         if (statusList.length === 1) {
           where.status = statusList[0];
         } else {
@@ -148,7 +172,9 @@ router.get("/",
           where,
           include: {
             client: { select: { id: true, username: true, avatarUrl: true } },
-            freelancer: { select: { id: true, username: true, avatarUrl: true } },
+            freelancer: {
+              select: { id: true, username: true, avatarUrl: true },
+            },
             milestones: true,
             _count: { select: { applications: true } },
           },
@@ -168,23 +194,21 @@ router.get("/",
     });
 
     // Add cache hit status to response headers for debugging
-    res.set('X-Cache-Hit', hit.toString());
+    res.set("X-Cache-Hit", hit.toString());
     res.json(data);
-  })
+  }),
 );
 
 // Get jobs for the authenticated user (client or freelancer)
-router.get("/mine",
+router.get(
+  "/mine",
   authenticate,
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const { page = 1, limit = 10, status } = req.query as any;
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: any = {
-      OR: [
-        { clientId: req.userId },
-        { freelancerId: req.userId },
-      ],
+      OR: [{ clientId: req.userId }, { freelancerId: req.userId }],
     };
     if (status) where.status = status;
 
@@ -208,25 +232,32 @@ router.get("/mine",
       data: jobs,
       total,
       page: Number(page),
-      totalPages: Math.ceil(total / Number(limit))
+      totalPages: Math.ceil(total / Number(limit)),
     });
-  })
+  }),
 );
 
 // Get a single job by ID
-router.get("/:id",
+router.get(
+  "/:id",
   validate({ params: getJobByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
     const job = await prisma.job.findUnique({
       where: { id },
       include: {
-        client: { select: { id: true, username: true, avatarUrl: true, bio: true } },
-        freelancer: { select: { id: true, username: true, avatarUrl: true, bio: true } },
+        client: {
+          select: { id: true, username: true, avatarUrl: true, bio: true },
+        },
+        freelancer: {
+          select: { id: true, username: true, avatarUrl: true, bio: true },
+        },
         milestones: { orderBy: { order: "asc" } },
         applications: {
           include: {
-            freelancer: { select: { id: true, username: true, avatarUrl: true } },
+            freelancer: {
+              select: { id: true, username: true, avatarUrl: true },
+            },
           },
         },
       },
@@ -238,7 +269,7 @@ router.get("/:id",
 
     // Fetch on-chain escrow status if contractJobId is present
     let escrowStatus = job.escrowStatus as string;
-    
+
     if (job.contractJobId) {
       try {
         const cacheKey = generateJobOnChainStatusCacheKey(id);
@@ -247,20 +278,24 @@ router.get("/:id",
         });
         escrowStatus = onChainStatus;
       } catch (error) {
-        console.warn(`Could not fetch on-chain status for job ${id}, falling back to DB:`, error);
+        console.warn(
+          `Could not fetch on-chain status for job ${id}, falling back to DB:`,
+          error,
+        );
       }
     }
 
     res.json({
       ...job,
       escrow_status: escrowStatus, // Alias for frontend compatibility
-      escrowStatus: escrowStatus,    // Keep original for consistency
+      escrowStatus: escrowStatus, // Keep original for consistency
     });
-  })
+  }),
 );
 
 // Create a new job
-router.post("/",
+router.post(
+  "/",
   /**
    * @swagger
    * /jobs:
@@ -403,17 +438,18 @@ router.post("/",
 
     // Invalidate job listings cache when a new job is created
     await invalidateCache("jobs:list:*");
-    
+
     res.status(201).json(job);
-  })
+  }),
 );
 
 // Update a job
-router.put("/:id",
+router.put(
+  "/:id",
   authenticate,
   validate({
     params: getJobByIdParamSchema,
-    body: updateJobSchema
+    body: updateJobSchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
@@ -423,7 +459,9 @@ router.put("/:id",
       return res.status(404).json({ error: "Job not found." });
     }
     if (job.clientId !== req.userId) {
-      return res.status(403).json({ error: "Not authorized to update this job." });
+      return res
+        .status(403)
+        .json({ error: "Not authorized to update this job." });
     }
 
     const updateData = req.body;
@@ -442,11 +480,12 @@ router.put("/:id",
     await invalidateCacheKey(generateJobCacheKey(id));
 
     res.json(updated);
-  })
+  }),
 );
 
 // Delete a job
-router.delete("/:id",
+router.delete(
+  "/:id",
   authenticate,
   validate({ params: getJobByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -457,37 +496,42 @@ router.delete("/:id",
       return res.status(404).json({ error: "Job not found." });
     }
     if (job.clientId !== req.userId) {
-      return res.status(403).json({ error: "Not authorized to delete this job." });
+      return res
+        .status(403)
+        .json({ error: "Not authorized to delete this job." });
     }
 
     await prisma.job.delete({ where: { id } });
-    
+
     // Invalidate job listings cache and single job cache
     await invalidateCache("jobs:list:*");
     await invalidateCacheKey(generateJobCacheKey(id));
-    
+
     res.json({ message: "Job deleted successfully." });
-  })
+  }),
 );
 
 // Update job status
-router.patch("/:id/status",
+router.patch(
+  "/:id/status",
   authenticate,
   validate({
     params: getJobByIdParamSchema,
-    body: updateJobStatusSchema
+    body: updateJobStatusSchema,
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
     const { status } = req.body;
-    
+
     const job = await prisma.job.findUnique({ where: { id } });
 
     if (!job) {
       return res.status(404).json({ error: "Job not found." });
     }
     if (job.clientId !== req.userId) {
-      return res.status(403).json({ error: "Not authorized to update this job." });
+      return res
+        .status(403)
+        .json({ error: "Not authorized to update this job." });
     }
 
     const updated = await prisma.job.update({
@@ -501,7 +545,75 @@ router.patch("/:id/status",
     await invalidateCacheKey(generateJobCacheKey(id));
 
     res.json(updated);
-  })
+  }),
+);
+
+// Complete a job (client only)
+router.patch(
+  "/:id/complete",
+  authenticate,
+  validate({ params: getJobByIdParamSchema }),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const id = req.params.id as string;
+
+    const job = await prisma.job.findUnique({
+      where: { id },
+      include: { milestones: true, freelancer: true },
+    });
+
+    if (!job) {
+      return res.status(404).json({ error: "Job not found." });
+    }
+    if (job.clientId !== req.userId) {
+      return res
+        .status(403)
+        .json({ error: "Only the client can mark the job as complete." });
+    }
+
+    // Validate all milestones are approved
+    const allApproved = job.milestones.every((m) => m.status === "APPROVED");
+    if (!allApproved) {
+      return res.status(400).json({
+        error: "All milestones must be approved before completing the job.",
+      });
+    }
+
+    // Update job status to COMPLETED
+    const updated = await prisma.job.update({
+      where: { id },
+      data: { status: "COMPLETED" },
+      include: { milestones: true, client: true, freelancer: true },
+    });
+
+    // Send notifications to both parties
+    const { NotificationService } =
+      await import("../services/notification.service");
+
+    // Notify freelancer
+    if (job.freelancerId) {
+      await NotificationService.sendNotification({
+        userId: job.freelancerId,
+        type: "MILESTONE_APPROVED",
+        title: "Job Completed",
+        message: `The client has marked "${job.title}" as complete. Please leave a review!`,
+        metadata: { jobId: id },
+      });
+    }
+
+    // Emit Socket.IO event
+    const { getIo } = await import("../socket");
+    const io = getIo();
+    io.to(`user:${job.clientId}`).emit("job:completed", { jobId: id });
+    if (job.freelancerId) {
+      io.to(`user:${job.freelancerId}`).emit("job:completed", { jobId: id });
+    }
+
+    // Invalidate caches
+    await invalidateCache("jobs:list:*");
+    await invalidateCacheKey(generateJobCacheKey(id));
+
+    res.json(updated);
+  }),
 );
 
 export default router;
