@@ -56,6 +56,33 @@ router.post("/init-create", authenticate, asyncHandler(async (req: AuthRequest, 
 }));
 
 /**
+ * Request XDR to submit a milestone on-chain.
+ */
+router.post("/init-submit", authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { milestoneId } = req.body;
+  const milestone = await prisma.milestone.findUnique({
+    where: { id: milestoneId },
+    include: { job: { include: { freelancer: true } } },
+  });
+
+  if (!milestone || !milestone.job.contractJobId || milestone.onChainIndex === null) {
+    return res.status(404).json({ error: "On-chain milestone not found." });
+  }
+
+  if (!milestone.job.freelancer || milestone.job.freelancerId !== req.userId) {
+    return res.status(403).json({ error: "Only the assigned freelancer can submit milestones." });
+  }
+
+  const xdr = await ContractService.buildSubmitMilestoneTx(
+    milestone.job.freelancer.walletAddress,
+    milestone.job.contractJobId,
+    milestone.onChainIndex,
+  );
+
+  res.json({ xdr });
+}));
+
+/**
  * Request XDR to fund a job on-chain.
  */
 router.post("/init-fund", authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -325,6 +352,24 @@ router.post("/confirm-tx", authenticate, asyncHandler(async (req: AuthRequest, r
     await prisma.milestone.update({
       where: { id: milestoneId },
       data: { contractDeadline: new Date(newDeadline) },
+    });
+  } else if (type === "SUBMIT_MILESTONE" && milestoneId) {
+    await prisma.$transaction(async (tx) => {
+      const updatedMilestone = await tx.milestone.update({
+        where: { id: milestoneId },
+        data: { status: "SUBMITTED" },
+        include: { job: true },
+      });
+
+      if (!updatedMilestone.jobId) return;
+
+      await NotificationService.sendNotification({
+        userId: updatedMilestone.job.clientId,
+        type: NotificationType.MILESTONE_SUBMITTED,
+        title: "Milestone Submitted",
+        message: `Milestone "${updatedMilestone.title}" has been submitted for review.`,
+        metadata: { jobId: updatedMilestone.jobId, milestoneId: updatedMilestone.id },
+      });
     });
   } else if (type === "APPROVE_MILESTONE" && milestoneId) {
     await prisma.$transaction(async (tx) => {

@@ -79,6 +79,35 @@ export class ContractService {
   }
 
   /**
+   * Builds an un-signed transaction XDR for submitting a milestone.
+   */
+  static async buildSubmitMilestoneTx(
+    freelancerPublicKey: string,
+    jobId: string,
+    milestoneId: number,
+  ) {
+    const contract = new Contract(contractId);
+    const account = await server.getAccount(freelancerPublicKey);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "submit_milestone",
+          nativeToScVal(BigInt(jobId)),
+          nativeToScVal(milestoneId, { type: "u32" }),
+          new Address(freelancerPublicKey).toScVal(),
+        ),
+      )
+      .setTimeout(0)
+      .build();
+
+    return tx.toXDR();
+  }
+
+  /**
    * Builds an un-signed transaction XDR for funding a job.
    */
   static async buildFundJobTx(clientPublicKey: string, jobId: string) {
