@@ -72,6 +72,10 @@ interface MilestoneItem {
   contractDeadline?: string;
 }
 
+interface ExtendedApplication extends Application {
+  job?: { id: string; title: string };
+}
+
 export default function DashboardPage() {
   const { user, token, isLoading } = useAuth();
   const { socket } = useSocket();
@@ -92,6 +96,7 @@ export default function DashboardPage() {
 
   const [postedJobs, setPostedJobs] = useState<Job[]>([]);
   const [pendingApplicants, setPendingApplicants] = useState<Application[]>([]);
+  const [applicantsLoading, setApplicantsLoading] = useState(false);
   const [activeJobs, setActiveJobs] = useState<Job[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
