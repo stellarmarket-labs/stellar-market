@@ -1308,6 +1308,36 @@ fn test_fund_job_when_paused() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #2)")] // Unauthorized
+fn test_fund_job_rejects_non_client_caller() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &admin, &100u32, &604800u64);
+
+    let job_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let token = env.register_contract(None, MockToken);
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+
+    let job_id = client.create_job(
+        &job_client,
+        &freelancer,
+        &token,
+        &milestones,
+        &2500_u64,
+        &GRACE_PERIOD,
+    );
+
+    client.fund_job(&job_id, &attacker);
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #15)")] // ContractPaused
 fn test_submit_milestone_when_paused() {
     let env = Env::default();

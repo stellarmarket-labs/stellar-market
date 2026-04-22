@@ -35,6 +35,7 @@ pub enum DisputeError {
     ConflictOfInterest = 10,
     ContractPaused = 11,
     NotAdmin = 12,
+    DisputeCooldown = 13,
 }
 
 #[contracttype]
@@ -106,6 +107,7 @@ enum DataKey {
     Dispute(u64),
     DisputeCount,
     Votes(u64),
+    LastDisputeClosedAt(u64),
     HasVoted(u64, Address),
     ReputationContract,
     MinVoterReputation,
@@ -144,6 +146,7 @@ const MIN_VOTER_REPUTATION: u32 = 300;
 
 /// Default reputation points slashed from the losing party after a resolved dispute.
 const DEFAULT_SLASH_AMOUNT: u64 = 50;
+const DISPUTE_COOLDOWN_SECS: u64 = 86_400;
 
 const MIN_TTL_THRESHOLD: u32 = 1_000;
 const MIN_TTL_EXTEND_TO: u32 = 10_000;
@@ -159,6 +162,14 @@ fn bump_dispute_ttl(env: &Env, dispute_id: u64) {
 fn bump_votes_ttl(env: &Env, dispute_id: u64) {
     env.storage().persistent().extend_ttl(
         &DataKey::Votes(dispute_id),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
+}
+
+fn bump_last_dispute_closed_ttl(env: &Env, job_id: u64) {
+    env.storage().persistent().extend_ttl(
+        &DataKey::LastDisputeClosedAt(job_id),
         MIN_TTL_THRESHOLD,
         MIN_TTL_EXTEND_TO,
     );
@@ -467,6 +478,18 @@ impl DisputeContract {
             return Err(DisputeError::InvalidParty);
         }
 
+        if let Some(last_closed_at) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u64>(&DataKey::LastDisputeClosedAt(job_id))
+        {
+            let now = env.ledger().timestamp();
+            if now <= last_closed_at.saturating_add(DISPUTE_COOLDOWN_SECS) {
+                return Err(DisputeError::DisputeCooldown);
+            }
+            bump_last_dispute_closed_ttl(&env, job_id);
+        }
+
         let mut count: u64 = env
             .storage()
             .instance()
@@ -769,6 +792,11 @@ impl DisputeContract {
                     (dispute.job_id, loser, slash_amount),
                 );
             }
+
+            env.storage()
+                .persistent()
+                .set(&DataKey::LastDisputeClosedAt(dispute.job_id), &env.ledger().timestamp());
+            bump_last_dispute_closed_ttl(&env, dispute.job_id);
         }
 
         env.storage()

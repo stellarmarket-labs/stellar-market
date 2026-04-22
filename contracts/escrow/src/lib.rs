@@ -364,7 +364,6 @@ impl EscrowContract {
 
     /// Fund the escrow for a job. The client transfers the total amount to this contract.
     pub fn fund_job(env: Env, job_id: u64, client: Address) -> Result<(), EscrowError> {
-        client.require_auth();
         require_not_paused(&env)?;
 
         let mut job: Job = env
@@ -373,6 +372,9 @@ impl EscrowContract {
             .get(&get_job_key(job_id))
             .ok_or(EscrowError::JobNotFound)?;
         bump_job_ttl(&env, job_id);
+
+        // Require auth from the persisted job owner to prevent third-party funding.
+        job.client.require_auth();
 
         if job.client != client {
             return Err(EscrowError::Unauthorized);
