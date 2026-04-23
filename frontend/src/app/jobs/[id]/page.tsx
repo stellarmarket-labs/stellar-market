@@ -6,7 +6,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 async function getJob(id: string) {
   try {
     const res = await fetch(`${API_URL}/jobs/${id}`, {
-      next: { revalidate: 60 },
+      next: { revalidate: 60 } as RequestInit["next"],
     });
     if (!res.ok) return null;
     return res.json();
