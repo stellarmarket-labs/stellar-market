@@ -12,7 +12,7 @@ interface AuthFormProps {
 
 export default function AuthForm({ type }: AuthFormProps) {
   const { login, register } = useAuth();
-  const { address, connect } = useWallet();
+  const { address, connect, isConnecting, error: walletError } = useWallet();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -247,13 +247,36 @@ export default function AuthForm({ type }: AuthFormProps) {
                   <button
                     type="button"
                     onClick={connect}
-                    className="btn-primary py-2 px-4 text-sm"
+                    disabled={isConnecting}
+                    className="btn-primary py-2 px-4 text-sm flex items-center gap-2 disabled:opacity-60"
                   >
-                    Connect
+                    {isConnecting ? <Loader2 size={14} className="animate-spin" /> : null}
+                    {isConnecting ? "Connecting…" : "Connect"}
                   </button>
                 )}
               </div>
-              {!address && type === "register" && (
+              {walletError === "NOT_INSTALLED" && (
+                <p className="text-xs text-theme-error mt-1">
+                  Freighter wallet extension is not installed.{" "}
+                  <a
+                    href="https://freighter.app"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:opacity-80"
+                  >
+                    Install Freighter ↗
+                  </a>
+                </p>
+              )}
+              {walletError === "LOCKED" && (
+                <p className="text-xs text-theme-error mt-1">
+                  Please unlock your Freighter wallet and try again.
+                </p>
+              )}
+              {walletError && walletError !== "NOT_INSTALLED" && walletError !== "LOCKED" && (
+                <p className="text-xs text-theme-error mt-1">{walletError}</p>
+              )}
+              {!address && !walletError && type === "register" && (
                 <p className="text-xs text-theme-error mt-1">Wallet is required for registration</p>
               )}
             </div>

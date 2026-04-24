@@ -114,26 +114,39 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setIsConnecting(true);
 
     try {
+      // Detect not-installed: window.freighter is undefined before the SDK
+      // even attempts a connection.
+      if (typeof window !== "undefined" && !(window as Record<string, unknown>).freighter) {
+        setError("NOT_INSTALLED");
+        return;
+      }
+
       const installed = await checkFreighterInstalled();
       if (!installed) {
-        setError(
-          "Freighter wallet extension not found. Please install it from https://freighter.app"
-        );
-        setIsConnecting(false);
+        setError("NOT_INSTALLED");
         return;
       }
 
       const accessResult = await requestAccess();
       if (accessResult.error) {
-        setError(accessResult.error.message ?? "Failed to connect wallet");
-        setIsConnecting(false);
+        const msg = typeof accessResult.error === "string"
+          ? accessResult.error
+          : (accessResult.error as { message?: string }).message ?? "";
+        // Freighter returns a specific message when the wallet is locked
+        if (msg.toLowerCase().includes("locked") || msg.toLowerCase().includes("unlock")) {
+          setError("LOCKED");
+        } else {
+          setError(msg || "Failed to connect wallet");
+        }
         return;
       }
 
       const addressResult = await getAddress();
       if (addressResult.error) {
-        setError(addressResult.error.message ?? "Failed to retrieve address");
-        setIsConnecting(false);
+        const msg = typeof addressResult.error === "string"
+          ? addressResult.error
+          : (addressResult.error as { message?: string }).message ?? "";
+        setError(msg || "Failed to retrieve address");
         return;
       }
 

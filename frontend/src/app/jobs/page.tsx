@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { Search, SlidersHorizontal, Briefcase, Loader2 } from "lucide-react";
 import axios from "axios";
 import JobCard from "@/components/JobCard";
+import JobCardSkeleton from "@/components/skeletons/JobCardSkeleton";
 import FilterSidebar from "@/components/FilterSidebar";
 import EmptyState from "@/components/EmptyState";
 import { useJobFilters } from "@/hooks/useJobFilters";
@@ -180,10 +181,7 @@ function JobsContent() {
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="animate-pulse bg-theme-card border border-theme-border rounded-xl h-64"
-                />
+                <JobCardSkeleton key={i} />
               ))}
             </div>
           ) : jobs.length > 0 ? (

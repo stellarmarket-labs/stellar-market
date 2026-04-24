@@ -31,6 +31,8 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import StatusBadge from "@/components/StatusBadge";
+import OnboardingWizard from "@/components/OnboardingWizard";
+import { DashboardStatsSkeleton, DashboardTabContentSkeleton } from "@/components/skeletons/DashboardSkeleton";
 import { useAuth } from "@/context/AuthContext";
 import { useSocket } from "@/context/SocketContext";
 import { Job, Application, PaginatedResponse } from "@/types";
@@ -267,6 +269,7 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <OnboardingWizard />
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold text-theme-heading">Dashboard</h1>
         {isClient ? (
@@ -283,22 +286,24 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        {displayStats.map((stat) => (
-          <div key={stat.label} className="card flex items-center gap-4">
-            <div className={`${stat.color}`}>
-              <stat.icon size={24} />
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-theme-heading">
-                {dataLoading ? "—" : stat.value}
+      {dataLoading ? (
+        <DashboardStatsSkeleton />
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          {displayStats.map((stat) => (
+            <div key={stat.label} className="card flex items-center gap-4">
+              <div className={`${stat.color}`}>
+                <stat.icon size={24} />
               </div>
-              <div className="text-sm text-theme-text">{stat.label}</div>
-              <div className="text-xs text-theme-text/60 mt-0.5">{dataLoading ? "" : stat.detail}</div>
+              <div>
+                <div className="text-2xl font-bold text-theme-heading">{stat.value}</div>
+                <div className="text-sm text-theme-text">{stat.label}</div>
+                <div className="text-xs text-theme-text/60 mt-0.5">{stat.detail}</div>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-4 mb-6 border-b border-theme-border overflow-x-auto">
@@ -318,9 +323,7 @@ export default function DashboardPage() {
       </div>
 
       {dataLoading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="animate-spin text-stellar-blue" size={32} />
-        </div>
+        <DashboardTabContentSkeleton />
       ) : (
         <>
           {/* ── Freelancer tab content ── */}

@@ -93,6 +93,7 @@ model User {
   availability           Boolean   @default(true)
   averageRating          Float     @default(0)
   reviewCount            Int       @default(0)
+  completedOnboarding    Boolean   @default(false)
 
   clientJobs         Job[]          @relation("ClientJobs")
   freelancerJobs     Job[]          @relation("FreelancerJobs")
