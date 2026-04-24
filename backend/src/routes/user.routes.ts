@@ -56,6 +56,7 @@ router.get("/me", authenticate, async (req: AuthRequest, res: Response) => {
         role: true,
         skills: true,
         availability: true,
+        completedOnboarding: true,
         createdAt: true,
       },
     });
@@ -423,6 +424,21 @@ router.get(
     });
   }),
 );
+
+// PATCH /api/users/me/onboarding — mark onboarding complete
+router.patch("/me/onboarding", authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.userId },
+      data: { completedOnboarding: true },
+      select: { id: true, completedOnboarding: true },
+    });
+    res.json(user);
+  } catch (error) {
+    console.error("Complete onboarding error:", error);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
 
 // Update user profile
 router.put(

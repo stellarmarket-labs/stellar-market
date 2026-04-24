@@ -16,6 +16,7 @@ import {
   Search,
   ShieldCheck,
   Unplug,
+  Wallet,
 } from "lucide-react";
 import axios from "axios";
 import { useState, useRef, useEffect } from "react";
@@ -241,6 +242,7 @@ export default function Navbar() {
     { href: "/disputes", label: "Disputes", icon: ShieldCheck },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/messages", label: "Messages", icon: MessageSquare, id: "messages-nav-link" },
+    { href: "/wallet", label: "Wallet", icon: Wallet },
   ];
 
   if (isClient) {

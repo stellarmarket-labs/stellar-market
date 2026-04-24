@@ -15,12 +15,13 @@ import {
 } from "lucide-react";
 import axios from "axios";
 import { UserProfile } from "@/types";
-import Skeleton from "@/components/Skeleton";
 import Link from "next/link";
 import Image from "next/image";
+import Skeleton from "@/components/Skeleton";
 import { useAuth } from "@/context/AuthContext";
 import { ContractService, ReputationResult } from "@/services/ContractService";
 import { ShareButton } from "@/components/ShareButton";
+import ProfileSkeleton from "@/components/skeletons/ProfileSkeleton";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
@@ -82,30 +83,7 @@ export default function ProfileClient() {
   const isOwnProfile = currentUser && profile && currentUser.id === profile.id;
 
   if (loading) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="flex flex-col md:flex-row gap-8 items-start mb-12">
-          <Skeleton className="w-32 h-32 rounded-full flex-shrink-0" />
-          <div className="flex-1 space-y-4">
-            <Skeleton className="h-10 w-64" />
-            <Skeleton className="h-4 w-full max-w-2xl" />
-            <Skeleton className="h-4 w-3/4 max-w-md" />
-            <Skeleton className="h-6 w-48" />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-          <div className="space-y-6">
-            <Skeleton className="h-48 w-full" />
-            <Skeleton className="h-32 w-full" />
-          </div>
-          <div className="lg:col-span-2 space-y-6">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
-          </div>
-        </div>
-      </div>
-    );
+    return <ProfileSkeleton />;
   }
 
   if (error || !profile) {

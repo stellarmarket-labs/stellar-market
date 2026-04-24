@@ -12,6 +12,7 @@ export interface User {
   averageRating?: number;
   reviewCount?: number;
   availability?: boolean;
+  completedOnboarding?: boolean;
 }
 
 export interface Milestone {
