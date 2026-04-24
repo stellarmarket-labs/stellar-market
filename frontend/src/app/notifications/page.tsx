@@ -8,6 +8,7 @@ import { useSocket } from "@/context/SocketContext";
 import { Notification, PaginatedResponse } from "@/types";
 import NotificationItem from "@/components/NotificationItem";
 import Pagination from "@/components/Pagination";
+import EmptyState from "@/components/EmptyState";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 
@@ -266,18 +267,11 @@ export default function NotificationsPage() {
             )}
           </>
         ) : (
-          <div className="p-20 text-center">
-            <div className="w-16 h-16 bg-theme-border/50 rounded-full flex items-center justify-center mx-auto mb-4 text-theme-text/50">
-              <Bell size={32} />
-            </div>
-            <h3 className="text-lg font-semibold text-theme-heading">
-              No notifications yet
-            </h3>
-            <p className="text-theme-text mt-1 max-w-xs mx-auto">
-              We&apos;ll notify you when something important happens on the
-              platform.
-            </p>
-          </div>
+          <EmptyState
+            icon={Bell}
+            title="No notifications yet"
+            description="We'll notify you when something important happens on the platform."
+          />
         )}
       </div>
     </div>
