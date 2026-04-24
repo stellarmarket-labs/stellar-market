@@ -90,8 +90,20 @@ router.get(
    */
   validate({ query: getJobsQuerySchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { page, limit, search, skill, skills, status, minBudget, maxBudget, clientId, sort, postedAfter, cursor } = req.query as any;
-
+    const {
+      page,
+      limit,
+      search,
+      skill,
+      skills,
+      status,
+      minBudget,
+      maxBudget,
+      clientId,
+      sort,
+      postedAfter,
+      cursor,
+    } = req.query as any;
 
     const cacheKey = generateJobsCacheKey({
       page,
@@ -109,7 +121,9 @@ router.get(
     });
 
     const { data, hit } = await cache(cacheKey, 60, async () => {
-      const where: any = {};
+      const where: any = {
+        deletedAt: null, // Exclude soft-deleted jobs
+      };
 
       if (search) {
         where.OR = [
@@ -156,7 +170,9 @@ router.get(
       if (cursor) {
         let cursorId: string;
         try {
-          ({ id: cursorId } = JSON.parse(Buffer.from(cursor, "base64").toString("utf8")));
+          ({ id: cursorId } = JSON.parse(
+            Buffer.from(cursor, "base64").toString("utf8"),
+          ));
         } catch {
           cursorId = cursor as string;
         }
@@ -168,7 +184,9 @@ router.get(
           where,
           include: {
             client: { select: { id: true, username: true, avatarUrl: true } },
-            freelancer: { select: { id: true, username: true, avatarUrl: true } },
+            freelancer: {
+              select: { id: true, username: true, avatarUrl: true },
+            },
             milestones: true,
             _count: { select: { applications: true } },
           },
@@ -181,9 +199,15 @@ router.get(
         const hasMore = jobs.length > limit;
         const pageData = hasMore ? jobs.slice(0, limit) : jobs;
         const lastJob = pageData[pageData.length - 1];
-        const nextCursor = hasMore && lastJob
-          ? Buffer.from(JSON.stringify({ id: lastJob.id, createdAt: lastJob.createdAt })).toString("base64")
-          : null;
+        const nextCursor =
+          hasMore && lastJob
+            ? Buffer.from(
+                JSON.stringify({
+                  id: lastJob.id,
+                  createdAt: lastJob.createdAt,
+                }),
+              ).toString("base64")
+            : null;
 
         return { data: pageData, nextCursor };
       }
@@ -216,7 +240,9 @@ router.get(
 
       const lastJob = jobs[jobs.length - 1];
       const nextCursor = lastJob
-        ? Buffer.from(JSON.stringify({ id: lastJob.id, createdAt: lastJob.createdAt })).toString("base64")
+        ? Buffer.from(
+            JSON.stringify({ id: lastJob.id, createdAt: lastJob.createdAt }),
+          ).toString("base64")
         : null;
 
       return {
@@ -243,6 +269,7 @@ router.get(
 
     const where: any = {
       OR: [{ clientId: req.userId }, { freelancerId: req.userId }],
+      deletedAt: null, // Exclude soft-deleted jobs
     };
     if (status) where.status = status;
 
@@ -301,6 +328,7 @@ router.get(
     // Build job filter conditions
     const jobWhere: any = {
       status: "OPEN",
+      deletedAt: null, // Exclude soft-deleted jobs
     };
 
     if (search) {
@@ -368,8 +396,11 @@ router.get(
   validate({ params: getJobByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
-    const job = await prisma.job.findUnique({
-      where: { id },
+    const job = await prisma.job.findFirst({
+      where: {
+        id,
+        deletedAt: null, // Exclude soft-deleted jobs
+      },
       include: {
         client: {
           select: { id: true, username: true, avatarUrl: true, bio: true },
@@ -609,7 +640,12 @@ router.put(
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
-    const job = await prisma.job.findUnique({ where: { id } });
+    const job = await prisma.job.findFirst({
+      where: {
+        id,
+        deletedAt: null, // Only allow updating non-deleted jobs
+      },
+    });
 
     if (!job) {
       return res.status(404).json({ error: "Job not found." });
@@ -639,14 +675,19 @@ router.put(
   }),
 );
 
-// Delete a job
+// Delete a job (soft delete)
 router.delete(
   "/:id",
   authenticate,
   validate({ params: getJobByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
-    const job = await prisma.job.findUnique({ where: { id } });
+    const job = await prisma.job.findFirst({
+      where: {
+        id,
+        deletedAt: null, // Only allow deleting non-deleted jobs
+      },
+    });
 
     if (!job) {
       return res.status(404).json({ error: "Job not found." });
@@ -657,7 +698,11 @@ router.delete(
         .json({ error: "Not authorized to delete this job." });
     }
 
-    await prisma.job.delete({ where: { id } });
+    // Soft delete: set deletedAt timestamp instead of removing the row
+    await prisma.job.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
 
     // Invalidate job listings cache and single job cache
     await invalidateCache("jobs:list:*");
@@ -679,7 +724,12 @@ router.patch(
     const id = req.params.id as string;
     const { status } = req.body;
 
-    const job = await prisma.job.findUnique({ where: { id } });
+    const job = await prisma.job.findFirst({
+      where: {
+        id,
+        deletedAt: null, // Only allow updating non-deleted jobs
+      },
+    });
 
     if (!job) {
       return res.status(404).json({ error: "Job not found." });
@@ -712,8 +762,11 @@ router.patch(
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
 
-    const job = await prisma.job.findUnique({
-      where: { id },
+    const job = await prisma.job.findFirst({
+      where: {
+        id,
+        deletedAt: null, // Only allow completing non-deleted jobs
+      },
       include: { milestones: true, freelancer: true },
     });
 
@@ -788,7 +841,12 @@ router.post(
     }
 
     const id = req.params.id as string;
-    const job = await prisma.job.findUnique({ where: { id } });
+    const job = await prisma.job.findFirst({
+      where: {
+        id,
+        deletedAt: null, // Only allow saving non-deleted jobs
+      },
+    });
 
     if (!job) {
       return res.status(404).json({ error: "Job not found." });
