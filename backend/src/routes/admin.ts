@@ -1,5 +1,5 @@
 import { Router, Response } from "express";
-import { PrismaClient, UserRole, DisputeStatus } from "@prisma/client";
+import { PrismaClient, UserRole, DisputeStatus, ReportStatus, ReportTargetType } from "@prisma/client";
 import { AuthRequest, requireAdmin } from "../middleware/auth";
 import {
     flagJobSchema,
@@ -478,6 +478,91 @@ router.post("/users/:id/restore", async (req: AuthRequest, res: Response): Promi
 
         res.json({ message: "User restored successfully", user: updatedUser });
     } catch (error) {
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+/**
+ * GET /api/admin/reports
+ * List all reports, filterable by status and targetType.
+ */
+router.get("/reports", async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const page = Math.max(1, parseInt(req.query.page as string) || 1);
+        const limit = Math.min(100, parseInt(req.query.limit as string) || 20);
+        const skip = (page - 1) * limit;
+
+        const where: any = {};
+        if (req.query.status) where.status = req.query.status as ReportStatus;
+        if (req.query.targetType) where.targetType = req.query.targetType as ReportTargetType;
+
+        const [reports, total] = await Promise.all([
+            prisma.report.findMany({
+                where,
+                skip,
+                take: limit,
+                orderBy: { createdAt: "desc" },
+                include: {
+                    reporter: { select: { id: true, username: true } },
+                },
+            }),
+            prisma.report.count({ where }),
+        ]);
+
+        res.json({
+            reports,
+            pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        });
+    } catch (error) {
+        console.error("Error fetching reports:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+/**
+ * PATCH /api/admin/reports/:id
+ * Update report status; optionally suspend the target user.
+ */
+router.patch("/reports/:id", async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const id = req.params.id as string;
+        const { status, suspend, suspendReason } = z.object({
+            status: z.nativeEnum(ReportStatus),
+            suspend: z.boolean().optional(),
+            suspendReason: z.string().optional(),
+        }).parse(req.body);
+
+        const report = await prisma.report.findUnique({ where: { id } });
+        if (!report) {
+            res.status(404).json({ error: "Report not found" });
+            return;
+        }
+
+        const updated = await prisma.report.update({
+            where: { id },
+            data: { status },
+        });
+
+        if (suspend && report.targetType === ReportTargetType.USER) {
+            await prisma.user.update({
+                where: { id: report.targetId },
+                data: {
+                    isSuspended: true,
+                    suspendReason: suspendReason ?? `Suspended via report ${id}`,
+                    suspendedAt: new Date(),
+                },
+            });
+            await logAdminAction(req.userId!, "SUSPEND_USER_VIA_REPORT", report.targetId, { reportId: id });
+        }
+
+        await logAdminAction(req.userId!, "UPDATE_REPORT", id, { status });
+
+        res.json({ report: updated });
+    } catch (error) {
+        if (error instanceof ZodError) {
+            res.status(400).json({ error: "Validation error", details: error.issues });
+            return;
+        }
         res.status(500).json({ error: "Internal server error" });
     }
 });
