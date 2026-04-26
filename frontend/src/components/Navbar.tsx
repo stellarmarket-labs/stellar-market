@@ -314,6 +314,7 @@ export default function Navbar() {
   const pathname = usePathname();
   const isClient = user?.role === "CLIENT";
   const isFreelancer = user?.role === "FREELANCER";
+  const mobileDrawerRef = useRef<HTMLDivElement>(null);
 
   const navLinks = [
     { href: "/jobs", label: isFreelancer ? "Find Work" : "Jobs", icon: Briefcase, hide: isClient },
@@ -333,6 +334,51 @@ export default function Navbar() {
     if (path === "/" && pathname !== "/") return false;
     return pathname?.startsWith(path);
   };
+
+  // Focus trap for mobile navigation
+  useEffect(() => {
+    if (!mobileOpen || !mobileDrawerRef.current) return;
+
+    const focusableElements = mobileDrawerRef.current.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    ) as NodeListOf<HTMLElement>;
+    
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    const handleTabKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      if (e.shiftKey) {
+        if (document.activeElement === firstElement) {
+          lastElement?.focus();
+          e.preventDefault();
+        }
+      } else {
+        if (document.activeElement === lastElement) {
+          firstElement?.focus();
+          e.preventDefault();
+        }
+      }
+    };
+
+    const handleEscapeKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMobileOpen(false);
+      }
+    };
+
+    // Focus first element when drawer opens
+    firstElement?.focus();
+
+    document.addEventListener('keydown', handleTabKey);
+    document.addEventListener('keydown', handleEscapeKey);
+
+    return () => {
+      document.removeEventListener('keydown', handleTabKey);
+      document.removeEventListener('keydown', handleEscapeKey);
+    };
+  }, [mobileOpen]);
 
   return (
     <nav className="border-b border-theme-border bg-theme-bg/80 backdrop-blur-md sticky top-0 z-50">
@@ -389,6 +435,7 @@ export default function Navbar() {
           
           {/* Panel */}
           <div
+            ref={mobileDrawerRef}
             className={`absolute right-0 top-0 h-full w-72 bg-theme-bg border-l border-theme-border p-6 shadow-2xl transition-transform duration-300 ease-in-out ${
               mobileOpen ? "translate-x-0" : "translate-x-full"
             }`}

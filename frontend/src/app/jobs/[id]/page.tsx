@@ -26,6 +26,9 @@ export async function generateMetadata({
     return {
       title: "Job Not Found | StellarMarket",
       description: "The requested job could not be found.",
+      alternates: {
+        canonical: `${process.env.NEXT_PUBLIC_SITE_URL || "https://stellarmarket.io"}/jobs/${params.id}`,
+      },
     };
   }
 

@@ -27,6 +27,9 @@ export async function generateMetadata({
     return {
       title: "Profile Not Found | StellarMarket",
       description: "The requested profile could not be found.",
+      alternates: {
+        canonical: `${process.env.NEXT_PUBLIC_SITE_URL || "https://stellarmarket.io"}/profile/${params.id}`,
+      },
     };
   }
 

@@ -9,6 +9,7 @@ export interface ServiceFilters {
   category: string;
   minPrice: string;
   maxPrice: string;
+  minRating: string;
   sort: string;
   page: number;
 }
@@ -19,6 +20,7 @@ const DEFAULTS: ServiceFilters = {
   category: "All",
   minPrice: "",
   maxPrice: "",
+  minRating: "",
   sort: "newest",
   page: 1,
 };
@@ -33,6 +35,7 @@ function parseFiltersFromParams(searchParams: URLSearchParams): ServiceFilters {
     category: searchParams.get("category") || "All",
     minPrice: searchParams.get("minPrice") || "",
     maxPrice: searchParams.get("maxPrice") || "",
+    minRating: searchParams.get("minRating") || "",
     sort: searchParams.get("sort") || "newest",
     page: isNaN(page) ? 1 : page,
   };
@@ -45,6 +48,7 @@ function filtersToParams(filters: ServiceFilters): URLSearchParams {
   if (filters.category !== "All") params.set("category", filters.category);
   if (filters.minPrice) params.set("minPrice", filters.minPrice);
   if (filters.maxPrice) params.set("maxPrice", filters.maxPrice);
+  if (filters.minRating) params.set("minRating", filters.minRating);
   if (filters.sort !== "newest") params.set("sort", filters.sort);
   if (filters.page > 1) params.set("page", String(filters.page));
   return params;
@@ -133,6 +137,7 @@ export function useServiceFilters() {
     if (filters.skills.length) count++;
     if (filters.category !== "All") count++;
     if (filters.minPrice || filters.maxPrice) count++;
+    if (filters.minRating) count++;
     if (filters.sort !== "newest") count++;
     return count;
   }, [filters]);

@@ -2,6 +2,7 @@
 
 import { Share2, Link, Twitter, Linkedin, Send, Copy, Check } from "lucide-react";
 import { useState } from "react";
+import { useToast } from "@/components/Toast";
 
 interface ShareMenuProps {
   title: string;
@@ -12,6 +13,7 @@ interface ShareMenuProps {
 export default function ShareMenu({ title, url, description = "" }: ShareMenuProps) {
   const [copied, setCopied] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const { toast } = useToast();
 
   const shareData = {
     title,
@@ -35,9 +37,11 @@ export default function ShareMenu({ title, url, description = "" }: ShareMenuPro
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
+      toast.success("Link copied!");
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error("Failed to copy:", err);
+      toast.error("Failed to copy link");
     }
   };
 

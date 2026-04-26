@@ -87,6 +87,7 @@ function ServicesContent() {
       if (filters.skills.length) params.skills = filters.skills.join(",");
       if (filters.minPrice) params.minPrice = Number(filters.minPrice);
       if (filters.maxPrice) params.maxPrice = Number(filters.maxPrice);
+      if (filters.minRating) params.minRating = Number(filters.minRating);
       if (filters.sort !== "newest") params.sort = filters.sort;
       return params;
     },
@@ -269,6 +270,24 @@ function ServicesContent() {
                 onChange={(e) => updateFilter("maxPrice", e.target.value)}
               />
             </div>
+          </div>
+
+          {/* Rating */}
+          <div>
+            <h3 className="text-sm font-semibold text-theme-heading mb-3">
+              Minimum Rating
+            </h3>
+            <select
+              className="input-field text-sm"
+              value={filters.minRating}
+              onChange={(e) => updateFilter("minRating", e.target.value)}
+            >
+              <option value="">Any Rating</option>
+              <option value="4">4+ Stars</option>
+              <option value="3">3+ Stars</option>
+              <option value="2">2+ Stars</option>
+              <option value="1">1+ Stars</option>
+            </select>
           </div>
 
           {/* Sort */}
