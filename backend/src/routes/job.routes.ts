@@ -153,14 +153,21 @@ router.get(
     const { data, hit } = await cache(cacheKey, 30, async () => {
       const where: any = {};
 
-      // Full-text search using PostgreSQL tsvector/tsquery.
+      // Full-text search using PostgreSQL tsvector/tsquery with relevance ranking.
       // Falls back to Prisma contains (LIKE) if raw query fails.
       if (search) {
         try {
-          const ftsResults = await prisma.$queryRaw<{ id: string }[]>`
-            SELECT id FROM "Job"
+          const ftsResults = await prisma.$queryRaw<
+            { id: string; rank: number }[]
+          >`
+            SELECT id, ts_rank(
+              to_tsvector('english', title || ' ' || description),
+              plainto_tsquery('english', ${search})
+            ) AS rank
+            FROM "Job"
             WHERE to_tsvector('english', title || ' ' || description)
               @@ plainto_tsquery('english', ${search})
+            ORDER BY rank DESC
           `;
           const matchedIds = ftsResults.map((r) => r.id);
           where.id = matchedIds.length > 0 ? { in: matchedIds } : { in: [] };
