@@ -212,7 +212,7 @@ export default function RaiseDisputeModal({
             </button>
             <button
               type="submit"
-              disabled={!canSubmit}
+              disabled={processing || !canSubmit}
               className="btn-primary flex-1 bg-theme-error hover:bg-theme-error/90 border border-transparent text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {processing ? (
