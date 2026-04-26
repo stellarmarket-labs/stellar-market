@@ -38,17 +38,21 @@ export async function generateMetadata({
   return {
     title,
     description,
+    alternates: {
+      canonical: `${process.env.NEXT_PUBLIC_SITE_URL || "https://stellarmarket.io"}/profile/${params.id}`,
+    },
     openGraph: {
       title,
       description,
-      images: profile.avatarUrl ? [profile.avatarUrl] : [],
+      images: profile.avatarUrl ? [profile.avatarUrl] : ["/og-default.png"],
       type: "profile",
-      username: profile.username,
+      siteName: "StellarMarket",
     },
     twitter: {
-      card: "summary",
+      card: "summary_large_image",
       title,
       description,
+      images: profile.avatarUrl ? [profile.avatarUrl] : ["/og-default.png"],
     },
   };
 }

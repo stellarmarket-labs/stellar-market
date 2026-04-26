@@ -34,15 +34,21 @@ export async function generateMetadata({
   return {
     title: `${job.title} | StellarMarket`,
     description: desc,
+    alternates: {
+      canonical: `${process.env.NEXT_PUBLIC_SITE_URL || "https://stellarmarket.io"}/jobs/${params.id}`,
+    },
     openGraph: {
       title: job.title,
       description: desc,
       images: [{ url: job.imageUrl || "/og-default.png" }],
+      type: "article",
+      siteName: "StellarMarket",
     },
     twitter: {
       card: "summary_large_image",
       title: job.title,
       description: desc,
+      images: [job.imageUrl || "/og-default.png"],
     },
   };
 }
