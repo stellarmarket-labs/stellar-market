@@ -1,15 +1,27 @@
 import Link from "next/link";
-import { Star, MapPin, CheckCircle2, User } from "lucide-react";
+import { MapPin, CheckCircle2, User } from "lucide-react";
 import { User as UserType } from "@/types";
 import Image from "next/image";
+import StarRating from "./StarRating";
 
 interface FreelancerCardProps {
   freelancer: UserType;
 }
 
 export default function FreelancerCard({ freelancer }: FreelancerCardProps) {
-  const averageRating = freelancer.averageRating || 0;
-  const reviewCount = freelancer.reviewCount || 0;
+  let averageRating = freelancer.averageRating || 0;
+  let reviewCount = freelancer.reviewCount || 0;
+
+  // Use on-chain reputation if available
+  if (freelancer.reputation) {
+    const totalScore = BigInt(freelancer.reputation.totalScore);
+    const totalWeight = BigInt(freelancer.reputation.totalWeight);
+    
+    if (totalWeight > 0n) {
+      averageRating = Number(totalScore) / Number(totalWeight);
+    }
+    reviewCount = freelancer.reputation.reviewCount;
+  }
 
   return (
     <Link href={`/profile/${freelancer.id}`}>
@@ -37,13 +49,8 @@ export default function FreelancerCard({ freelancer }: FreelancerCardProps) {
             <h3 className="text-lg font-bold text-theme-heading mb-1 group-hover:text-stellar-blue transition-colors">
               {freelancer.username}
             </h3>
-            <div className="flex items-center gap-1.5 text-xs text-theme-text font-medium">
-              <div className="flex items-center gap-1 text-yellow-500">
-                <Star size={14} fill="currentColor" />
-                <span>{averageRating.toFixed(1)}</span>
-              </div>
-              <span>•</span>
-              <span>{reviewCount} {reviewCount === 1 ? 'Review' : 'Reviews'}</span>
+            <div className="mt-1">
+              <StarRating rating={averageRating} reviewCount={reviewCount} />
             </div>
           </div>
         </div>

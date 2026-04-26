@@ -13,6 +13,11 @@ export interface User {
   reviewCount?: number;
   availability?: boolean;
   completedOnboarding?: boolean;
+  reputation?: {
+    totalScore: string;
+    totalWeight: string;
+    reviewCount: number;
+  };
 }
 
 export interface Milestone {
