@@ -28,7 +28,7 @@ export async function generateMetadata({
       title: "Profile Not Found | StellarMarket",
       description: "The requested profile could not be found.",
       alternates: {
-        canonical: `${process.env.NEXT_PUBLIC_SITE_URL || "https://stellarmarket.io"}/profile/${params.id}`,
+        canonical: `${(process.env.NEXT_PUBLIC_SITE_URL as string) || "https://stellarmarket.io"}/profile/${params.id}`,
       },
     };
   }
@@ -42,7 +42,7 @@ export async function generateMetadata({
     title,
     description,
     alternates: {
-      canonical: `${process.env.NEXT_PUBLIC_SITE_URL || "https://stellarmarket.io"}/profile/${params.id}`,
+      canonical: `${(process.env.NEXT_PUBLIC_SITE_URL as string) || "https://stellarmarket.io"}/profile/${params.id}`,
     },
     openGraph: {
       title,

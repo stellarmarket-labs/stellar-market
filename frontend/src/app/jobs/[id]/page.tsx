@@ -27,7 +27,7 @@ export async function generateMetadata({
       title: "Job Not Found | StellarMarket",
       description: "The requested job could not be found.",
       alternates: {
-        canonical: `${process.env.NEXT_PUBLIC_SITE_URL || "https://stellarmarket.io"}/jobs/${params.id}`,
+        canonical: `${(process.env.NEXT_PUBLIC_SITE_URL as string) || "https://stellarmarket.io"}/jobs/${params.id}`,
       },
     };
   }
@@ -38,7 +38,7 @@ export async function generateMetadata({
     title: `${job.title} | StellarMarket`,
     description: desc,
     alternates: {
-      canonical: `${process.env.NEXT_PUBLIC_SITE_URL || "https://stellarmarket.io"}/jobs/${params.id}`,
+      canonical: `${(process.env.NEXT_PUBLIC_SITE_URL as string) || "https://stellarmarket.io"}/jobs/${params.id}`,
     },
     openGraph: {
       title: job.title,
