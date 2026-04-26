@@ -607,7 +607,7 @@ impl EscrowContract {
             id: job_count,
             client: client.clone(),
             freelancer: freelancer.clone(),
-            token,
+            token: token.clone(),
             total_amount: total,
             status: JobStatus::Created,
             milestones: milestone_vec,
@@ -625,7 +625,7 @@ impl EscrowContract {
         // Emit event
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("created")),
-            (job_count, client, freelancer),
+            (job_count, client, freelancer, token.clone(), total),
         );
 
         Ok(job_count)
@@ -674,7 +674,7 @@ impl EscrowContract {
         // Emit event
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("funded")),
-            (job_id, client),
+            (job_id, client, job.freelancer, job.token, job.total_amount),
         );
 
         Ok(())
@@ -787,7 +787,7 @@ impl EscrowContract {
 
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("dispute")),
-            (job_id, resolution),
+            (job_id, resolution, job.client, job.freelancer, job.token),
         );
 
         Ok(())
@@ -963,14 +963,14 @@ impl EscrowContract {
         // Emit milestone approved event
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("milestone")),
-            (job_id, milestone_id, client),
+            (job_id, milestone_id, client, job.freelancer.clone(), milestone.amount),
         );
 
         // Emit PaymentReleased event when job reaches Completed status
         if all_approved {
             env.events().publish(
                 (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
-                (job_id, job.freelancer, freelancer_amount),
+                (job_id, job.freelancer.clone(), freelancer_amount),
             );
         }
 
@@ -1093,14 +1093,14 @@ impl EscrowContract {
         // Emit batch approval event
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("batch")),
-            (job_id, milestone_indices, total_released),
+            (job_id, milestone_indices, total_released, job.client.clone(), job.freelancer.clone()),
         );
 
         // Emit PaymentReleased event when job reaches Completed status
         if all_approved {
             env.events().publish(
                 (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
-                (job_id, job.freelancer, total_released),
+                (job_id, job.freelancer.clone(), total_released),
             );
         }
 
@@ -1403,15 +1403,17 @@ impl EscrowContract {
         bump_job_ttl(&env, job_id);
 
         // Emit PartialPaymentReleased event.
+        let client = job.client.clone();
+        let freelancer = job.freelancer.clone();
         env.events().publish(
             (symbol_short!("escrow"), Symbol::new(&env, "partial_pmt")),
-            (job_id, milestone_index, amount),
+            (job_id, milestone_index, amount, client, freelancer.clone()),
         );
 
         if all_approved {
             env.events().publish(
                 (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
-                (job_id, job.freelancer, amount),
+                (job_id, freelancer, amount),
             );
         }
 
@@ -1487,7 +1489,7 @@ impl EscrowContract {
         // Emit JobCancelled event with job_id, client address, and refund_amount.
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("cancelled")),
-            (job_id, client, refund),
+            (job_id, client, job.freelancer, refund),
         );
 
         Ok(())
@@ -1555,7 +1557,7 @@ impl EscrowContract {
         // Emit event
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("refund")),
-            (job_id, refund, client),
+            (job_id, refund, client, job.freelancer),
         );
 
         Ok(())
@@ -1690,7 +1692,7 @@ impl EscrowContract {
         // 7. Emit event
         env.events().publish(
             (Symbol::new(&env, "revision_proposed"),),
-            (job_id, caller, new_total),
+            (job_id, caller, job.client, job.freelancer, new_total),
         );
 
         Ok(())
@@ -1828,7 +1830,7 @@ impl EscrowContract {
         // 10. Emit event
         env.events().publish(
             (Symbol::new(&env, "revision_accepted"),),
-            (job_id, caller, new_total, delta),
+            (job_id, caller, job.client, job.freelancer, new_total, delta),
         );
 
         Ok(())
@@ -1891,7 +1893,7 @@ impl EscrowContract {
 
         // 5. Emit event
         env.events()
-            .publish((Symbol::new(&env, "revision_rejected"),), (job_id, caller));
+            .publish((Symbol::new(&env, "revision_rejected"),), (job_id, caller, job.client, job.freelancer));
 
         Ok(())
     }
@@ -1987,7 +1989,7 @@ impl EscrowContract {
 
         env.events().publish(
             (symbol_short!("escrow"), Symbol::new(&env, "job_expired")),
-            (job_id, job.client, refund),
+            (job_id, job.client, job.freelancer, job.token, refund),
         );
 
         Ok(())
