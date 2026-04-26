@@ -2,11 +2,12 @@ import { Router, Response } from "express";
 import { PrismaClient, UserRole, DisputeStatus } from "@prisma/client";
 import { AuthRequest, requireAdmin } from "../middleware/auth";
 import {
-  flagJobSchema,
-  suspendUserSchema,
-  getUsersAdminQuerySchema,
-  getJobsAdminQuerySchema,
-  overrideDisputeSchema,
+    flagJobSchema,
+    suspendUserSchema,
+    getUsersAdminQuerySchema,
+    overrideDisputeSchema,
+    queryPendingDisputesSchema,
+    queryFlaggedUsersSchema
 } from "../schemas/admin";
 import { z } from "zod";
 import { logAdminAction } from "../utils/auditLogger";
@@ -460,25 +461,168 @@ router.get(
  * Get moderation statistics (Upstream merge)
  */
 router.get("/stats", async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const [totalJobs, flaggedJobs, totalUsers, suspendedUsers] =
-      await Promise.all([
-        prisma.job.count(),
-        prisma.job.count({ where: { isFlagged: true } }),
-        prisma.user.count(),
-        prisma.user.count({ where: { isSuspended: true } }),
-      ]);
+    try {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    res.json({
-      totalJobs,
-      flaggedJobs,
-      totalUsers,
-      suspendedUsers,
-    });
-  } catch (error) {
-    console.error("Error fetching stats:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
+        const [
+            totalJobs,
+            flaggedJobs,
+            totalUsers,
+            suspendedUsers,
+            totalVolume,
+            activeUsersCount,
+            totalDisputes,
+        ] = await Promise.all([
+            prisma.job.count(),
+            prisma.job.count({ where: { isFlagged: true } }),
+            prisma.user.count(),
+            prisma.user.count({ where: { isSuspended: true } }),
+            prisma.job.aggregate({
+                _sum: { budget: true },
+            }),
+            prisma.user.count({
+                where: {
+                    OR: [
+                        { updatedAt: { gte: thirtyDaysAgo } },
+                        { createdAt: { gte: thirtyDaysAgo } },
+                    ],
+                },
+            }),
+            prisma.dispute.count(),
+        ]);
+
+        const disputeRate = totalJobs > 0 ? ((totalDisputes / totalJobs) * 100).toFixed(2) : "0.00";
+
+        res.json({
+            totalJobs,
+            flaggedJobs,
+            totalUsers,
+            suspendedUsers,
+            totalVolume: totalVolume._sum.budget || 0,
+            activeUsers: activeUsersCount,
+            disputeRate: parseFloat(disputeRate),
+        });
+    } catch (error) {
+        console.error("Error fetching stats:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+/**
+ * GET /api/admin/disputes/pending
+ * List all disputes in OPEN status with user details
+ */
+router.get("/disputes/pending", async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const query = queryPendingDisputesSchema.parse(req.query);
+        const { page = 1, limit = 10 } = query;
+        const skip = (page - 1) * limit;
+
+        const [disputes, total] = await Promise.all([
+            prisma.dispute.findMany({
+                where: { status: "OPEN" },
+                skip,
+                take: limit,
+                include: {
+                    job: {
+                        select: {
+                            id: true,
+                            title: true,
+                            budget: true,
+                        },
+                    },
+                    client: {
+                        select: {
+                            id: true,
+                            username: true,
+                            walletAddress: true,
+                        },
+                    },
+                    freelancer: {
+                        select: {
+                            id: true,
+                            username: true,
+                            walletAddress: true,
+                        },
+                    },
+                    initiator: {
+                        select: {
+                            id: true,
+                            username: true,
+                            walletAddress: true,
+                        },
+                    },
+                },
+                orderBy: { createdAt: "desc" },
+            }),
+            prisma.dispute.count({ where: { status: "OPEN" } }),
+        ]);
+
+        res.json({
+            disputes,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            },
+        });
+    } catch (error) {
+        if (error instanceof ZodError) {
+            res.status(400).json({ error: "Validation error", details: error.issues });
+            return;
+        }
+        console.error("Error fetching pending disputes:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+/**
+ * GET /api/admin/users/flagged
+ * List all flagged users with pagination
+ */
+router.get("/users/flagged", async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const query = queryFlaggedUsersSchema.parse(req.query);
+        const { page = 1, limit = 10 } = query;
+        const skip = (page - 1) * limit;
+
+        const [users, total] = await Promise.all([
+            prisma.user.findMany({
+                where: { isFlagged: true },
+                skip,
+                take: limit,
+                select: {
+                    id: true,
+                    username: true,
+                    walletAddress: true,
+                    email: true,
+                    flagReason: true,
+                    createdAt: true,
+                },
+                orderBy: { createdAt: "desc" },
+            }),
+            prisma.user.count({ where: { isFlagged: true } }),
+        ]);
+
+        res.json({
+            users,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            },
+        });
+    } catch (error) {
+        if (error instanceof ZodError) {
+            res.status(400).json({ error: "Validation error", details: error.issues });
+            return;
+        }
+        console.error("Error fetching flagged users:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
 });
 
 /**

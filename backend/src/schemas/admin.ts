@@ -44,8 +44,14 @@ export const overrideDisputeSchema = z.object({
   ]),
 });
 
+export const queryPendingDisputesSchema = paginationSchema;
+
+export const queryFlaggedUsersSchema = paginationSchema;
+
 export type FlagJobInput = z.infer<typeof flagJobSchema>;
 export type SuspendUserInput = z.infer<typeof suspendUserSchema>;
 export type GetUsersAdminQuery = z.infer<typeof getUsersAdminQuerySchema>;
 export type GetJobsAdminQuery = z.infer<typeof getJobsAdminQuerySchema>;
 export type OverrideDisputeInput = z.infer<typeof overrideDisputeSchema>;
+export type QueryPendingDisputes = z.infer<typeof queryPendingDisputesSchema>;
+export type QueryFlaggedUsers = z.infer<typeof queryFlaggedUsersSchema>;
