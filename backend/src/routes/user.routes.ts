@@ -13,6 +13,7 @@ import { PrismaClient } from "@prisma/client";
 import { asyncHandler } from "../middleware/error";
 import { avatarUpload } from "../config/upload";
 import { validate } from "../middleware/validation";
+import { ReputationService } from "../services/reputation.service";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -231,7 +232,7 @@ router.get(
       prisma.review.count({ where }),
     ]);
 
-    const data = reviews.map((r) => {
+    const data = reviews.map((r: any) => {
       const targetUser = type === "given" ? r.reviewee : r.reviewer;
       return {
         id: r.id,
@@ -285,6 +286,9 @@ router.get(
             avatarUrl: true,
             role: true,
             skills: true,
+            walletAddress: true,
+            averageRating: true,
+            reviewCount: true,
             createdAt: true,
             reviewsReceived: {
               orderBy: { createdAt: "desc" as const },
@@ -324,6 +328,17 @@ router.get(
 
         if (!user) {
           throw new Error("User not found");
+        }
+
+        if (user.role === "FREELANCER" && user.walletAddress) {
+          const reputation = await ReputationService.getReputation(user.walletAddress);
+          if (reputation) {
+            (user as any).reputation = {
+              totalScore: reputation.total_score.toString(),
+              totalWeight: reputation.total_weight.toString(),
+              reviewCount: reputation.review_count,
+            };
+          }
         }
 
         return user;
@@ -391,8 +406,25 @@ router.get(
       prisma.user.count({ where }),
     ]);
 
+    const usersWithReputation = await Promise.all(
+      users.map(async (user: any) => {
+        if (user.role === "FREELANCER" && user.walletAddress) {
+          const reputation = await ReputationService.getReputation(user.walletAddress);
+          return {
+            ...user,
+            reputation: reputation ? {
+              totalScore: reputation.total_score.toString(),
+              totalWeight: reputation.total_weight.toString(),
+              reviewCount: reputation.review_count,
+            } : null,
+          };
+        }
+        return user;
+      })
+    );
+
     res.json({
-      users,
+      users: usersWithReputation,
       pagination: {
         page,
         limit,
