@@ -140,6 +140,7 @@ model User {
   reportsGiven       Report[]       @relation("ReportsGiven")
   badges             Badge[]
   notificationPreference NotificationPreference?
+  webhooks           Webhook[]
 }
 
 model NotificationPreference {
@@ -444,4 +445,39 @@ model Badge {
 
   @@unique([userId, tier])
   @@index([userId])
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  userId    String
+  url       String
+  event     String
+  secret    String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([userId])
+  @@index([event])
+}
+
+model WebhookDelivery {
+  id           String    @id @default(cuid())
+  webhookId    String
+  event        String
+  payload      Json
+  status       String    @default("pending")
+  attempts     Int       @default(0)
+  lastAttempt  DateTime?
+  nextRetry    DateTime?
+  responseCode Int?
+  createdAt    DateTime  @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([status])
+  @@index([nextRetry])
 }

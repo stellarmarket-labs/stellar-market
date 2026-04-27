@@ -39,6 +39,12 @@ export const errorHandler = (
     };
   }
 
+  // Handle Soroban simulation errors
+  if (err.name === 'ContractSimulationError') {
+    statusCode = 422;
+    message = err.message;
+  }
+
   // Handle JWT errors
   if (err.name === 'JsonWebTokenError') {
     statusCode = 401;
