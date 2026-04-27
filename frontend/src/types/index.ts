@@ -63,6 +63,7 @@ export interface Job {
   contractJobId?: string;
   escrowStatus: "UNFUNDED" | "FUNDED" | "COMPLETED" | "CANCELLED" | "DISPUTED";
   revisionProposal?: RevisionProposal | null;
+  imageUrl?: string;
   createdAt: string;
   updatedAt?: string;
   _count?: { applications: number };
