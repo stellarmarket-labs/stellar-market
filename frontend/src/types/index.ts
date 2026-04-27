@@ -15,6 +15,19 @@ export interface User {
   completedOnboarding?: boolean;
 }
 
+export interface PortfolioItem {
+  id: string;
+  userId: string;
+  title: string;
+  description?: string;
+  fileUrl: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  displayOrder: number;
+  createdAt: string;
+}
+
 export interface Milestone {
   id: string;
   jobId: string;
@@ -127,6 +140,7 @@ export interface UserProfile extends User {
   averageRating: number;
   reviewCount: number;
   services: ServiceListing[];
+  portfolioItems?: PortfolioItem[];
   createdAt: string;
 }
 

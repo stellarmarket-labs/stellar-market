@@ -37,4 +37,4 @@ coverage/
 *.swo
 checks.md
 issue.md
-pr.md
+pr.md*.tsbuildinfo
