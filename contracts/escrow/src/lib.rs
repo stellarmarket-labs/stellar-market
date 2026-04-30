@@ -70,6 +70,8 @@ pub enum EscrowError {
     ContractNotPaused = 37,
     /// The job has no escrowed funds available to withdraw.
     NoFundsToWithdraw = 38,
+    /// Proposal has expired.
+    ProposalExpired = 39,
 }
 
 /// Privileged actions that can be proposed and approved through the multi-sig flow.
@@ -223,6 +225,7 @@ const DEFAULT_PROPOSAL_EXPIRY_SECS: u64 = 7 * 24 * 3600;
 const INACTIVITY_THRESHOLD_SECS: u64 = 7 * 24 * 3600;
 const INACTIVITY_GRACE_SECS: u64 = 3 * 24 * 3600;
 const MULTISIG_TIME_LOCK_SECS: u64 = 48 * 60 * 60;
+const PROPOSAL_TTL: u64 = 7 * 24 * 60 * 60;
 
 fn get_job_key(job_id: u64) -> DataKey {
     DataKey::Job(job_id)
@@ -431,6 +434,10 @@ impl EscrowContract {
             return Err(EscrowError::MultiSigAlreadyExecuted);
         }
 
+        if env.ledger().timestamp() > proposal.created_at + PROPOSAL_TTL {
+            return Err(EscrowError::ProposalExpired);
+        }
+
         if proposal.approvals.iter().any(|a| a == approver) {
             return Err(EscrowError::MultiSigAlreadyApproved);
         }
@@ -457,6 +464,10 @@ impl EscrowContract {
 
         if proposal.executed {
             return Err(EscrowError::MultiSigAlreadyExecuted);
+        }
+
+        if env.ledger().timestamp() > proposal.created_at + PROPOSAL_TTL {
+            return Err(EscrowError::ProposalExpired);
         }
 
         let not_before: u64 = env

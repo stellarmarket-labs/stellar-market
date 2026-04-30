@@ -257,6 +257,21 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "MultiSigExecutionNotBefore"
+                            },
+                            {
+                              "u64": 2
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "MultiSigProposal"
                             },
                             {
