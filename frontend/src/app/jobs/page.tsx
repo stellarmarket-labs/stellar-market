@@ -123,17 +123,18 @@ function JobsContent() {
 
   const loadNewJobs = useCallback(() => {
     if (pendingJobs.length === 0) return;
-    const incomingIds = new Set(pendingJobs.map((j) => j.id));
     setJobs((prev) => {
       const existingIds = new Set(prev.map((j) => j.id));
       const fresh = pendingJobs.filter((j) => !existingIds.has(j.id));
+
+      setTotal((t) => t + fresh.length);
+      setNewJobIds(new Set(fresh.map((j) => j.id)));
+
       return [...fresh, ...prev];
     });
-    setTotal((t) => t + pendingJobs.filter((j) => !jobs.some((e) => e.id === j.id)).length);
-    setNewJobIds(incomingIds);
     clearPending();
     setTimeout(() => setNewJobIds(new Set()), 3000);
-  }, [pendingJobs, clearPending, jobs]);
+  }, [pendingJobs, clearPending]);
 
   const { sentinelRef } = useInfiniteScroll({
     onLoadMore: fetchNextPage,
