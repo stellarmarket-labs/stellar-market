@@ -375,7 +375,7 @@ export class NotificationService {
    * Marks all notifications as read for a specific user.
    */
   static async markAllAsRead(userId: string) {
-    return prisma.notification.updateMany({
+    const result = await prisma.notification.updateMany({
       where: {
         userId,
         read: false,
@@ -384,6 +384,13 @@ export class NotificationService {
         read: true,
       },
     });
+
+    if (result.count > 0) {
+      const io = getIo();
+      io.to(`user:${userId}`).emit("notifications:read");
+    }
+
+    return result;
   }
 
   /**

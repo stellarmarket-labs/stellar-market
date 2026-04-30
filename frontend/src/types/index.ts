@@ -13,6 +13,11 @@ export interface User {
   reviewCount?: number;
   availability?: boolean;
   completedOnboarding?: boolean;
+  reputation?: {
+    totalScore: string;
+    totalWeight: string;
+    reviewCount: number;
+  };
 }
 
 export interface PortfolioItem {
@@ -71,6 +76,7 @@ export interface Job {
   contractJobId?: string;
   escrowStatus: "UNFUNDED" | "FUNDED" | "COMPLETED" | "CANCELLED" | "DISPUTED";
   revisionProposal?: RevisionProposal | null;
+  imageUrl?: string;
   createdAt: string;
   updatedAt?: string;
   _count?: { applications: number };

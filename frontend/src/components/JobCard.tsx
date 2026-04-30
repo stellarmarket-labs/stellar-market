@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Clock, DollarSign, Users } from "lucide-react";
 import StatusBadge from "./StatusBadge";
 import EscrowStatusBadge from "./EscrowStatusBadge";
+import Skeleton from "./Skeleton";
 import { Job } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 
@@ -13,6 +16,7 @@ interface JobCardProps {
 
 export default function JobCard({ job }: JobCardProps) {
   const { user } = useAuth();
+  const [imageLoading, setImageLoading] = useState(true);
   const isFreelancer = user?.role === "FREELANCER";
   const isClient = user?.role === "CLIENT";
   const isOwnJob = user?.id === job.client.id;
@@ -20,6 +24,22 @@ export default function JobCard({ job }: JobCardProps) {
   return (
     <div className="card hover:border-stellar-blue/50 transition-all duration-200 cursor-pointer">
       <Link href={`/jobs/${job.id}`} className="block">
+        {job.imageUrl && (
+          <div className="relative w-full h-48 mb-4 rounded-lg overflow-hidden">
+            {imageLoading && (
+              <Skeleton className="absolute inset-0 w-full h-full" />
+            )}
+            <Image
+              src={job.imageUrl}
+              alt={job.title}
+              fill
+              className="object-cover"
+              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+              onLoad={() => setImageLoading(false)}
+            />
+          </div>
+        )}
+
         <div className="flex items-start justify-between mb-3">
           <div className="flex flex-col gap-1">
             <span className="text-xs font-medium text-stellar-purple bg-stellar-purple/10 px-2 py-1 rounded w-fit">

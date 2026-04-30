@@ -41,6 +41,13 @@ export type RevisionProposalView = {
   createdAt: number;
 };
 
+export class ContractSimulationError extends Error {
+  constructor(public readonly simulationError: string) {
+    super(`Contract simulation failed: ${simulationError}`);
+    this.name = "ContractSimulationError";
+  }
+}
+
 export class ContractService {
   /**
    * Builds an un-signed transaction XDR for creating a job on-chain.
@@ -335,14 +342,15 @@ export class ContractService {
       .build();
   }
 
-  private static async simulateContractRead(operation: xdr.Operation): Promise<unknown> {
+  static async simulateContractRead(operation: xdr.Operation): Promise<unknown> {
     const server = getRpcServer();
     const tx = await this.buildReadonlySimTx(operation);
     const simulation = await server.simulateTransaction(tx);
+    if (rpc.Api.isSimulationError(simulation)) {
+      throw new ContractSimulationError(simulation.error);
+    }
     if (!rpc.Api.isSimulationSuccess(simulation)) {
-      const err = simulation.error;
-      const msg = typeof err === "string" ? err : (err as { message?: string })?.message;
-      throw new Error(msg || "Simulation failed");
+      throw new ContractSimulationError("Simulation did not succeed — state restore may be required");
     }
     return scValToNative(simulation.result!.retval);
   }
@@ -611,7 +619,7 @@ export class ContractService {
         : BigInt(Math.floor(Number(job.total_amount)));
     const budgetXlm = Number(totalStroops) / Number(STROOPS_PER_XLM);
 
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: any) => {
       await tx.milestone.deleteMany({ where: { jobId } });
       const list = job.milestones ?? [];
       for (let i = 0; i < list.length; i++) {

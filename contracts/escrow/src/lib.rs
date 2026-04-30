@@ -66,6 +66,10 @@ pub enum EscrowError {
     InvalidFee = 35,
     /// Proposal execution is time-locked and cannot be executed yet.
     ProposalTimeLockActive = 36,
+    /// Emergency withdrawal requires the contract to be paused.
+    ContractNotPaused = 37,
+    /// The job has no escrowed funds available to withdraw.
+    NoFundsToWithdraw = 38,
 }
 
 /// Privileged actions that can be proposed and approved through the multi-sig flow.
@@ -80,6 +84,9 @@ pub enum AdminAction {
     RemoveSigner(Address),
     ChangeThreshold(u32),
     RotateSigner(Address, Address),
+    /// Emergency withdrawal: recover escrowed funds from a specific job to a recipient address.
+    /// Only executable when the contract is paused. Requires multi-sig approval.
+    EmergencyWithdraw(u64, Address),
 }
 
 /// A pending multi-sig proposal. Executed when `approvals.len() >= threshold`.
@@ -519,6 +526,61 @@ impl EscrowContract {
                 } else {
                     return Err(EscrowError::SignerNotFound);
                 }
+            }
+            AdminAction::EmergencyWithdraw(job_id, recipient) => {
+                // Only callable while the contract is paused.
+                let paused: bool = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Paused)
+                    .unwrap_or(false);
+                if !paused {
+                    return Err(EscrowError::ContractNotPaused);
+                }
+
+                let mut job: Job = env
+                    .storage()
+                    .persistent()
+                    .get(&get_job_key(job_id))
+                    .ok_or(EscrowError::JobNotFound)?;
+                bump_job_ttl(&env, job_id);
+
+                // Compute the remaining escrowed balance (total minus already-approved milestones).
+                let approved_amount: i128 = job
+                    .milestones
+                    .iter()
+                    .filter(|m| m.status == MilestoneStatus::Approved)
+                    .map(|m| m.amount)
+                    .sum();
+                let withdrawable = job.total_amount - approved_amount;
+
+                if withdrawable <= 0 {
+                    return Err(EscrowError::NoFundsToWithdraw);
+                }
+
+                // Only transfer if the job held funded escrow.
+                if job.status == JobStatus::Funded
+                    || job.status == JobStatus::InProgress
+                    || job.status == JobStatus::Disputed
+                {
+                    let token_client = token::Client::new(&env, &job.token);
+                    token_client.transfer(
+                        &env.current_contract_address(),
+                        &recipient,
+                        &withdrawable,
+                    );
+                } else {
+                    return Err(EscrowError::NoFundsToWithdraw);
+                }
+
+                job.status = JobStatus::Cancelled;
+                env.storage().persistent().set(&get_job_key(job_id), &job);
+                bump_job_ttl(&env, job_id);
+
+                env.events().publish(
+                    (symbol_short!("escrow"), Symbol::new(&env, "emrg_wdrw")),
+                    (job_id, recipient, withdrawable, job.client, job.freelancer),
+                );
             }
         }
 

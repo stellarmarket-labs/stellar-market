@@ -4,6 +4,7 @@ import { asyncHandler } from "../middleware/error";
 import { validate } from "../middleware/validation";
 import { freelancerSearchQuerySchema, getUserByIdParamSchema } from "../schemas";
 import { searchFreelancers } from "../services/freelancer-search.service";
+import { ReputationService } from "../services/reputation.service";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -56,6 +57,7 @@ router.get(
         availability: true,
         averageRating: true,
         reviewCount: true,
+        walletAddress: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -73,7 +75,16 @@ router.get(
       return res.status(304).end();
     }
 
-    res.json(freelancer);
+    const reputation = await ReputationService.getReputation(freelancer.walletAddress);
+
+    res.json({
+      ...freelancer,
+      reputation: reputation ? {
+        totalScore: reputation.total_score.toString(),
+        totalWeight: reputation.total_weight.toString(),
+        reviewCount: reputation.review_count,
+      } : null
+    });
   }),
 );
 
