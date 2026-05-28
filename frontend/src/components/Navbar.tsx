@@ -19,6 +19,7 @@ import {
   Wallet,
   ChevronDown,
   Loader2,
+  Gift,
 } from "lucide-react";
 import axios from "axios";
 import { useState, useRef, useEffect } from "react";
@@ -152,6 +153,14 @@ function UserMenu({ className }: { className?: string }) {
             >
               <Settings size={16} />
               Settings
+            </Link>
+            <Link
+              href="/dashboard/referrals"
+              onClick={() => setMenuOpen(false)}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm text-theme-text hover:bg-theme-border/50 transition-colors"
+            >
+              <Gift size={16} />
+              Referrals
             </Link>
 
             {/* Wallet disconnect section — only shown when Freighter is connected */}

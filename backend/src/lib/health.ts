@@ -3,18 +3,26 @@ import RedisClient from "./redis";
 import { logger } from "./logger";
 import { getHorizonListenerHealth } from "../services/horizon-listener.service";
 
+export type DependencyHealthStatus = "ok" | "error" | "degraded";
 export type DependencyHealthStatus = "ok" | "error";
 export type HorizonListenerStatus = "connected" | "degraded" | "down";
 
 export type HealthResponse = {
   status: "ok" | "degraded";
   service: "stellarmarket-api";
+  uptime: number;
   checks: {
     database: DependencyHealthStatus;
     redis: DependencyHealthStatus;
-    horizonListener: HorizonListenerStatus;
+    horizonListener: DependencyHealthStatus;
   };
 };
+
+let horizonListenerHealthy = true;
+
+export function setHorizonListenerHealth(healthy: boolean): void {
+  horizonListenerHealthy = healthy;
+}
 
 export async function getHealthStatus(
   prisma: Pick<PrismaClient, "$queryRawUnsafe">,
@@ -22,7 +30,7 @@ export async function getHealthStatus(
   const checks: HealthResponse["checks"] = {
     database: "ok",
     redis: "ok",
-    horizonListener: getHorizonListenerHealth(),
+    horizonListener: horizonListenerHealthy ? "ok" : "degraded",
   };
 
   try {
@@ -42,14 +50,14 @@ export async function getHealthStatus(
     logger.error({ err: error }, "Health check Redis probe failed");
   }
 
-  const healthy =
-    checks.database === "ok" &&
-    checks.redis === "ok" &&
-    checks.horizonListener !== "down";
+  // Database and Redis are critical; Horizon listener is non-critical (degraded only)
+  const criticalHealthy =
+    checks.database === "ok" && checks.redis === "ok";
 
   return {
-    status: healthy ? "ok" : "degraded",
+    status: criticalHealthy ? "ok" : "degraded",
     service: "stellarmarket-api",
+    uptime: Math.floor(process.uptime()),
     checks,
   };
 }

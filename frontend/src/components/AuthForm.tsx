@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useWallet } from "@/context/WalletContext";
-import { Loader2, Mail, Lock, User as UserIcon, Wallet, ShieldCheck } from "lucide-react";
+import { Loader2, Mail, Lock, User as UserIcon, Wallet, ShieldCheck, Gift, ChevronDown } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 interface AuthFormProps {
   type: "login" | "register";
@@ -13,8 +14,10 @@ interface AuthFormProps {
 export default function AuthForm({ type }: AuthFormProps) {
   const { login, register } = useAuth();
   const { address, connect, isConnecting, error: walletError } = useWallet();
+  const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [referralOpen, setReferralOpen] = useState(false);
 
   // 2FA state
   const [twoFactorPending, setTwoFactorPending] = useState(false);
@@ -26,7 +29,18 @@ export default function AuthForm({ type }: AuthFormProps) {
     email: "",
     password: "",
     role: "FREELANCER" as "CLIENT" | "FREELANCER",
+    referralCode: "",
   });
+
+  // Auto-fill referral code from ?ref= query param
+  useEffect(() => {
+    if (type !== "register") return;
+    const ref = searchParams?.get("ref");
+    if (ref) {
+      setFormData((prev) => ({ ...prev, referralCode: ref }));
+      setReferralOpen(true);
+    }
+  }, [type, searchParams]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -85,16 +99,20 @@ export default function AuthForm({ type }: AuthFormProps) {
 
         login(data.token, data.user);
       } else {
+        const body: Record<string, string> = {
+          name: formData.username,
+          email: formData.email,
+          password: formData.password,
+          stellarAddress: address ?? "",
+          role: formData.role,
+        };
+        if (formData.referralCode.trim()) {
+          body.referralCode = formData.referralCode.trim();
+        }
         const response = await fetch(`${API}/auth/register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: formData.username,
-            email: formData.email,
-            password: formData.password,
-            stellarAddress: address,
-            role: formData.role,
-          }),
+          body: JSON.stringify(body),
         });
 
         const data = await response.json();
@@ -279,6 +297,40 @@ export default function AuthForm({ type }: AuthFormProps) {
               )}
               {!address && !walletError && type === "register" && (
                 <p className="text-xs text-theme-error mt-1">Wallet is required for registration</p>
+              )}
+            </div>
+
+            {/* Collapsible referral code field */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setReferralOpen((o) => !o)}
+                className="flex items-center gap-2 text-sm text-theme-text hover:text-stellar-blue transition-colors"
+              >
+                <Gift size={16} />
+                Have a referral code?
+                <ChevronDown
+                  size={14}
+                  className={`transition-transform ${referralOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              {referralOpen && (
+                <div className="mt-2">
+                  <div className="relative">
+                    <Gift
+                      size={18}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-theme-text"
+                    />
+                    <input
+                      type="text"
+                      name="referralCode"
+                      value={formData.referralCode}
+                      onChange={handleChange}
+                      className="w-full pl-10 pr-4 py-2 bg-theme-bg border border-theme-border rounded-lg focus:ring-2 focus:ring-stellar-blue outline-none transition-all text-theme-text"
+                      placeholder="Enter referral code (optional)"
+                    />
+                  </div>
+                </div>
               )}
             </div>
           </>

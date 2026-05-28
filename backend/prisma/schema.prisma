@@ -143,6 +143,12 @@ model User {
   notificationPreference NotificationPreference?
   portfolioItems     PortfolioItem[]
   webhooks           Webhook[]
+
+  referralCode       String?   @unique
+  referredById       String?
+  referredBy         User?     @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals          User[]    @relation("UserReferrals")
+  referralBonusEarned Float    @default(0)
   refreshTokens      RefreshToken[]
 }
 

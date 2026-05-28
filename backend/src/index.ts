@@ -63,7 +63,10 @@ app.use(sanitizeInput);
 // Health check
 app.get("/health", async (_req, res) => {
   const health = await getHealthStatus(prisma);
-  res.status(health.status === "ok" ? 200 : 503).json(health);
+  const httpStatus = health.checks.database === "error" || health.checks.redis === "error"
+    ? 503
+    : 200;
+  res.status(httpStatus).json(health);
 });
 
 // Database-only health probe (used by some platforms/LB checks)

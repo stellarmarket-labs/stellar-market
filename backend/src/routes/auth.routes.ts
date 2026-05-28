@@ -149,7 +149,7 @@ router.post(
   registerRateLimiter,
   validate({ body: registerSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const { stellarAddress, email, name, password, role } = req.body;
+    const { stellarAddress, email, name, password, role, referralCode } = req.body;
 
     const existingUser = await prisma.user.findFirst({
       where: {
@@ -165,10 +165,25 @@ router.post(
       return res.status(409).json({ error: "User already exists." });
     }
 
+    // Resolve referrer from the provided referral code (code = referrer's unique code)
+    let referredById: string | undefined;
+    if (referralCode) {
+      const referrer = await prisma.user.findUnique({
+        where: { referralCode },
+        select: { id: true },
+      });
+      if (referrer) {
+        referredById = referrer.id;
+      }
+    }
+
     const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
 
     const rawToken = generateToken();
     const hashed = hashToken(rawToken);
+
+    // Generate a unique referral code for the new user
+    const newReferralCode = crypto.randomBytes(6).toString("hex");
 
     const user = await prisma.user.create({
       data: {
@@ -179,6 +194,8 @@ router.post(
         role: role ?? "FREELANCER",
         emailVerified: false,
         emailVerificationToken: hashed,
+        referralCode: newReferralCode,
+        ...(referredById ? { referredById } : {}),
         notificationPreference: { create: {} },
       },
     });
@@ -202,6 +219,7 @@ router.post(
         email: user.email,
         role: user.role,
         emailVerified: user.emailVerified,
+        referralCode: user.referralCode,
       },
       token,
     });
