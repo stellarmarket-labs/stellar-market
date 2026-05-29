@@ -33,6 +33,7 @@ import {
 import StatusBadge from "@/components/StatusBadge";
 import OnboardingWizard from "@/components/OnboardingWizard";
 import { DashboardStatsSkeleton, DashboardTabContentSkeleton } from "@/components/skeletons/DashboardSkeleton";
+import DisputeCardSkeleton from "@/components/skeletons/DisputeCardSkeleton";
 import { useAuth } from "@/context/AuthContext";
 import { useSocket } from "@/context/SocketContext";
 import { Job, Application, PaginatedResponse } from "@/types";
@@ -376,7 +377,15 @@ export default function DashboardPage() {
       </div>
 
       {dataLoading ? (
-        <DashboardTabContentSkeleton />
+        activeTab === "Active Disputes" ? (
+          <div className="space-y-4">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <DisputeCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : (
+          <DashboardTabContentSkeleton />
+        )
       ) : (
         <>
           {/* ── Freelancer tab content ── */}

@@ -11,10 +11,10 @@ import {
   Download,
   ExternalLink,
   Filter,
-  Loader2,
   RefreshCw,
   Wallet,
 } from "lucide-react";
+import TransactionRowSkeleton from "@/components/skeletons/TransactionRowSkeleton";
 import { useAuth } from "@/context/AuthContext";
 import { useWallet } from "@/context/WalletContext";
 
@@ -543,15 +543,9 @@ export default function WalletPage() {
             </div>
 
             {loading ? (
-              <div className="space-y-3 px-5 py-5">
+              <div className="divide-y divide-theme-border">
                 {Array.from({ length: 6 }).map((_, index) => (
-                  <div
-                    key={index}
-                    className="animate-pulse rounded-xl border border-theme-border bg-theme-bg px-4 py-4"
-                  >
-                    <div className="h-4 w-1/3 rounded bg-theme-border" />
-                    <div className="mt-3 h-3 w-1/2 rounded bg-theme-border" />
-                  </div>
+                  <TransactionRowSkeleton key={index} />
                 ))}
               </div>
             ) : visibleTransactions.length === 0 ? (
