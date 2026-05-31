@@ -1,10 +1,9 @@
 {
   "generators": {
-    "address": 2,
+    "address": 3,
     "nonce": 0
   },
   "auth": [
-    [],
     [],
     [
       [
@@ -21,13 +20,57 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SetMinStake"
+                      "symbol": "SetStakeTiers"
                     },
                     {
-                      "i128": {
-                        "hi": 0,
-                        "lo": 20000000
-                      }
+                      "vec": [
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "multiplier"
+                              },
+                              "val": {
+                                "u32": 120
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1000000000
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "multiplier"
+                              },
+                              "val": {
+                                "u32": 150
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 10000000000
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -38,6 +81,7 @@
         }
       ]
     ],
+    [],
     []
   ],
   "ledger": {
@@ -50,6 +94,54 @@
     "min_temp_entry_ttl": 16,
     "max_entry_ttl": 6312000,
     "ledger_entries": [
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "StakeBalance"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "StakeBalance"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 50000000000
+                  }
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
       [
         {
           "contract_data": {
@@ -82,7 +174,7 @@
                           ]
                         },
                         "val": {
-                          "u32": 50
+                          "u32": 0
                         }
                       },
                       {
@@ -96,7 +188,7 @@
                         "val": {
                           "i128": {
                             "hi": 0,
-                            "lo": 20000000
+                            "lo": 10000000
                           }
                         }
                       },
@@ -120,13 +212,57 @@
                               "val": {
                                 "vec": [
                                   {
-                                    "symbol": "SetMinStake"
+                                    "symbol": "SetStakeTiers"
                                   },
                                   {
-                                    "i128": {
-                                      "hi": 0,
-                                      "lo": 20000000
-                                    }
+                                    "vec": [
+                                      {
+                                        "map": [
+                                          {
+                                            "key": {
+                                              "symbol": "multiplier"
+                                            },
+                                            "val": {
+                                              "u32": 120
+                                            }
+                                          },
+                                          {
+                                            "key": {
+                                              "symbol": "threshold"
+                                            },
+                                            "val": {
+                                              "i128": {
+                                                "hi": 0,
+                                                "lo": 1000000000
+                                              }
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "map": [
+                                          {
+                                            "key": {
+                                              "symbol": "multiplier"
+                                            },
+                                            "val": {
+                                              "u32": 150
+                                            }
+                                          },
+                                          {
+                                            "key": {
+                                              "symbol": "threshold"
+                                            },
+                                            "val": {
+                                              "i128": {
+                                                "hi": 0,
+                                                "lo": 10000000000
+                                              }
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ]
                                   }
                                 ]
                               }
@@ -241,6 +377,65 @@
                         "val": {
                           "u32": 120
                         }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "StakeTiers"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "map": [
+                                {
+                                  "key": {
+                                    "symbol": "multiplier"
+                                  },
+                                  "val": {
+                                    "u32": 120
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "threshold"
+                                  },
+                                  "val": {
+                                    "i128": {
+                                      "hi": 0,
+                                      "lo": 1000000000
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "map": [
+                                {
+                                  "key": {
+                                    "symbol": "multiplier"
+                                  },
+                                  "val": {
+                                    "u32": 150
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "threshold"
+                                  },
+                                  "val": {
+                                    "i128": {
+                                      "hi": 0,
+                                      "lo": 10000000000
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
                       }
                     ]
                   }
@@ -340,7 +535,7 @@
                   "u32": 1
                 },
                 {
-                  "u32": 50
+                  "u32": 0
                 }
               ]
             }
@@ -385,56 +580,6 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "get_min_stake"
-              }
-            ],
-            "data": "void"
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "get_min_stake"
-              }
-            ],
-            "data": {
-              "i128": {
-                "hi": 0,
-                "lo": 10000000
-              }
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
-              },
-              {
                 "symbol": "propose_admin_action"
               }
             ],
@@ -446,13 +591,57 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SetMinStake"
+                      "symbol": "SetStakeTiers"
                     },
                     {
-                      "i128": {
-                        "hi": 0,
-                        "lo": 20000000
-                      }
+                      "vec": [
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "multiplier"
+                              },
+                              "val": {
+                                "u32": 120
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1000000000
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "multiplier"
+                              },
+                              "val": {
+                                "u32": 150
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 10000000000
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -489,13 +678,57 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SetMinStake"
+                      "symbol": "SetStakeTiers"
                     },
                     {
-                      "i128": {
-                        "hi": 0,
-                        "lo": 20000000
-                      }
+                      "vec": [
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "multiplier"
+                              },
+                              "val": {
+                                "u32": 120
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1000000000
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "multiplier"
+                              },
+                              "val": {
+                                "u32": 150
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 10000000000
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -529,13 +762,57 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SetMinStake"
+                      "symbol": "SetStakeTiers"
                     },
                     {
-                      "i128": {
-                        "hi": 0,
-                        "lo": 20000000
-                      }
+                      "vec": [
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "multiplier"
+                              },
+                              "val": {
+                                "u32": 120
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1000000000
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "multiplier"
+                              },
+                              "val": {
+                                "u32": 150
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 10000000000
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -584,10 +861,12 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "get_min_stake"
+                "symbol": "get_stake_multiplier"
               }
             ],
-            "data": "void"
+            "data": {
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+            }
           }
         }
       },
@@ -605,14 +884,11 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "get_min_stake"
+                "symbol": "get_stake_multiplier"
               }
             ],
             "data": {
-              "i128": {
-                "hi": 0,
-                "lo": 20000000
-              }
+              "u32": 150
             }
           }
         }
