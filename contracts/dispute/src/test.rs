@@ -2,11 +2,9 @@
 
 use super::*;
 use soroban_sdk::{
-    contract,
-    contractimpl,
+    contract, contractimpl,
     testutils::{Address as _, Events, Ledger},
-    Env,
-    String,
+    Env, String,
 };
 
 #[contract]
@@ -935,7 +933,14 @@ fn setup_dispute_with_votes(
         );
     }
 
-    (client, dispute_contract_id, escrow_contract_id, user_client, freelancer, dispute_id)
+    (
+        client,
+        dispute_contract_id,
+        escrow_contract_id,
+        user_client,
+        freelancer,
+        dispute_id,
+    )
 }
 
 #[test]
@@ -965,7 +970,10 @@ fn test_client_wins_freelancer_stake_slashed() {
     });
     let _ = last_event;
     let _ = topic1;
-    assert!(slash_event.is_some(), "StakeSlashed event should be emitted when client wins");
+    assert!(
+        slash_event.is_some(),
+        "StakeSlashed event should be emitted when client wins"
+    );
 }
 
 #[test]
@@ -988,7 +996,10 @@ fn test_freelancer_wins_client_stake_slashed() {
         }
         false
     });
-    assert!(slash_event.is_some(), "StakeSlashed event should be emitted when freelancer wins");
+    assert!(
+        slash_event.is_some(),
+        "StakeSlashed event should be emitted when freelancer wins"
+    );
 }
 
 #[test]
@@ -1021,10 +1032,30 @@ fn test_no_slash_on_escalated_dispute() {
     let voter2 = Address::generate(&env);
     let voter3 = Address::generate(&env);
     let voter4 = Address::generate(&env);
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Client, &String::from_str(&env, "C"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "F"));
-    client.cast_vote(&dispute_id, &voter3, &VoteChoice::Client, &String::from_str(&env, "C"));
-    client.cast_vote(&dispute_id, &voter4, &VoteChoice::Freelancer, &String::from_str(&env, "F"));
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter3,
+        &VoteChoice::Client,
+        &String::from_str(&env, "C"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter4,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "F"),
+    );
 
     let status = client.resolve_dispute(&dispute_id);
     assert_eq!(status, DisputeStatus::Escalated);
@@ -1038,7 +1069,10 @@ fn test_no_slash_on_escalated_dispute() {
         }
         false
     });
-    assert!(!has_slash, "StakeSlashed event should NOT be emitted for escalated disputes");
+    assert!(
+        !has_slash,
+        "StakeSlashed event should NOT be emitted for escalated disputes"
+    );
 }
 
 #[test]
@@ -1674,14 +1708,29 @@ fn test_delegated_vote_counts_same_as_direct_vote_in_resolution() {
     // Two direct voters for freelancer.
     let voter1 = Address::generate(&env);
     let voter2 = Address::generate(&env);
-    client.cast_vote(&dispute_id, &voter1, &VoteChoice::Freelancer, &String::from_str(&env, "v1"));
-    client.cast_vote(&dispute_id, &voter2, &VoteChoice::Freelancer, &String::from_str(&env, "v2"));
+    client.cast_vote(
+        &dispute_id,
+        &voter1,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "v1"),
+    );
+    client.cast_vote(
+        &dispute_id,
+        &voter2,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "v2"),
+    );
 
     // One delegated vote for freelancer.
     let owner = Address::generate(&env);
     let delegate = Address::generate(&env);
     client.delegate_vote(&owner, &delegate, &1u64);
-    client.cast_vote(&dispute_id, &delegate, &VoteChoice::Freelancer, &String::from_str(&env, "delegated"));
+    client.cast_vote(
+        &dispute_id,
+        &delegate,
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "delegated"),
+    );
 
     // 3 votes for freelancer — resolution should succeed.
     let status = client.resolve_dispute(&dispute_id);

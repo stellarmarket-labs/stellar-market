@@ -68,9 +68,10 @@ export default function RootLayout({
               (function() {
                 try {
                   var savedTheme = localStorage.getItem('stellar-market-theme');
-                  var supportDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                  if (!savedTheme && supportDarkMode) savedTheme = 'dark';
-                  if (!savedTheme) savedTheme = 'light';
+                  if (!savedTheme) {
+                    var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    savedTheme = prefersDark ? 'dark' : 'light';
+                  }
                   document.documentElement.setAttribute('data-theme', savedTheme);
                   if (savedTheme === 'dark') document.documentElement.classList.add('dark');
                   else document.documentElement.classList.remove('dark');

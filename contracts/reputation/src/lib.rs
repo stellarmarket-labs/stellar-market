@@ -16,6 +16,7 @@ mod escrow {
         Completed,
         Disputed,
         Cancelled,
+        Expired,
     }
 
     #[contracttype]
@@ -25,6 +26,7 @@ mod escrow {
         InProgress,
         Submitted,
         Approved,
+        PartiallyPaid,
     }
 
     #[contracttype]

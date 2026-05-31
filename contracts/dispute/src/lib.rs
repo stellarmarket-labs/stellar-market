@@ -275,17 +275,19 @@ mod escrow {
         Funded,
         InProgress,
         Completed,
-        Cancelled,
         Disputed,
+        Cancelled,
+        Expired,
     }
 
     #[contracttype]
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub enum MilestoneStatus {
         Pending,
+        InProgress,
         Submitted,
         Approved,
-        Rejected,
+        PartiallyPaid,
     }
 
     #[contracttype]
@@ -802,7 +804,14 @@ impl DisputeContract {
         // Emit event
         env.events().publish(
             (symbol_short!("dispute"), symbol_short!("voted")),
-            (dispute_id, voter, choice, dispute.job_id, dispute.client, dispute.freelancer),
+            (
+                dispute_id,
+                voter,
+                choice,
+                dispute.job_id,
+                dispute.client,
+                dispute.freelancer,
+            ),
         );
 
         Ok(())
@@ -850,16 +859,19 @@ impl DisputeContract {
         // Emit event
         env.events().publish(
             (symbol_short!("dispute"), symbol_short!("excluded")),
-            (dispute_id, voter, dispute.job_id, dispute.client, dispute.freelancer),
+            (
+                dispute_id,
+                voter,
+                dispute.job_id,
+                dispute.client,
+                dispute.freelancer,
+            ),
         );
 
         Ok(())
     }
 
-    pub fn resolve_dispute(
-        env: Env,
-        dispute_id: u64,
-    ) -> Result<DisputeStatus, DisputeError> {
+    pub fn resolve_dispute(env: Env, dispute_id: u64) -> Result<DisputeStatus, DisputeError> {
         require_not_paused(&env)?;
 
         let mut dispute: Dispute = env
@@ -880,10 +892,7 @@ impl DisputeContract {
 
     /// Force resolution of a dispute after the voting deadline has passed,
     /// even if the minimum number of votes has not been reached.
-    pub fn force_resolve_timeout(
-        env: Env,
-        dispute_id: u64,
-    ) -> Result<DisputeStatus, DisputeError> {
+    pub fn force_resolve_timeout(env: Env, dispute_id: u64) -> Result<DisputeStatus, DisputeError> {
         require_not_paused(&env)?;
 
         let mut dispute: Dispute = env
@@ -979,7 +988,7 @@ impl DisputeContract {
             .persistent()
             .get(&DataKey::Votes(dispute_id))
             .unwrap_or(Vec::<Vote>::new(&env));
-        
+
         let mut arbitrators: Vec<Address> = Vec::new(&env);
         for vote in votes.iter() {
             if !arbitrators.contains(&vote.voter) {
@@ -1031,8 +1040,7 @@ impl DisputeContract {
                 .persistent()
                 .get::<DataKey, Dispute>(&DataKey::Dispute(dispute_id))
             {
-                if dispute.status != DisputeStatus::Open
-                    && dispute.status != DisputeStatus::Voting
+                if dispute.status != DisputeStatus::Open && dispute.status != DisputeStatus::Voting
                 {
                     return Err(DisputeError::VotingClosed);
                 }
@@ -1068,11 +1076,7 @@ impl DisputeContract {
 
     /// Revoke a previously granted vote delegation for a job, provided the delegate
     /// has not yet cast a vote on the associated dispute.
-    pub fn revoke_delegation(
-        env: Env,
-        owner: Address,
-        job_id: u64,
-    ) -> Result<(), DisputeError> {
+    pub fn revoke_delegation(env: Env, owner: Address, job_id: u64) -> Result<(), DisputeError> {
         owner.require_auth();
         require_not_paused(&env)?;
 
@@ -1275,11 +1279,7 @@ fn internal_resolve(
         env.invoke_contract::<()>(
             escrow_addr,
             &Symbol::new(env, "resolve_dispute_callback"),
-            vec![
-                env,
-                dispute.job_id.into_val(env),
-                resolution.into_val(env),
-            ],
+            vec![env, dispute.job_id.into_val(env), resolution.into_val(env)],
         );
 
         // Slash the losing party's reputation score.
@@ -1340,9 +1340,10 @@ fn internal_resolve(
         }
     }
 
-    env.storage()
-        .persistent()
-        .set(&DataKey::LastDisputeClosedAt(dispute.job_id), &env.ledger().timestamp());
+    env.storage().persistent().set(
+        &DataKey::LastDisputeClosedAt(dispute.job_id),
+        &env.ledger().timestamp(),
+    );
     bump_last_dispute_closed_ttl(env, dispute.job_id);
 
     env.storage().persistent().set(
@@ -1356,11 +1357,16 @@ fn internal_resolve(
         .set(&DataKey::Dispute(dispute_id), &*dispute);
     bump_dispute_ttl(env, dispute_id);
 
-    let client = dispute.client.clone();
-    let freelancer = dispute.freelancer.clone();
     env.events().publish(
         (symbol_short!("dispute"), symbol_short!("resolved")),
-        (dispute_id, dispute.status.clone(), dispute.job_id, client, freelancer, resolution),
+        (
+            dispute_id,
+            dispute.status.clone(),
+            dispute.job_id,
+            dispute.client.clone(),
+            dispute.freelancer.clone(),
+            resolution,
+        ),
     );
 
     Ok(dispute.status.clone())

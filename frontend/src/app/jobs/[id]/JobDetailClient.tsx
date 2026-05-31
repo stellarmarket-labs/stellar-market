@@ -34,6 +34,7 @@ import ProposeRevisionModal, {
 import { Job, Application, PaginatedResponse, Review } from "@/types";
 import { parseJobIdFromResult } from "@/utils/stellar";
 import ShareMenu from "@/components/ShareMenu";
+import { useToast } from "@/components/Toast";
 import WalletAddress from "@/components/WalletAddress";
 
 
@@ -72,6 +73,7 @@ export default function JobDetailClient() {
   const { id } = useParams();
   const { address, balances, signAndBroadcastTransaction } = useWallet();
   const { user } = useAuth();
+  const { toast } = useToast();
   const [job, setJob] = useState<Job | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
@@ -467,6 +469,79 @@ export default function JobDetailClient() {
   };
 
   const handleApproveMilestone = async (milestoneId: string) => {
+    setError(null);
+    setActioningMilestoneId(milestoneId);
+    const previousMilestones = job?.milestones ?? [];
+    setJob((prev) =>
+      prev
+        ? {
+            ...prev,
+            milestones: prev.milestones.map((m) =>
+              m.id === milestoneId ? { ...m, status: "APPROVED" } : m,
+            ),
+          }
+        : prev,
+    );
+    setConfirmingMilestoneId(milestoneId);
+    try {
+      const token =
+        localStorage.getItem("stellarmarket_jwt") ??
+        localStorage.getItem("token");
+
+      if (!token) {
+        throw new Error("Please log in again.");
+      }
+
+      const res = await axios.put(
+        `${API_URL}/milestones/${milestoneId}/approve`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      const txResult = await signAndBroadcastTransaction(res.data.xdr);
+      if (!txResult.success) {
+        throw new Error(txResult.error || "Transaction failed");
+      }
+
+      await axios.post(
+        `${API_URL}/escrow/confirm-tx`,
+        {
+          hash: txResult.hash,
+          type: "APPROVE_MILESTONE",
+          jobId: id,
+          milestoneId,
+        },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      await fetchJob();
+      setRecentlyApprovedMilestoneId(milestoneId);
+    } catch (err: unknown) {
+      // Roll back optimistic milestone status if on-chain confirmation fails.
+      setJob((prev) =>
+        prev
+          ? {
+              ...prev,
+              milestones: prev.milestones.map((m) =>
+                m.id === milestoneId
+                  ? {
+                      ...m,
+                      status:
+                        previousMilestones.find((pm) => pm.id === milestoneId)
+                          ?.status ?? m.status,
+                    }
+                  : m,
+                ),
+            }
+          : prev,
+      );
+      setRecentlyApprovedMilestoneId(null);
+      setError(err instanceof Error ? err.message : "Action failed.");
+      toast.error("Failed to approve milestone. Please try again.");
+    } finally {
+      setConfirmingMilestoneId(null);
+      setActioningMilestoneId(null);
+    }
     await handleEscrowAction("approve", milestoneId);
   };
 
