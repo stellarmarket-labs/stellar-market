@@ -242,6 +242,8 @@ pub struct Job {
     pub milestones: Vec<Milestone>,
     pub job_deadline: u64,
     pub auto_refund_after: u64,
+    /// Ledger number at which the escrow expires and funds can be auto-released.
+    pub expiry_ledger: u32,
 }
 
 const MAX_FEE_BPS: u32 = 1000; // 10%
@@ -877,6 +879,7 @@ impl EscrowContract {
         milestones: Vec<(String, i128, u64)>,
         job_deadline: u64,
         auto_refund_after: u64,
+        expiry_ledger: u32,
     ) -> Result<u64, EscrowError> {
         client.require_auth();
         require_not_paused(&env)?;
@@ -891,6 +894,10 @@ impl EscrowContract {
         }
 
         if job_deadline <= env.ledger().timestamp() {
+            return Err(EscrowError::InvalidDeadline);
+        }
+
+        if expiry_ledger <= env.ledger().sequence() {
             return Err(EscrowError::InvalidDeadline);
         }
 
@@ -940,6 +947,7 @@ impl EscrowContract {
             milestones: milestone_vec,
             job_deadline,
             auto_refund_after,
+            expiry_ledger,
         };
 
         env.storage()
@@ -2879,3 +2887,6 @@ impl EscrowContract {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod fuzz;

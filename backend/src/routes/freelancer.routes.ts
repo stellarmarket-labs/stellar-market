@@ -157,13 +157,20 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 100);
     const offset = parseInt(req.query.offset as string) || 0;
+    const category = req.query.category as string | undefined;
+
+    const where: any = {
+      role: "FREELANCER",
+      averageRating: { gte: 4.0 },
+      reviewCount: { gt: 0 },
+    };
+
+    if (category) {
+      where.skills = { has: category };
+    }
 
     const topFreelancers = await prisma.user.findMany({
-      where: {
-        role: "FREELANCER",
-        averageRating: { gte: 4.0 }, // Only show highly-rated freelancers
-        reviewCount: { gt: 0 }, // Must have at least one review
-      },
+      where,
       select: {
         id: true,
         username: true,
@@ -204,14 +211,7 @@ router.get(
       })
     );
 
-    // Get total count for pagination
-    const total = await prisma.user.count({
-      where: {
-        role: "FREELANCER",
-        averageRating: { gte: 4.0 },
-        reviewCount: { gt: 0 },
-      },
-    });
+    const total = await prisma.user.count({ where });
 
     res.json({
       data: freelancersWithReputation,
