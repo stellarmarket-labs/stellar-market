@@ -6,6 +6,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import axios from "axios";
 import JobCard from "@/components/JobCard";
 import JobCardSkeleton from "@/components/skeletons/JobCardSkeleton";
+import { useDelay } from "@/hooks/useDelay";
 import FilterSidebar from "@/components/FilterSidebar";
 import EmptyState from "@/components/EmptyState";
 import { useJobFilters } from "@/hooks/useJobFilters";
@@ -144,36 +145,7 @@ function JobsContent() {
     fetchFirstPage();
   }, [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync page from URL on back/forward navigation
-  const urlPageRef = useRef(page);
-  useEffect(() => {
-    const urlPage = parseInt(searchParams.get("page") || "1", 10);
-    if (urlPage !== urlPageRef.current && urlPage !== page && !loading && !loadingMore) {
-      urlPageRef.current = urlPage;
-      if (urlPage > page && hasMore) {
-        // Navigated forward — load missing pages
-        fetchNextPage();
-      } else if (urlPage < page) {
-        // Navigated backward — reload from that page
-        setLoading(true);
-        setPage(urlPage);
-        axios.get<PaginatedResponse<Job>>(`${API_URL}/jobs`, {
-          params: buildParams(urlPage),
-        }).then((res) => {
-          setJobs(res.data.data);
-          setTotal(res.data.total);
-          setHasMore(
-            res.data.data.length === JOBS_PER_PAGE && urlPage < res.data.totalPages,
-          );
-        }).catch(() => {
-          setJobs([]);
-          setTotal(0);
-          setHasMore(false);
-        }).finally(() => setLoading(false));
-      }
-    }
-    urlPageRef.current = urlPage;
-  }, [searchParams, page, hasMore, loading, loadingMore, fetchNextPage, buildParams]);
+
 
   const loadNewJobs = useCallback(() => {
     if (pendingJobs.length === 0) return;
@@ -301,13 +273,13 @@ function JobsContent() {
             </p>
           )}
 
-          {loading ? (
+          {loading && ready ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {Array.from({ length: 6 }).map((_, i) => (
                 <JobCardSkeleton key={i} />
               ))}
             </div>
-          ) : jobs.length > 0 ? (
+          ) : loading ? null : jobs.length > 0 ? (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {jobs.map((job, i) => (
