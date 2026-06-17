@@ -1,0 +1,263 @@
+/**
+ * Proposal diff computation and comparison utilities
+ * Handles field-level diffs for milestone negotiations
+ */
+
+export interface MilestoneSnapshot {
+  title: string;
+  description: string;
+  amount: number;
+  dueDate: string; // ISO date string
+}
+
+export interface FieldDiff {
+  field: "title" | "description" | "amount" | "dueDate";
+  changed: boolean;
+  prev?: string | number;
+  next?: string | number;
+  delta?: string | number; // e.g., "+$300" or "+15 days"
+  wordDiffs?: WordDiff[]; // For text fields
+}
+
+export interface WordDiff {
+  type: "added" | "removed" | "unchanged";
+  text: string;
+}
+
+export interface MilestoneFieldDiffs {
+  milestoneId: string;
+  title: string;
+  fields: FieldDiff[];
+  allUnchanged: boolean;
+}
+
+export interface ProposalSnapshot {
+  milestones: MilestoneSnapshot[];
+  proposedAt: number;
+  proposedBy: string;
+}
+
+/**
+ * Simple word-level diff using word tokenization
+ * Returns an array of WordDiff objects showing added, removed, or unchanged words
+ */
+function computeWordDiff(prev: string, next: string): WordDiff[] {
+  const prevWords = prev.split(/\s+/).filter(Boolean);
+  const nextWords = next.split(/\s+/).filter(Boolean);
+
+  const diffs: WordDiff[] = [];
+  let i = 0,
+    j = 0;
+
+  // Simple longest common subsequence approach
+  const lcs = longestCommonSubsequence(prevWords, nextWords);
+  const lcsSet = new Set(lcs);
+
+  // Mark removed words
+  for (const word of prevWords) {
+    if (!lcsSet.has(word)) {
+      diffs.push({ type: "removed", text: word });
+    }
+  }
+
+  // Mark added words and unchanged words
+  for (const word of nextWords) {
+    if (lcsSet.has(word)) {
+      diffs.push({ type: "unchanged", text: word });
+    } else {
+      diffs.push({ type: "added", text: word });
+    }
+  }
+
+  return diffs;
+}
+
+/**
+ * Simple longest common subsequence for word matching
+ */
+function longestCommonSubsequence(
+  arr1: string[],
+  arr2: string[]
+): string[] {
+  const m = arr1.length;
+  const n = arr2.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    Array(n + 1).fill(0)
+  );
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (arr1[i - 1] === arr2[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  const result: string[] = [];
+  let i = m,
+    j = n;
+  while (i > 0 && j > 0) {
+    if (arr1[i - 1] === arr2[j - 1]) {
+      result.unshift(arr1[i - 1]);
+      i--;
+      j--;
+    } else if (dp[i - 1][j] > dp[i][j - 1]) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Format date difference (e.g., "+15 days")
+ */
+function formatDateDelta(prevDate: string, nextDate: string): string {
+  try {
+    const prev = new Date(prevDate).getTime();
+    const next = new Date(nextDate).getTime();
+    const daysDiff = Math.round((next - prev) / (1000 * 60 * 60 * 24));
+
+    if (daysDiff === 0) return "no change";
+    if (daysDiff > 0) return `+${daysDiff}d`;
+    return `${daysDiff}d`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Format amount difference (e.g., "+$300")
+ */
+function formatAmountDelta(prev: number, next: number): string {
+  const delta = next - prev;
+  if (delta === 0) return "no change";
+  if (delta > 0) return `+${delta.toLocaleString()}`;
+  return `${delta.toLocaleString()}`;
+}
+
+/**
+ * Compute field-level diffs between two milestone snapshots
+ */
+export function computeMilestoneDiff(
+  prev: MilestoneSnapshot,
+  next: MilestoneSnapshot
+): FieldDiff[] {
+  const diffs: FieldDiff[] = [];
+
+  // Title diff
+  const titleChanged = prev.title !== next.title;
+  diffs.push({
+    field: "title",
+    changed: titleChanged,
+    prev: prev.title,
+    next: next.title,
+    wordDiffs: titleChanged ? computeWordDiff(prev.title, next.title) : undefined,
+  });
+
+  // Description diff
+  const descriptionChanged = prev.description !== next.description;
+  diffs.push({
+    field: "description",
+    changed: descriptionChanged,
+    prev: prev.description,
+    next: next.description,
+    wordDiffs: descriptionChanged ? computeWordDiff(prev.description, next.description) : undefined,
+  });
+
+  // Amount diff
+  const amountChanged = prev.amount !== next.amount;
+  diffs.push({
+    field: "amount",
+    changed: amountChanged,
+    prev: prev.amount,
+    next: next.amount,
+    delta: amountChanged ? formatAmountDelta(prev.amount, next.amount) : undefined,
+  });
+
+  // Due date diff
+  const dateChanged = prev.dueDate !== next.dueDate;
+  diffs.push({
+    field: "dueDate",
+    changed: dateChanged,
+    prev: prev.dueDate,
+    next: next.dueDate,
+    delta: dateChanged ? formatDateDelta(prev.dueDate, next.dueDate) : undefined,
+  });
+
+  return diffs;
+}
+
+/**
+ * Compute all milestone diffs between previous and next snapshots
+ * Matches milestones by title (trimmed)
+ */
+export function computeProposalDiffs(
+  prevSnapshot: MilestoneSnapshot[],
+  nextSnapshot: MilestoneSnapshot[]
+): MilestoneFieldDiffs[] {
+  const result: MilestoneFieldDiffs[] = [];
+  const prevByTitle = new Map(prevSnapshot.map((m) => [m.title.trim(), m]));
+
+  for (const nextMilestone of nextSnapshot) {
+    const prevMilestone = prevByTitle.get(nextMilestone.title.trim());
+
+    if (prevMilestone) {
+      const fields = computeMilestoneDiff(prevMilestone, nextMilestone);
+      const allUnchanged = fields.every((f) => !f.changed);
+
+      result.push({
+        milestoneId: nextMilestone.title, // Using title as ID for matching
+        title: nextMilestone.title,
+        fields,
+        allUnchanged,
+      });
+    } else {
+      // New milestone - all fields are "changed"
+      result.push({
+        milestoneId: nextMilestone.title,
+        title: nextMilestone.title,
+        fields: [
+          {
+            field: "title",
+            changed: true,
+            prev: undefined,
+            next: nextMilestone.title,
+          },
+          {
+            field: "description",
+            changed: true,
+            prev: undefined,
+            next: nextMilestone.description,
+          },
+          {
+            field: "amount",
+            changed: true,
+            prev: undefined,
+            next: nextMilestone.amount,
+          },
+          {
+            field: "dueDate",
+            changed: true,
+            prev: undefined,
+            next: nextMilestone.dueDate,
+          },
+        ],
+        allUnchanged: false,
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Check if all milestones are unchanged
+ */
+export function areAllMilestonesUnchanged(diffs: MilestoneFieldDiffs[]): boolean {
+  return diffs.length === 0 || diffs.every((m) => m.allUnchanged);
+}

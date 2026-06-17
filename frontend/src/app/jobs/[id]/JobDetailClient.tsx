@@ -31,6 +31,7 @@ import TransactionConfirmationModal from "@/components/TransactionConfirmationMo
 import ProposeRevisionModal, {
   type ProposeRevisionMilestoneInput,
 } from "@/components/ProposeRevisionModal";
+import RevisionProposalViewer from "@/components/RevisionProposalViewer";
 import { Job, Application, PaginatedResponse, Review } from "@/types";
 import { parseJobIdFromResult } from "@/utils/stellar";
 import ShareMenu from "@/components/ShareMenu";
@@ -776,65 +777,26 @@ export default function JobDetailClient() {
           </div>
 
           {pendingRevision && canRespondToRevision && (
-            <div className="card mb-8 border-theme-warning/40 bg-theme-warning/5">
-              <h2 className="text-lg font-semibold text-theme-heading mb-2">
-                Pending revision proposal
-              </h2>
-              <p className="text-sm text-theme-text mb-3">
-                The other party proposed new milestones and a budget of{" "}
-                <span className="font-semibold text-stellar-blue">
-                  {stroopsToXlm(
-                    pendingRevision.newTotalStroops,
-                  ).toLocaleString()}{" "}
-                  XLM
-                </span>
-                . Review the milestones below, then accept or reject on-chain.
-              </p>
-              <ul className="space-y-2 mb-4 text-sm text-theme-text">
-                {pendingRevision.milestones.map((m, i) => (
-                  <li
-                    key={`${m.id}-${i}`}
-                    className="p-3 rounded-lg bg-theme-bg border border-theme-border"
-                  >
-                    <div className="font-medium text-theme-heading">
-                      {m.description || `Milestone ${i + 1}`}
-                    </div>
-                    <div className="text-xs mt-1">
-                      {stroopsToXlm(m.amountStroops).toLocaleString()} XLM · due{" "}
-                      {new Date(m.deadline * 1000).toLocaleDateString()}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={processing}
-                  onClick={() => void handleRevisionEscrow("accept")}
-                  className="btn-primary py-2 px-4 text-sm flex items-center gap-2"
-                >
-                  {processing ? (
-                    <Loader2 className="animate-spin" size={16} />
-                  ) : (
-                    <CheckCircle size={16} />
-                  )}
-                  Accept revision
-                </button>
-                <button
-                  type="button"
-                  disabled={processing}
-                  onClick={() => void handleRevisionEscrow("reject")}
-                  className="btn-secondary py-2 px-4 text-sm border-theme-error text-theme-error hover:bg-theme-error/10 flex items-center gap-2"
-                >
-                  {processing ? (
-                    <Loader2 className="animate-spin" size={16} />
-                  ) : (
-                    <XCircle size={16} />
-                  )}
-                  Reject
-                </button>
-              </div>
-            </div>
+            <RevisionProposalViewer
+              proposal={pendingRevision}
+              proposedBy={
+                pendingRevision.proposer === address
+                  ? "You"
+                  : job.client.walletAddress === pendingRevision.proposer
+                    ? job.client.username
+                    : job.freelancer?.username ?? "Unknown"
+              }
+              currentMilestones={job.milestones.map((m) => ({
+                title: m.title,
+                description: m.description,
+                amount: m.amount,
+                deadline: m.contractDeadline || m.deadline,
+              }))}
+              canRespond={canRespondToRevision}
+              onAccept={() => void handleRevisionEscrow("accept")}
+              onReject={() => void handleRevisionEscrow("reject")}
+              processing={processing}
+            />
           )}
 
           {pendingRevision && isRevisionProposer && (

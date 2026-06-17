@@ -58,12 +58,32 @@ export interface RevisionProposalMilestone {
   status: string;
 }
 
+export interface ProposalHistorySnapshot {
+  proposer: string;
+  totalAmount: number;
+  milestoneCount: number;
+  proposedAt: number;
+}
+
+export interface LastAcceptedSnapshot {
+  milestones: Array<{
+    title: string;
+    description: string;
+    amount: number;
+    dueDate: string;
+  }>;
+  acceptedAt: number;
+  acceptedBy: string;
+}
+
 export interface RevisionProposal {
   proposer: string;
   status: "PENDING" | "ACCEPTED" | "REJECTED";
   newTotalStroops: string;
   milestones: RevisionProposalMilestone[];
   createdAt: number;
+  lastAccepted?: LastAcceptedSnapshot | null;
+  history?: ProposalHistorySnapshot[];
 }
 
 export interface Job {
