@@ -30,6 +30,8 @@
     "react-hook-form": "^7.73.1",
     "recharts": "^3.8.1",
     "socket.io-client": "^4.8.3",
+    "yjs": "^13.6.18",
+    "y-websocket": "^2.0.4",
     "tailwindcss": "^3.4.17",
     "zod": "^4.3.6"
   },

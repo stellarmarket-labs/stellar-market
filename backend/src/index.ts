@@ -3,6 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { createServer } from "http";
+import { Server as WebSocketServer } from "ws";
 import { PrismaClient } from "@prisma/client";
 import { config } from "./config";
 import routes from "./routes";
@@ -11,6 +12,7 @@ import { sanitizeInput } from "./middleware/sanitize";
 import { errorHandler } from "./middleware/error";
 import { requestIdMiddleware } from "./middleware/request-id";
 import { initSocket } from "./socket";
+import { initYjsServer } from "./socket/yjsServer";
 import { startExpiryJob } from "./jobs/expiry.job";
 import {
   startHorizonListener,
@@ -26,10 +28,29 @@ import { swaggerUi, swaggerSpec } from "./config/swagger";
 const httpServer = createServer(app);
 const prisma = new PrismaClient();
 
+// Create WebSocket server for Yjs
+const wss = new WebSocketServer({ noServer: true });
+
+// Handle WebSocket upgrade for Yjs
+httpServer.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname;
+  
+  if (pathname === '/yjs') {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
+
 installRequestIdConsolePatch();
 
 // Attach Socket.io
 initSocket(httpServer);
+
+// Initialize Yjs WebSocket server
+initYjsServer(wss);
 
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {

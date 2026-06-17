@@ -20,6 +20,8 @@ import Link from "next/link";
 import axios from "axios";
 import { useWallet } from "@/context/WalletContext";
 import { useAuth } from "@/context/AuthContext";
+import { YjsProvider } from "@/context/YjsContext";
+import { useCollaborativeMilestones } from "@/hooks/useCollaborativeMilestones";
 import { PAYMENT_TOKENS, TOKEN_EXCHANGE_RATES } from "@/constants/jobs";
 import StatusBadge from "@/components/StatusBadge";
 import ApplyModal from "@/components/ApplyModal";
@@ -69,7 +71,7 @@ type PendingOnChainAction = {
   onChainJobId?: number | string;
 };
 
-export default function JobDetailClient() {
+function JobDetailContent() {
   const { id } = useParams();
   const { address, balances, signAndBroadcastTransaction } = useWallet();
   const { user } = useAuth();
@@ -104,7 +106,32 @@ export default function JobDetailClient() {
   const [pendingOnChainAction, setPendingOnChainAction] = useState<PendingOnChainAction | null>(null);
   const [selectedPaymentToken, setSelectedPaymentToken] = useState<(typeof PAYMENT_TOKENS)[number]>("XLM");
 
+  // Collaborative editing hook
+  const {
+    milestones: collaborativeMilestones,
+    isConnected: isCollaborativeConnected,
+    updateMilestoneData,
+    isCollaborative,
+  } = useCollaborativeMilestones(id as string, job?.milestones ?? []);
+
   const isClient = Boolean(job && address === job.client.walletAddress);
+
+  // Use collaborative milestones when available, otherwise use job milestones
+  const displayMilestones = isCollaborative ? collaborativeMilestones : (job?.milestones ?? []);
+
+  // Update job state when collaborative milestones change
+  useEffect(() => {
+    if (isCollaborative && collaborativeMilestones.length > 0 && job) {
+      setJob((prev) =>
+        prev
+          ? {
+              ...prev,
+              milestones: collaborativeMilestones,
+            }
+          : prev,
+      );
+    }
+  }, [isCollaborative, collaborativeMilestones, job]);
 
   const fetchJob = useCallback(async () => {
     try {
@@ -472,6 +499,12 @@ export default function JobDetailClient() {
         { status },
         { headers: { Authorization: `Bearer ${token}` } },
       );
+      
+      // Update collaborative document
+      if (isCollaborative) {
+        updateMilestoneData(milestoneId, { status });
+      }
+      
       await fetchJob();
     } catch (err: unknown) {
       setError(
@@ -850,17 +883,25 @@ export default function JobDetailClient() {
           {/* Milestones */}
           <div className="mb-8">
             <MilestoneProgressTracker
-              milestones={job.milestones}
+              milestones={displayMilestones}
               jobTitle={job.title}
             />
           </div>
 
           <div className="card">
-            <h2 className="text-lg font-semibold text-theme-heading mb-4">
-              Milestones
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-theme-heading">
+                Milestones
+              </h2>
+              {isCollaborative && (
+                <span className="text-xs text-stellar-blue flex items-center gap-1">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                  Collaborative editing active
+                </span>
+              )}
+            </div>
             <MilestoneTimeline
-              milestones={job.milestones}
+              milestones={displayMilestones}
               isClient={isClient}
               isFreelancerOnJob={isFreelancerOnJob}
               actioningMilestoneId={actioningMilestoneId}
@@ -1421,5 +1462,16 @@ export default function JobDetailClient() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function JobDetailClient() {
+  const { id } = useParams();
+  const { user } = useAuth();
+
+  return (
+    <YjsProvider jobId={id as string} userId={user?.id ?? ""}>
+      <JobDetailContent />
+    </YjsProvider>
   );
 }

@@ -19,6 +19,7 @@ import {
   getMilestoneByIdParamSchema,
   getJobByIdParamSchema,
 } from "../schemas";
+import { initializeDocumentFromDB, getDocumentState } from "../socket/yjsServer";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -50,6 +51,9 @@ router.get(
       where: { jobId },
       orderBy: { createdAt: "asc" },
     });
+
+    // Initialize Yjs document with current milestone data
+    initializeDocumentFromDB(jobId, milestones);
 
     res.json(milestones);
   }),
@@ -167,7 +171,7 @@ router.get(
   }),
 );
 
-// Update a milestone
+// Update a milestone with CRDT merge
 router.put(
   "/:id",
   authenticate,
@@ -195,6 +199,22 @@ router.put(
       return res
         .status(403)
         .json({ error: "Not authorized to update this milestone." });
+    }
+
+    // Check if there's a CRDT document with concurrent changes
+    const crdtState = getDocumentState(milestone.jobId);
+    if (crdtState && crdtState.milestones[id]) {
+      const crdtMilestone = crdtState.milestones[id];
+      // Merge CRDT changes with the update
+      if (crdtMilestone.title && !updateData.title) {
+        updateData.title = crdtMilestone.title;
+      }
+      if (crdtMilestone.description && !updateData.description) {
+        updateData.description = crdtMilestone.description;
+      }
+      if (crdtMilestone.amount && !updateData.amount) {
+        updateData.amount = crdtMilestone.amount;
+      }
     }
 
     const updated = await prisma.milestone.update({
