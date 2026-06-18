@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Env, IntoVal,
-    String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Bytes,
+    BytesN, Env, IntoVal, String, Symbol, Vec,
 };
 
 // Import reputation contract types for cross-contract calls
@@ -146,17 +146,16 @@ pub struct Dispute {
     pub votes_for_freelancer: u32,
     pub votes_for_refund_split: u32,
     pub refund_split_sum: u64,
-    /// Votes that the filing was malicious (bad-faith). Requires 4/5 supermajority to trigger.
     pub votes_for_malicious: u32,
-    /// Votes for a proportional split award (SplitAward variant).
     pub votes_for_split_award: u32,
     pub min_votes: u32,
     pub tie_break_method: TieBreakMethod,
     pub created_at: u64,
     pub voting_deadline: u64,
     pub excluded_voters: Vec<Address>,
-    /// List of arbitrators assigned to this dispute (randomly selected at creation)
     pub assigned_arbitrators: Vec<Address>,
+    pub evidence_merkle_root: Option<BytesN<32>>,
+    pub evidence_count: u32,
 }
 
 #[contracttype]
@@ -721,6 +720,8 @@ impl DisputeContract {
         reason: String,
         min_votes: u32,
         tie_break_method: Option<TieBreakMethod>,
+        evidence_merkle_root: Option<BytesN<32>>,
+        evidence_count: u32,
     ) -> Result<u64, DisputeError> {
         initiator.require_auth();
         require_not_paused(&env)?;
@@ -800,6 +801,8 @@ impl DisputeContract {
             voting_deadline: env.ledger().timestamp().saturating_add(VOTING_PERIOD_SECS),
             excluded_voters,
             assigned_arbitrators: assigned_arbitrators.clone(),
+            evidence_merkle_root,
+            evidence_count,
         };
 
         env.storage()
@@ -1734,6 +1737,60 @@ impl DisputeContract {
             .ok_or(DisputeError::DisputeNotFound)?;
         bump_dispute_ttl(&env, dispute_id);
         Ok(dispute.assigned_arbitrators)
+    }
+
+    /// Verify that a file hash belongs to the Merkle root stored on-chain.
+    /// Returns true if the proof is valid, false otherwise.
+    pub fn verify_evidence(
+        env: Env,
+        dispute_id: u64,
+        file_hash: BytesN<32>,
+        proof: Vec<BytesN<32>>,
+        leaf_index: u32,
+    ) -> bool {
+        let dispute: Dispute = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Dispute(dispute_id))
+            .unwrap_or_else(|| panic_with_error!(&env, DisputeError::DisputeNotFound));
+        bump_dispute_ttl(&env, dispute_id);
+
+        let root = match dispute.evidence_merkle_root {
+            Some(r) => r,
+            None => return false,
+        };
+
+        let mut current = file_hash;
+        let mut idx = leaf_index;
+
+        for sibling in proof.iter() {
+            let (left, right) = if idx % 2 == 0 {
+                (current.clone(), sibling.clone())
+            } else {
+                (sibling.clone(), current.clone())
+            };
+            let mut combined = Bytes::new(&env);
+            combined.append(&left);
+            combined.append(&right);
+            current = env.crypto().sha256(&combined).into_bytes::<32>();
+            idx /= 2;
+        }
+
+        current == root
+    }
+
+    /// Retrieve the on-chain evidence Merkle root for a dispute.
+    pub fn get_evidence_merkle_root(
+        env: Env,
+        dispute_id: u64,
+    ) -> Option<BytesN<32>> {
+        let dispute: Dispute = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Dispute(dispute_id))
+            .unwrap_or_else(|| panic_with_error!(&env, DisputeError::DisputeNotFound));
+        bump_dispute_ttl(&env, dispute_id);
+        dispute.evidence_merkle_root
     }
 }
 
