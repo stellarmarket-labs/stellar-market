@@ -364,15 +364,10 @@ pub fn apply_lazy_decay(env: &Env, rep: &mut UserReputation) {
 
     let current_timestamp = env.ledger().timestamp();
     let current_ledger = env.ledger().sequence();
-    
+
     // Use timestamp for decay calculation (30-day periods) - matches original behavior
     const PERIOD_SECONDS: u64 = 30 * 86400; // 30 days in seconds
-    
-    // Initialize last_updated_timestamp if not set (for existing records)
-    if rep.last_updated_timestamp == 0 {
-        rep.last_updated_timestamp = current_timestamp;
-    }
-    
+
     if current_timestamp <= rep.last_updated_timestamp {
         return;
     }
@@ -914,14 +909,17 @@ impl ReputationContract {
         let (total_score, total_weight, review_count) =
             Self::get_decayed_totals(&env, user.clone());
 
+        // Get the updated reputation with correct timestamps
+        let rep: UserReputation = env.storage().persistent().get(&rep_key).unwrap();
+        
         bump_reputation_ttl(&env, &user);
         Ok(UserReputation {
             user,
             total_score,
             total_weight,
             review_count,
-            last_updated_ledger: env.ledger().sequence(),
-            last_updated_timestamp: env.ledger().timestamp(),
+            last_updated_ledger: rep.last_updated_ledger,
+            last_updated_timestamp: rep.last_updated_timestamp,
         })
     }
 
@@ -1438,6 +1436,11 @@ impl ReputationContract {
                 });
 
         apply_lazy_decay(env, &mut rep);
+        
+        // Persist the decayed values so we don't re-apply decay on next read
+        env.storage().persistent().set(&rep_key, &rep);
+        bump_reputation_ttl(env, &user);
+        
         (rep.total_score, rep.total_weight, rep.review_count)
     }
 

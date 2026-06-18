@@ -833,7 +833,7 @@ fn test_get_reputation_with_decay() {
     let reputation_id = env.register_contract(None, ReputationContract);
     let reputation_client = ReputationContractClient::new(&env, &reputation_id);
 
-    // Initialize with 50% decay per year
+    // Initialize with 50% decay per period (30 days)
     let admin = Address::generate(&env);
     reputation_client.initialize(&vec![&env, admin.clone()], &1u32, &50);
 
@@ -875,10 +875,10 @@ fn test_get_reputation_with_decay() {
     assert_eq!(rep0.total_score, 4 * MIN_STAKE as u64);
     assert_eq!(rep0.total_weight, MIN_STAKE as u64);
 
-    // Advance time by 1 year (31,536,000 seconds)
-    // Decay is 50%, so weight should be 50% of MIN_STAKE
+    // Advance time by 1 period (30 days = 2,592,000 seconds)
+    // Decay is 50% per period, so weight should be 50% of MIN_STAKE
     env.ledger().set(soroban_sdk::testutils::LedgerInfo {
-        timestamp: 31_536_000,
+        timestamp: 2_592_000,
         protocol_version: 20,
         sequence_number: 100,
         network_id: [0; 32],
@@ -985,7 +985,7 @@ fn test_decay_calculation() {
     let reputation_client = ReputationContractClient::new(&env, &reputation_id);
     let admin = Address::generate(&env);
 
-    // Set decay rate to 50% per year
+    // Set decay rate to 50% per period (30 days)
     reputation_client.initialize(&vec![&env, admin.clone()], &1u32, &50u32);
 
     let reviewer = Address::generate(&env);
@@ -996,8 +996,10 @@ fn test_decay_calculation() {
 
     setup_completed_job(&env, &escrow_id, 1u64, &reviewer, &reviewee, &token_addr);
 
-    // Initial timestamp: day 0
-    let start_time = 1_000_000;
+    const PERIOD_SECONDS: u64 = 30 * 86_400;
+
+    // Initial timestamp: period 0
+    let start_time = 0;
     env.ledger().with_mut(|l| l.timestamp = start_time);
 
     // Review with weight MIN_STAKE, rating 5
@@ -1011,25 +1013,26 @@ fn test_decay_calculation() {
         &MIN_STAKE,
     );
 
-    // At day 0 (no decay), avg = 500
+    // At period 0 (no decay), avg = 500
     assert_eq!(reputation_client.get_average_rating(&reviewee), 500);
 
-    // Advance 1 day (86400 seconds) — negligible decay
-    env.ledger().with_mut(|l| l.timestamp = start_time + 86400);
+    // Advance 1 day (86400 seconds) — less than 1 period, no decay
+    env.ledger().with_mut(|l| l.timestamp = start_time + 86_400);
     assert_eq!(reputation_client.get_average_rating(&reviewee), 500);
 
-    // Advance 1 year (31,536,000 seconds)
-    // 50% decay per year -> weight should be 50% of original, but ratio is the same for a single review
-    env.ledger()
-        .with_mut(|l| l.timestamp = start_time + 31_536_000);
-    assert_eq!(reputation_client.get_average_rating(&reviewee), 500);
+    // Advance 1 period (30 days) — 50% decay
+    env.ledger().with_mut(|l| l.timestamp = start_time + PERIOD_SECONDS);
+    // Single review: average rating unchanged, but weight/score decayed
+    let rep = reputation_client.get_reputation(&reviewee);
+    assert_eq!(rep.total_weight, MIN_STAKE as u64 / 2);
+    assert_eq!(rep.total_score, 5 * MIN_STAKE as u64 / 2);
 
-    // To test actual decay, add a second review at year 1
+    // To test weighted average with decay, add a second review at period 1 with different weight
     let reviewer2 = Address::generate(&env);
     mint(&env, &token_addr, &token_admin, &reviewer2, 1_000_000_000);
     setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
 
-    // Second review at year 1 with rating 1 (Poor)
+    // Second review at period 1 with rating 1 (Poor), double weight (2 * MIN_STAKE)
     reputation_client.submit_review(
         &escrow_id,
         &reviewer2,
@@ -1037,25 +1040,33 @@ fn test_decay_calculation() {
         &2u64,
         &1u32,
         &String::from_str(&env, "Terrible now"),
-        &MIN_STAKE,
+        &(2 * MIN_STAKE),
     );
 
-    // Review 1 (5 stars) has 50% weight decay. Review 2 (1 star) has full weight.
-    // effective_w1 = MIN_STAKE/2, effective_w2 = MIN_STAKE
-    // Weighted score: 5 * (MIN/2) + 1 * MIN = 2.5*MIN + MIN = 3.5*MIN
-    // Total weight: MIN/2 + MIN = 1.5*MIN
-    // Avg = 3.5/1.5 * 100 = 233
-    assert_eq!(reputation_client.get_average_rating(&reviewee), 233);
+    // Review 1 (5 stars): 1 period old -> 50% weight = MIN_STAKE/2
+    // Review 2 (1 star): 0 periods old -> 100% weight = 2*MIN_STAKE
+    // Weighted score: 5 * (MIN/2) + 1 * (2*MIN) = 2.5*MIN + 2*MIN = 4.5*MIN
+    // Total weight: MIN/2 + 2*MIN = 2.5*MIN
+    // Avg = 4.5/2.5 * 100 = 180
+    assert_eq!(reputation_client.get_average_rating(&reviewee), 180);
 
-    // Advance to year 2
-    // Review 1 is 2 years old -> 100% decayed (weight 0)
-    // Review 2 is 1 year old -> 50% decayed (weight MIN/2)
-    // Weighted score: 0 + 1 * MIN/2 = MIN/2
-    // Total weight: MIN/2
-    // Avg = 1.0 * 100 = 100
-    env.ledger()
-        .with_mut(|l| l.timestamp = start_time + 63_072_000);
-    assert_eq!(reputation_client.get_average_rating(&reviewee), 100);
+    // Advance to period 2 (60 days)
+    // Review 1: 2 periods old -> 25% weight = MIN_STAKE/4
+    // Review 2: 1 period old -> 50% weight = MIN_STAKE
+    // Weighted score: 5 * (MIN/4) + 1 * MIN = 1.25*MIN + MIN = 2.25*MIN
+    // Total weight: MIN/4 + MIN = 1.25*MIN
+    // Avg = 2.25/1.25 * 100 = 180
+    env.ledger().with_mut(|l| l.timestamp = start_time + 2 * PERIOD_SECONDS);
+    assert_eq!(reputation_client.get_average_rating(&reviewee), 180);
+
+    // Advance to period 4 (120 days)
+    // Review 1: 4 periods old -> 6.25% weight = MIN_STAKE/16
+    // Review 2: 3 periods old -> 12.5% weight = MIN_STAKE/4
+    // Weighted score: 5 * (MIN/16) + 1 * (MIN/4) = 0.3125*MIN + 0.25*MIN = 0.5625*MIN
+    // Total weight: MIN/16 + MIN/4 = 0.3125*MIN
+    // Avg = 0.5625/0.3125 * 100 = 180
+    env.ledger().with_mut(|l| l.timestamp = start_time + 4 * PERIOD_SECONDS);
+    assert_eq!(reputation_client.get_average_rating(&reviewee), 180);
 }
 
 #[test]
@@ -1099,10 +1110,11 @@ fn test_decay_uses_timestamp_instead_of_ledger_sequence() {
         &MIN_STAKE,
     );
 
-    // Advance timestamp to 6 months; keep sequence small so entries are not archived.
+    // Advance timestamp by 1 period (30 days = 2,592,000 seconds); keep sequence small so entries are not archived.
     // (The test verifies that decay is driven by timestamp, not ledger sequence.)
+    const PERIOD_SECONDS: u64 = 30 * 86_400;
     env.ledger().set(soroban_sdk::testutils::LedgerInfo {
-        timestamp: ONE_YEAR_IN_SECONDS / 2,
+        timestamp: PERIOD_SECONDS,
         protocol_version: 20,
         sequence_number: 200,
         network_id: [0; 32],
@@ -1113,14 +1125,15 @@ fn test_decay_uses_timestamp_instead_of_ledger_sequence() {
     });
 
     let rep = reputation_client.get_reputation(&reviewee);
-    let expected_weight = (MIN_STAKE as u64 * 75) / 100;
+    // With 50% decay per period, after 1 period weight should be 50%
+    let expected_weight = (MIN_STAKE as u64) / 2;
 
     assert_eq!(rep.total_weight, expected_weight);
     assert_eq!(rep.total_score, 4 * expected_weight);
 
     // Same timestamp, very different sequence number — result must be identical.
     env.ledger().set(soroban_sdk::testutils::LedgerInfo {
-        timestamp: ONE_YEAR_IN_SECONDS / 2,
+        timestamp: PERIOD_SECONDS,
         protocol_version: 20,
         sequence_number: 25,
         network_id: [0; 32],
@@ -1814,7 +1827,7 @@ fn advance_n_periods(env: &Env, periods: u32) {
     let seq = env.ledger().sequence();
     let ts  = env.ledger().timestamp();
     env.ledger().set(soroban_sdk::testutils::LedgerInfo {
-        sequence_number:        seq + periods * 518_400,
+        sequence_number:        seq + periods * 100,
         timestamp:              ts  + (periods as u64) * 30 * 86_400,
         protocol_version:       20,
         network_id:             [0; 32],
@@ -1901,12 +1914,12 @@ fn test_lazy_decay_ten_periods() {
     setup_review_for(&env, &escrow_id, &client, 1, &reviewer, &reviewee, 5);
 
     let before = client.get_reputation(&reviewee);
-    let mut exp_score  = before.total_score;
-    let mut exp_weight = before.total_weight;
-    for _ in 0..10 {
-        exp_score  = (exp_score  * 90) / 100;
-        exp_weight = (exp_weight * 90) / 100;
-    }
+    // Closed-form decay using fixed_point_pow for O(1) calculation.
+    // The iterative loop above would differ slightly due to rounding.
+    const SCALE: u128 = 10_000;
+    let decay_factor = fixed_point_pow(90, 100, 10);
+    let exp_score = ((before.total_score as u128 * decay_factor) / SCALE) as u64;
+    let exp_weight = ((before.total_weight as u128 * decay_factor) / SCALE) as u64;
 
     advance_n_periods(&env, 10);
     let after = client.get_reputation(&reviewee);

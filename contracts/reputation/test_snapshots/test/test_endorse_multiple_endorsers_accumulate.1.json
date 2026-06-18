@@ -270,6 +270,288 @@
             "key": {
               "vec": [
                 {
+                  "symbol": "Reputation"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "Reputation"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "last_updated_ledger"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "last_updated_timestamp"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "review_count"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_score"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_weight"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "user"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "Reputation"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "Reputation"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "last_updated_ledger"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "last_updated_timestamp"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "review_count"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_score"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_weight"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "user"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "Reputation"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "Reputation"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "last_updated_ledger"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "last_updated_timestamp"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "review_count"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_score"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_weight"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "user"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
                   "symbol": "SkillEndorsers"
                 },
                 {

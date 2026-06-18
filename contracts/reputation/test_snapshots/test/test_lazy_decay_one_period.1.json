@@ -214,11 +214,12 @@
         }
       ]
     ],
+    [],
     []
   ],
   "ledger": {
     "protocol_version": 20,
-    "sequence_number": 518400,
+    "sequence_number": 100,
     "timestamp": 2592000,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 10,
@@ -681,7 +682,7 @@
                         "symbol": "last_updated_ledger"
                       },
                       "val": {
-                        "u32": 0
+                        "u32": 100
                       }
                     },
                     {
@@ -689,7 +690,7 @@
                         "symbol": "last_updated_timestamp"
                       },
                       "val": {
-                        "u64": 0
+                        "u64": 2592000
                       }
                     },
                     {
@@ -705,7 +706,7 @@
                         "symbol": "total_score"
                       },
                       "val": {
-                        "u64": 50000000
+                        "u64": 45000000
                       }
                     },
                     {
@@ -713,7 +714,7 @@
                         "symbol": "total_weight"
                       },
                       "val": {
-                        "u64": 10000000
+                        "u64": 9000000
                       }
                     },
                     {
@@ -3022,93 +3023,69 @@
     {
       "event": {
         "ext": "v0",
-        "contract_id": null,
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
         "type_": "diagnostic",
         "body": {
           "v0": {
             "topics": [
               {
-                "symbol": "error"
+                "symbol": "fn_return"
               },
               {
-                "error": {
-                  "storage": "internal_error"
-                }
+                "symbol": "get_reputation"
               }
             ],
             "data": {
-              "vec": [
+              "map": [
                 {
-                  "string": "[testing-only] Accessed contract instance key that has been archived. Important: this error may only appear in tests; in the real network contracts aren't called at all if any archived entry is accessed."
+                  "key": {
+                    "symbol": "last_updated_ledger"
+                  },
+                  "val": {
+                    "u32": 100
+                  }
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  "key": {
+                    "symbol": "last_updated_timestamp"
+                  },
+                  "val": {
+                    "u64": 2592000
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "review_count"
+                  },
+                  "val": {
+                    "u32": 1
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "total_score"
+                  },
+                  "val": {
+                    "u64": 45000000
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "total_weight"
+                  },
+                  "val": {
+                    "u64": 9000000
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "user"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  }
                 }
               ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "storage": "internal_error"
-                }
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "string": "contract call failed"
-                },
-                {
-                  "symbol": "get_reputation"
-                },
-                {
-                  "vec": [
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                    }
-                  ]
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "storage": "internal_error"
-                }
-              }
-            ],
-            "data": {
-              "string": "escalating error to panic"
             }
           }
         }

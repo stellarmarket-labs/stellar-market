@@ -904,6 +904,100 @@
             "key": {
               "vec": [
                 {
+                  "symbol": "Reputation"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "Reputation"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "last_updated_ledger"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "last_updated_timestamp"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "review_count"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_score"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_weight"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "user"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "vec": [
+                {
                   "symbol": "ReviewExists"
                 },
                 {
