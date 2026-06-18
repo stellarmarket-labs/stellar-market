@@ -181,6 +181,8 @@ fn test_vote_with_reputation_check() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     // Vote with reputation check - should succeed with mock
@@ -216,6 +218,8 @@ fn test_raise_dispute() {
         &String::from_str(&env, "Work not delivered"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     assert_eq!(dispute_id, 1);
@@ -257,6 +261,8 @@ fn test_vote_and_resolve() {
         &String::from_str(&env, "Payment not released"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -310,6 +316,8 @@ fn test_resolve_without_enough_votes() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let voter = Address::generate(&env);
@@ -352,6 +360,8 @@ fn test_tie_break_favor_client() {
         &String::from_str(&env, "Issue"),
         &4u32, // min_votes set to 4
         &Some(TieBreakMethod::FavorClient),
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -413,6 +423,8 @@ fn test_tie_break_favor_freelancer() {
         &String::from_str(&env, "Issue"),
         &4u32,
         &Some(TieBreakMethod::FavorFreelancer),
+        &None,
+        &0u32,
     );
 
     client.cast_vote(
@@ -472,6 +484,8 @@ fn test_tie_break_refund_both() {
         &String::from_str(&env, "Issue"),
         &4u32,
         &Some(TieBreakMethod::RefundBoth),
+        &None,
+        &0u32,
     );
 
     client.cast_vote(
@@ -531,6 +545,8 @@ fn test_tie_break_escalate() {
         &String::from_str(&env, "Issue"),
         &4u32,
         &Some(TieBreakMethod::Escalate),
+        &None,
+        &0u32,
     );
 
     client.cast_vote(
@@ -590,6 +606,8 @@ fn test_tie_break_default_refund_both() {
         &String::from_str(&env, "Issue"),
         &4u32,
         &None, // Should default to RefundBoth
+        &None,
+        &0u32,
     );
 
     client.cast_vote(
@@ -643,6 +661,8 @@ fn test_vote_without_reputation_contract() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     // Voting should succeed — reputation check is skipped when not configured
@@ -686,6 +706,8 @@ fn test_pause_and_unpause() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
     assert_eq!(dispute_id, 1);
 
@@ -704,6 +726,8 @@ fn test_pause_and_unpause() {
         &String::from_str(&env, "Issue 2"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
     assert_eq!(dispute_id2, 2);
 }
@@ -755,6 +779,8 @@ fn test_raise_dispute_when_paused() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 }
 
@@ -784,6 +810,8 @@ fn test_cast_vote_when_paused() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     client.pause(&admin);
@@ -823,6 +851,8 @@ fn test_resolve_dispute_when_paused() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     // Add some votes
@@ -879,6 +909,8 @@ fn test_read_only_functions_when_paused() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     client.pause(&admin);
@@ -939,6 +971,8 @@ fn setup_dispute_with_votes(
         &String::from_str(env, "Dispute"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -1059,6 +1093,8 @@ fn test_no_slash_on_escalated_dispute() {
         &String::from_str(&env, "Issue"),
         &4u32,
         &Some(TieBreakMethod::Escalate),
+        &None,
+        &0u32,
     );
 
     // Tie vote → escalate
@@ -1135,6 +1171,8 @@ fn test_raise_dispute_blocked_by_job_cooldown() {
         &String::from_str(&env, "Initial dispute"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let voter1 = Address::generate(&env);
@@ -1171,6 +1209,8 @@ fn test_raise_dispute_blocked_by_job_cooldown() {
         &String::from_str(&env, "Retry too soon"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 }
 
@@ -1199,6 +1239,8 @@ fn test_raise_dispute_allowed_after_cooldown() {
         &String::from_str(&env, "Initial dispute"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let voter1 = Address::generate(&env);
@@ -1237,6 +1279,8 @@ fn test_raise_dispute_allowed_after_cooldown() {
         &String::from_str(&env, "Retry after cooldown"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     assert_eq!(second_dispute_id, 2);
@@ -1268,6 +1312,8 @@ fn test_force_resolve_timeout_not_expired_fails() {
         &String::from_str(&env, "Issue"),
         &10u32,
         &None,
+        &None,
+        &0u32,
     );
 
     // Try to force resolve before deadline (Deadline is 1000 + 604_800 = 605_800)
@@ -1300,6 +1346,8 @@ fn test_force_resolve_timeout_expired_success() {
         &String::from_str(&env, "Issue"),
         &10u32,
         &None,
+        &None,
+        &0u32,
     );
 
     // 1 vote for freelancer
@@ -1343,6 +1391,8 @@ fn test_force_resolve_timeout_tie_break_success() {
         &String::from_str(&env, "Issue"),
         &10u32,
         &Some(TieBreakMethod::FavorClient),
+        &None,
+        &0u32,
     );
 
     // Advance past deadline
@@ -1374,7 +1424,7 @@ fn test_party_cooldown_blocks_same_parties_on_different_job() {
     // Raise and resolve a dispute on job 1.
     let d1 = client.raise_dispute(
         &1u64, &user_client, &freelancer, &user_client,
-        &String::from_str(&env, "First dispute"), &3u32, &None,
+        &String::from_str(&env, "First dispute"), &3u32, &None, &None, &0u32,
     );
     let v1 = Address::generate(&env);
     let v2 = Address::generate(&env);
@@ -1387,7 +1437,7 @@ fn test_party_cooldown_blocks_same_parties_on_different_job() {
     // Immediately try to raise a dispute on a different job between the same parties — must fail.
     client.raise_dispute(
         &2u64, &user_client, &freelancer, &freelancer,
-        &String::from_str(&env, "Too soon"), &3u32, &None,
+        &String::from_str(&env, "Too soon"), &3u32, &None, &None, &0u32,
     );
 }
 
@@ -1409,7 +1459,7 @@ fn test_party_cooldown_allows_after_expiry() {
 
     let d1 = client.raise_dispute(
         &1u64, &user_client, &freelancer, &user_client,
-        &String::from_str(&env, "First dispute"), &3u32, &None,
+        &String::from_str(&env, "First dispute"), &3u32, &None, &None, &0u32,
     );
     let v1 = Address::generate(&env);
     let v2 = Address::generate(&env);
@@ -1424,7 +1474,7 @@ fn test_party_cooldown_allows_after_expiry() {
 
     let d2 = client.raise_dispute(
         &2u64, &user_client, &freelancer, &freelancer,
-        &String::from_str(&env, "After cooldown"), &3u32, &None,
+        &String::from_str(&env, "After cooldown"), &3u32, &None, &None, &0u32,
     );
     assert_eq!(d2, 2);
 }
@@ -1453,7 +1503,7 @@ fn test_party_cooldown_does_not_affect_different_party_pairs() {
     // Resolve a dispute between pair A.
     let d1 = client.raise_dispute(
         &1u64, &user_client_a, &freelancer_a, &user_client_a,
-        &String::from_str(&env, "Pair A"), &3u32, &None,
+        &String::from_str(&env, "Pair A"), &3u32, &None, &None, &0u32,
     );
     let v1 = Address::generate(&env);
     let v2 = Address::generate(&env);
@@ -1466,7 +1516,7 @@ fn test_party_cooldown_does_not_affect_different_party_pairs() {
     // Different pair B should be unaffected.
     let d2 = client.raise_dispute(
         &2u64, &user_client_b, &freelancer_b, &user_client_b,
-        &String::from_str(&env, "Pair B"), &3u32, &None,
+        &String::from_str(&env, "Pair B"), &3u32, &None, &None, &0u32,
     );
     assert_eq!(d2, 2);
 }
@@ -1562,6 +1612,8 @@ fn test_delegate_can_cast_vote_on_behalf_of_owner() {
         &String::from_str(&env, "Issue"),
         &1u32,
         &None,
+        &None,
+        &0u32,
     );
 
     // Owner delegates their vote rights for job 1 to delegate.
@@ -1617,6 +1669,8 @@ fn test_owner_cannot_vote_directly_after_delegate_voted() {
         &String::from_str(&env, "Issue"),
         &1u32,
         &None,
+        &None,
+        &0u32,
     );
 
     client.delegate_vote(&owner, &delegate, &1u64);
@@ -1659,6 +1713,8 @@ fn test_delegate_cannot_vote_if_owner_voted_directly() {
         &String::from_str(&env, "Issue"),
         &1u32,
         &None,
+        &None,
+        &0u32,
     );
 
     // Owner votes directly first.
@@ -1694,6 +1750,8 @@ fn test_revoke_fails_after_delegate_voted() {
         &String::from_str(&env, "Issue"),
         &1u32,
         &None,
+        &None,
+        &0u32,
     );
 
     client.delegate_vote(&owner, &delegate, &1u64);
@@ -1744,6 +1802,8 @@ fn test_delegated_vote_counts_same_as_direct_vote_in_resolution() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     // Two direct voters for freelancer.
@@ -1804,6 +1864,8 @@ fn test_conflict_of_interest_voter_is_party() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     // Client tries to vote on their own dispute
@@ -1849,6 +1911,8 @@ fn setup_malicious_test(
         &String::from_str(env, "Frivolous claim"),
         &5u32, // min_votes = 5 so we can reach supermajority
         &None,
+        &None,
+        &0u32,
     );
     (client, job_client, freelancer, dispute_id)
 }
@@ -2051,6 +2115,8 @@ fn test_dispute_assigns_arbitrators() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -2089,6 +2155,8 @@ fn test_non_assigned_arbitrator_cannot_vote() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     // Try to vote with an address not in the assigned arbitrators
@@ -2125,6 +2193,8 @@ fn test_assigned_arbitrator_can_vote() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -2167,6 +2237,8 @@ fn test_auto_resolve_at_3_vote_majority() {
         &String::from_str(&env, "Issue"),
         &5u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -2211,6 +2283,8 @@ fn test_unanimous_vote_5_0() {
         &String::from_str(&env, "Issue"),
         &5u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -2255,6 +2329,8 @@ fn test_split_vote_3_2_client_wins() {
         &String::from_str(&env, "Issue"),
         &5u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -2300,6 +2376,8 @@ fn test_split_vote_3_2_freelancer_wins() {
         &String::from_str(&env, "Issue"),
         &5u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -2344,6 +2422,8 @@ fn test_vote_cast_event_emitted() {
         &String::from_str(&env, "Issue"),
         &5u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -2393,6 +2473,8 @@ fn test_dispute_resolved_event_emitted_on_auto_resolve() {
         &String::from_str(&env, "Issue"),
         &5u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -2446,6 +2528,8 @@ fn test_arbitrator_cannot_vote_twice() {
         &String::from_str(&env, "Issue"),
         &5u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
@@ -2487,10 +2571,253 @@ fn test_dispute_with_empty_arbitrator_pool() {
         &String::from_str(&env, "Issue"),
         &3u32,
         &None,
+        &None,
+        &0u32,
     );
 
     let assigned = client.get_assigned_arbitrators(&dispute_id);
     
     // Should have no assigned arbitrators
     assert_eq!(assigned.len(), 0);
+}
+
+// ── Evidence Merkle proof verification tests (#657) ──────────────────────────
+
+#[test]
+fn test_verify_evidence_correct_proof_passes() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+
+    for _ in 0..5 {
+        let arb = Address::generate(&env);
+        client.add_arbitrator(&admin, &arb);
+    }
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    // Construct a known Merkle root for 3 leaves:
+    //   leaf0 = sha256(0x00..00)  leaf1 = sha256(0x01..01)  leaf2 = sha256(0x02..02)
+    // Padded to 4 leaves with zero hash for leaf3.
+    let zero_bytes = Bytes::from_slice(&env, &[0u8; 32]);
+    let one_bytes = Bytes::from_slice(&env, &[1u8; 32]);
+    let two_bytes = Bytes::from_slice(&env, &[2u8; 32]);
+    let empty_bytes = Bytes::from_slice(&env, &[0u8; 32]);
+
+    let leaf0: BytesN<32> = env.crypto().sha256(&zero_bytes).into_bytes::<32>();
+    let leaf1: BytesN<32> = env.crypto().sha256(&one_bytes).into_bytes::<32>();
+    let leaf2: BytesN<32> = env.crypto().sha256(&two_bytes).into_bytes::<32>();
+    let leaf3: BytesN<32> = env.crypto().sha256(&empty_bytes).into_bytes::<32>();
+
+    // Level 1:  parent0 = sha256(leaf0 || leaf1), parent1 = sha256(leaf2 || leaf3)
+    let mut combined01 = Bytes::new(&env);
+    combined01.append(&leaf0);
+    combined01.append(&leaf1);
+    let parent0: BytesN<32> = env.crypto().sha256(&combined01).into_bytes::<32>();
+
+    let mut combined23 = Bytes::new(&env);
+    combined23.append(&leaf2);
+    combined23.append(&leaf3);
+    let parent1: BytesN<32> = env.crypto().sha256(&combined23).into_bytes::<32>();
+
+    // Root: sha256(parent0 || parent1)
+    let mut combined_root = Bytes::new(&env);
+    combined_root.append(&parent0);
+    combined_root.append(&parent1);
+    let root: BytesN<32> = env.crypto().sha256(&combined_root).into_bytes::<32>();
+
+    // Raise dispute with this Merkle root
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &3u32,
+        &None,
+        &Some(root.clone()),
+        &3u32,
+    );
+
+    // Verify leaf0: proof = [leaf1, parent1]
+    let proof_leaf0 = vec![&env, leaf1.clone(), parent1.clone()];
+    let valid = client.verify_evidence(&dispute_id, &leaf0, &proof_leaf0, &0u32);
+    assert!(valid);
+
+    // Verify leaf1: proof = [leaf0, parent1]
+    let proof_leaf1 = vec![&env, leaf0.clone(), parent1.clone()];
+    let valid1 = client.verify_evidence(&dispute_id, &leaf1, &proof_leaf1, &1u32);
+    assert!(valid1);
+
+    // Verify leaf2: proof = [leaf3, parent0]
+    let proof_leaf2 = vec![&env, leaf3.clone(), parent0.clone()];
+    let valid2 = client.verify_evidence(&dispute_id, &leaf2, &proof_leaf2, &2u32);
+    assert!(valid2);
+}
+
+#[test]
+fn test_verify_evidence_tampered_file_hash_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+
+    for _ in 0..5 {
+        let arb = Address::generate(&env);
+        client.add_arbitrator(&admin, &arb);
+    }
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    // Build a simple tree with 2 leaves
+    let zero_bytes = Bytes::from_slice(&env, &[0u8; 32]);
+    let one_bytes = Bytes::from_slice(&env, &[1u8; 32]);
+
+    let leaf0: BytesN<32> = env.crypto().sha256(&zero_bytes).into_bytes::<32>();
+    let leaf1: BytesN<32> = env.crypto().sha256(&one_bytes).into_bytes::<32>();
+
+    let mut combined = Bytes::new(&env);
+    combined.append(&leaf0);
+    combined.append(&leaf1);
+    let root: BytesN<32> = env.crypto().sha256(&combined).into_bytes::<32>();
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &3u32,
+        &None,
+        &Some(root.clone()),
+        &2u32,
+    );
+
+    // Tampered hash (different from leaf0)
+    let tampered_bytes = Bytes::from_slice(&env, &[99u8; 32]);
+    let tampered_hash: BytesN<32> = env.crypto().sha256(&tampered_bytes).into_bytes::<32>();
+
+    let proof = vec![&env, leaf1.clone()];
+    let valid = client.verify_evidence(&dispute_id, &tampered_hash, &proof, &0u32);
+    assert!(!valid);
+}
+
+#[test]
+fn test_verify_evidence_no_merkle_root_returns_false() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+
+    for _ in 0..5 {
+        let arb = Address::generate(&env);
+        client.add_arbitrator(&admin, &arb);
+    }
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    // Raise dispute without Merkle root
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &3u32,
+        &None,
+        &None,
+        &0u32,
+    );
+
+    let fake_hash_bytes = Bytes::from_slice(&env, &[0u8; 32]);
+    let fake_hash: BytesN<32> = env.crypto().sha256(&fake_hash_bytes).into_bytes::<32>();
+    let empty_proof = vec![&env,];
+
+    let valid = client.verify_evidence(&dispute_id, &fake_hash, &empty_proof, &0u32);
+    assert!(!valid);
+}
+
+#[test]
+fn test_get_evidence_merkle_root() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+
+    for _ in 0..5 {
+        let arb = Address::generate(&env);
+        client.add_arbitrator(&admin, &arb);
+    }
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    let zero_bytes = Bytes::from_slice(&env, &[0u8; 32]);
+    let one_bytes = Bytes::from_slice(&env, &[1u8; 32]);
+    let leaf0: BytesN<32> = env.crypto().sha256(&zero_bytes).into_bytes::<32>();
+    let leaf1: BytesN<32> = env.crypto().sha256(&one_bytes).into_bytes::<32>();
+
+    let mut combined = Bytes::new(&env);
+    combined.append(&leaf0);
+    combined.append(&leaf1);
+    let root: BytesN<32> = env.crypto().sha256(&combined).into_bytes::<32>();
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Issue"),
+        &3u32,
+        &None,
+        &Some(root.clone()),
+        &2u32,
+    );
+
+    let stored_root = client.get_evidence_merkle_root(&dispute_id);
+    assert_eq!(stored_root, Some(root));
+
+    // Test that a dispute without root returns None
+    let dispute_id2 = client.raise_dispute(
+        &2u64,
+        &user_client,
+        &freelancer,
+        &freelancer,
+        &String::from_str(&env, "No evidence"),
+        &3u32,
+        &None,
+        &None,
+        &0u32,
+    );
+
+    let no_root = client.get_evidence_merkle_root(&dispute_id2);
+    assert_eq!(no_root, None);
 }
