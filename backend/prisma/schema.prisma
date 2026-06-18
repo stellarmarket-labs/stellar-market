@@ -388,16 +388,19 @@ model Dispute {
   reason           String
   status           DisputeStatus @default(OPEN)
   outcome          String?
+  evidenceMerkleRoot String?
+  evidenceCount    Int           @default(0)
   resolvedAt       DateTime?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  job         Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  client      User          @relation("DisputeClient", fields: [clientId], references: [id])
-  freelancer  User          @relation("DisputeFreelancer", fields: [freelancerId], references: [id])
-  initiator   User          @relation("DisputeInitiated", fields: [initiatorId], references: [id])
+  job         Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  client      User             @relation("DisputeClient", fields: [clientId], references: [id])
+  freelancer  User             @relation("DisputeFreelancer", fields: [freelancerId], references: [id])
+  initiator   User             @relation("DisputeInitiated", fields: [initiatorId], references: [id])
   votes       DisputeVote[]
   attachments Attachment[]
+  evidence    DisputeEvidence[]
 
   @@index([jobId])
   @@index([clientId])
@@ -410,7 +413,7 @@ model DisputeVote {
   id        String   @id @default(cuid())
   disputeId String
   voterId   String
-  choice    String // "CLIENT" or "FREELANCER"
+  choice    String
   reason    String
   createdAt DateTime @default(now())
 
@@ -420,6 +423,23 @@ model DisputeVote {
   @@unique([disputeId, voterId])
   @@index([disputeId])
   @@index([voterId])
+}
+
+model DisputeEvidence {
+  id          String   @id @default(cuid())
+  disputeId   String
+  fileUrl     String
+  fileHash    String
+  leafIndex   Int
+  merkleProof Json
+  fileName    String
+  mimeType    String
+  fileSize    Int
+  uploadedAt  DateTime @default(now())
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId])
 }
 
 model SavedJob {

@@ -10,6 +10,12 @@ import {
 } from "@prisma/client";
 import { createError } from "../middleware/error";
 import { NotificationService } from "./notification.service";
+import {
+  buildMerkleTree,
+  getMerkleProof,
+  hashLeaf,
+  toHex,
+} from "../lib/merkle";
 
 const prisma = new PrismaClient();
 
@@ -316,6 +322,9 @@ export class DisputeService {
           orderBy: { createdAt: "desc" },
         },
         attachments: true,
+        evidence: {
+          orderBy: { leafIndex: "asc" },
+        },
       },
     });
 
@@ -729,6 +738,118 @@ export class DisputeService {
       total: votes.length,
       votesForClient,
       votesForFreelancer,
+    };
+  }
+
+  static async uploadEvidence(
+    disputeId: string,
+    files: { buffer: Buffer; originalName: string; mimeType: string; size: number; savedPath?: string; filename?: string }[],
+    uploaderId: string,
+  ) {
+    const dispute = await prisma.dispute.findUnique({
+      where: { id: disputeId },
+    });
+
+    if (!dispute) {
+      throw createError("Dispute not found", 404);
+    }
+
+    if (dispute.clientId !== uploaderId && dispute.freelancerId !== uploaderId) {
+      throw createError("Only dispute participants can upload evidence", 403);
+    }
+
+    if (dispute.status === DisputeStatus.RESOLVED) {
+      throw createError("Cannot upload evidence to a resolved dispute", 400);
+    }
+
+    const fileHashes: Buffer[] = files.map((f) => hashLeaf(f.buffer));
+    const tree = buildMerkleTree(fileHashes);
+    const merkleRootHex = toHex(tree.root);
+
+    const evidenceRecords = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const fileHashHex = toHex(fileHashes[i]);
+      const proof = getMerkleProof(tree, i);
+
+      const urlPath = file.filename
+        ? `/api/uploads/dispute-evidence/${file.filename}`
+        : `/api/uploads/dispute-evidence/${disputeId}/${i}-${file.originalName}`;
+
+      const record = await prisma.disputeEvidence.create({
+        data: {
+          disputeId,
+          fileUrl: urlPath,
+          fileHash: fileHashHex,
+          leafIndex: i,
+          merkleProof: proof.proof.map((p) => toHex(p)),
+          fileName: file.originalName,
+          mimeType: file.mimeType,
+          fileSize: file.size,
+        },
+      });
+
+      evidenceRecords.push(record);
+    }
+
+    await prisma.dispute.update({
+      where: { id: disputeId },
+      data: {
+        evidenceMerkleRoot: merkleRootHex,
+        evidenceCount: files.length,
+      },
+    });
+
+    return {
+      merkleRoot: merkleRootHex,
+      evidence: evidenceRecords,
+    };
+  }
+
+  static async getEvidenceProof(disputeId: string, evidenceId: string) {
+    const dispute = await prisma.dispute.findUnique({
+      where: { id: disputeId },
+    });
+
+    if (!dispute) {
+      throw createError("Dispute not found", 404);
+    }
+
+    const evidence = await prisma.disputeEvidence.findUnique({
+      where: { id: evidenceId },
+    });
+
+    if (!evidence || evidence.disputeId !== disputeId) {
+      throw createError("Evidence not found for this dispute", 404);
+    }
+
+    return {
+      fileHash: evidence.fileHash,
+      proof: evidence.merkleProof,
+      leafIndex: evidence.leafIndex,
+      onChainRoot: dispute.evidenceMerkleRoot,
+    };
+  }
+
+  static async getDisputeEvidence(disputeId: string) {
+    const dispute = await prisma.dispute.findUnique({
+      where: { id: disputeId },
+    });
+
+    if (!dispute) {
+      throw createError("Dispute not found", 404);
+    }
+
+    const evidence = await prisma.disputeEvidence.findMany({
+      where: { disputeId },
+      orderBy: { leafIndex: "asc" },
+    });
+
+    return {
+      merkleRoot: dispute.evidenceMerkleRoot,
+      evidenceCount: dispute.evidenceCount,
+      evidence,
     };
   }
 }

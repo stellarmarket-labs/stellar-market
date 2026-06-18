@@ -1,5 +1,8 @@
 import { Router, Request, Response } from "express";
 import { DisputeStatus, UserRole } from "@prisma/client";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { asyncHandler } from "../middleware/error";
 import { validate } from "../middleware/validation";
@@ -14,8 +17,30 @@ import {
   resolveDisputeSchema,
   webhookPayloadSchema,
 } from "../schemas/dispute";
+import { UPLOAD_DIR } from "../config/upload";
+
+const evidenceUploadDir = path.join(UPLOAD_DIR, "dispute-evidence");
+if (!fs.existsSync(evidenceUploadDir)) {
+  fs.mkdirSync(evidenceUploadDir, { recursive: true });
+}
+
+const evidenceStorage = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, evidenceUploadDir),
+    filename: (_req, file, cb) => {
+      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      cb(null, `${unique}-${file.originalname}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 
 const router = Router();
+
+const evidenceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
+});
 
 /**
  * GET /api/disputes/history
@@ -272,6 +297,73 @@ router.post(
 
     const result = await DisputeService.processWebhook(payload);
 
+    res.json(result);
+  }),
+);
+
+/**
+ * POST /api/disputes/:id/evidence
+ * Upload evidence files for a dispute, hash them, and build Merkle tree
+ */
+router.post(
+  "/:id/evidence",
+  authenticate,
+  validate({ params: disputeIdParamSchema }),
+  evidenceStorage.array("files", 5),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const files = (req.files as Express.Multer.File[]) || [];
+    if (files.length === 0) {
+      return res.status(400).json({ error: "No files uploaded" });
+    }
+
+    const mappedFiles = files.map((f) => ({
+      buffer: fs.readFileSync(f.path),
+      originalName: f.originalname,
+      mimeType: f.mimetype,
+      size: f.size,
+      savedPath: f.path,
+      filename: f.filename,
+    }));
+
+    const result = await DisputeService.uploadEvidence(
+      req.params.id as string,
+      mappedFiles,
+      req.userId!,
+    );
+
+    res.status(201).json(result);
+  }),
+);
+
+/**
+ * GET /api/disputes/:id/evidence
+ * Get all evidence records for a dispute
+ */
+router.get(
+  "/:id/evidence",
+  authenticate,
+  validate({ params: disputeIdParamSchema }),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const result = await DisputeService.getDisputeEvidence(
+      req.params.id as string,
+    );
+    res.json(result);
+  }),
+);
+
+/**
+ * GET /api/disputes/:id/evidence/:evidenceId/proof
+ * Get Merkle proof data for a specific evidence file
+ */
+router.get(
+  "/:id/evidence/:evidenceId/proof",
+  authenticate,
+  validate({ params: disputeIdParamSchema }),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const result = await DisputeService.getEvidenceProof(
+      req.params.id as string,
+      req.params.evidenceId as string,
+    );
     res.json(result);
   }),
 );
