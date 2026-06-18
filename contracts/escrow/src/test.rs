@@ -101,6 +101,7 @@ fn test_create_job() {
         &milestones,
         &JOB_DEADLINE, // job_deadline must be >= all milestone deadlines
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
     assert_eq!(job_id, 1);
 
@@ -130,6 +131,7 @@ fn test_extend_deadline_emits_event() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     let new_deadline = JOB_DEADLINE + 1000;
@@ -192,6 +194,7 @@ fn test_job_count_increments() {
         &milestones,
         &JOB_DEADLINE, // job_deadline must be >= milestone deadlines
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
     let id2 = contract.create_job(
         &user,
@@ -200,6 +203,7 @@ fn test_job_count_increments() {
         &milestones,
         &JOB_DEADLINE, // job_deadline must be >= milestone deadlines
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     assert_eq!(id1, 1);
@@ -228,6 +232,7 @@ fn test_create_job_invalid_deadline() {
         &milestones,
         &2000_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 }
 
@@ -249,6 +254,7 @@ fn test_create_job_empty_milestones() {
         &milestones,
         &2000_u64,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 }
 
@@ -273,6 +279,7 @@ fn test_create_job_too_many_milestones() {
         &milestones,
         &3000_u64,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 }
 
@@ -299,6 +306,7 @@ fn test_submit_milestone_past_deadline() {
         &milestones,
         &3000_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
     client.fund_job(&job_id, &user);
 
@@ -330,6 +338,7 @@ fn test_is_milestone_overdue() {
         &milestones,
         &3000_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     // not overdue initially
@@ -364,6 +373,7 @@ fn test_extend_deadline() {
         &milestones,
         &3000_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     client.extend_deadline(&job_id, &0, &4000_u64);
@@ -457,6 +467,7 @@ fn test_claim_refund_partial() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, total);
@@ -501,6 +512,7 @@ fn test_claim_refund_in_progress_status() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, 3000);
@@ -540,6 +552,7 @@ fn test_claim_refund_fails_before_grace_period() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, 3000);
@@ -570,6 +583,7 @@ fn test_claim_refund_fails_with_pending_milestone() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, 3000);
@@ -604,6 +618,7 @@ fn test_claim_refund_fails_unauthorized() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, 3000);
@@ -641,6 +656,7 @@ fn test_claim_refund_fails_on_completed_job() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, task_amount);
@@ -679,6 +695,7 @@ fn test_claim_refund_fails_on_cancelled_job() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, 3000);
@@ -1487,6 +1504,7 @@ fn test_resolve_dispute_callback_client_wins() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, total);
@@ -1519,6 +1537,7 @@ fn test_resolve_dispute_callback_freelancer_wins() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, total);
@@ -1553,6 +1572,7 @@ fn test_resolve_dispute_callback_refund_both() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, total);
@@ -1605,6 +1625,7 @@ fn test_pause_and_unpause() {
         &milestones,
         &2500_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
     assert_eq!(job_id, 1);
 
@@ -1650,6 +1671,7 @@ fn test_create_job_when_paused() {
         &milestones,
         &2500_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 }
 
@@ -1677,6 +1699,7 @@ fn test_fund_job_when_paused() {
         &milestones,
         &2500_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     pause_escrow(&env, &client, &admin);
@@ -1708,6 +1731,7 @@ fn test_fund_job_rejects_non_client_caller() {
         &milestones,
         &2500_u64,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     client.fund_job(&job_id, &attacker);
@@ -1737,6 +1761,7 @@ fn test_submit_milestone_when_paused() {
         &milestones,
         &2500_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     client.fund_job(&job_id, &user);
@@ -1768,6 +1793,7 @@ fn test_approve_milestone_when_paused() {
         &milestones,
         &2500_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     client.fund_job(&job_id, &user);
@@ -1800,6 +1826,7 @@ fn test_claim_refund_when_paused() {
         &milestones,
         &2500_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     client.fund_job(&job_id, &user);
@@ -1836,6 +1863,7 @@ fn test_extend_deadline_when_paused() {
         &milestones,
         &2500_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     pause_escrow(&env, &client, &admin);
@@ -1866,6 +1894,7 @@ fn test_read_only_functions_when_paused() {
         &milestones,
         &2_000_000_u64,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     pause_escrow(&env, &client, &admin);
@@ -1918,6 +1947,7 @@ fn test_approve_milestones_batch_happy_path() {
         &milestones,
         &5000_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, total);
@@ -1971,6 +2001,7 @@ fn test_approve_milestones_batch_partial_invalid() {
         &milestones,
         &5000_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, total);
@@ -2014,6 +2045,7 @@ fn test_approve_milestones_batch_unauthorized_caller() {
         &milestones,
         &5000_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, 1000);
@@ -2052,6 +2084,7 @@ fn test_approve_milestones_batch_non_existent_index() {
         &milestones,
         &5000_u64,
         &GRACE_PERIOD, // Correction 5
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     mint_tokens(&env, &token, &client, 1000);
@@ -2583,6 +2616,7 @@ fn test_release_partial_payment_happy_path() {
     let milestones = vec![&env, (String::from_str(&env, "Task"), amount, JOB_DEADLINE)];
     let job_id = contract.create_job(
         &client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -2612,6 +2646,7 @@ fn test_release_partial_payment_fully_zeros_becomes_approved() {
     let milestones = vec![&env, (String::from_str(&env, "Only"), amount, JOB_DEADLINE)];
     let job_id = contract.create_job(
         &client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -2642,6 +2677,7 @@ fn test_release_partial_then_full_remainder() {
     let milestones = vec![&env, (String::from_str(&env, "Work"), amount, JOB_DEADLINE)];
     let job_id = contract.create_job(
         &client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -2673,6 +2709,7 @@ fn test_release_partial_payment_amount_zero_rejected() {
     let milestones = vec![&env, (String::from_str(&env, "Task"), amount, JOB_DEADLINE)];
     let job_id = contract.create_job(
         &client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -2694,6 +2731,7 @@ fn test_release_partial_payment_amount_exceeds_milestone_rejected() {
     let milestones = vec![&env, (String::from_str(&env, "Task"), amount, JOB_DEADLINE)];
     let job_id = contract.create_job(
         &client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -2716,6 +2754,7 @@ fn test_release_partial_payment_wrong_status_rejected() {
     let milestones = vec![&env, (String::from_str(&env, "Task"), amount, JOB_DEADLINE)];
     let job_id = contract.create_job(
         &client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -2737,6 +2776,7 @@ fn test_release_partial_payment_unauthorized_rejected() {
     let milestones = vec![&env, (String::from_str(&env, "Task"), amount, JOB_DEADLINE)];
     let job_id = contract.create_job(
         &client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -3104,6 +3144,7 @@ fn test_token_validation_happens_before_auth() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
     // Contract errors are surfaced as Err(Ok(contract_error)) in try_* calls
     let contract_err = result.err().unwrap().unwrap();
@@ -3632,6 +3673,7 @@ fn test_release_milestone_success() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -3668,6 +3710,7 @@ fn test_release_milestone_completes_job() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -3698,6 +3741,7 @@ fn test_release_milestone_event_emitted() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -3748,6 +3792,7 @@ fn test_release_milestone_fails_for_non_client() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -3777,6 +3822,7 @@ fn test_release_milestone_fails_for_disputed_job() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -3819,6 +3865,7 @@ fn test_partial_refund_success() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -3871,6 +3918,7 @@ fn test_partial_refund_balance_tracked_accurately() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -3914,6 +3962,7 @@ fn test_partial_refund_fails_over_refund() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -3945,6 +3994,7 @@ fn test_partial_refund_fails_unauthorized_caller() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -3974,6 +4024,7 @@ fn test_partial_refund_event_emitted() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -4027,6 +4078,7 @@ fn test_expire_proposal_success() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -4075,6 +4127,7 @@ fn test_expire_proposal_event_emitted() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -4134,6 +4187,7 @@ fn test_expire_proposal_fails_before_ttl() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -4175,6 +4229,7 @@ fn test_expire_proposal_fails_non_proposer() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -4219,6 +4274,7 @@ fn test_expire_proposal_fails_non_pending() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
@@ -4266,6 +4322,7 @@ fn test_expire_proposal_fails_no_proposal() {
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
     );
 
     contract.fund_job(&job_id, &client_addr);
