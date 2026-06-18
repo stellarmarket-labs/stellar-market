@@ -16,7 +16,14 @@ import {
   signTransaction,
 } from "@stellar/freighter-api";
 import { rpc, Transaction, Horizon } from "@stellar/stellar-sdk";
-import { Loader2, QrCode, Wallet, Smartphone } from "lucide-react";
+import { Loader2, QrCode, Wallet, Smartphone, Lock, Eye, EyeOff, ShieldCheck } from "lucide-react";
+import {
+  saveToVault,
+  loadFromVault,
+  hasVault,
+  clearVault,
+  type VaultPayload,
+} from "@/services/sessionVault";
 
 interface WalletBalance {
   asset: string;
@@ -51,6 +58,16 @@ interface WalletState {
   isSessionActive: boolean;
   sessionExpiresIn: number | null;
   extendSession: () => void;
+  /** Whether the wallet is currently locked (requires passphrase to unlock) */
+  isLocked: boolean;
+  /** Whether an encrypted vault exists in IndexedDB */
+  isVaultSetup: boolean;
+  /** Set up a new vault with a passphrase (called on first wallet connection) */
+  setupVault: (passphrase: string) => Promise<void>;
+  /** Unlock the wallet using the vault passphrase */
+  unlockVault: (passphrase: string) => Promise<void>;
+  /** Lock the wallet immediately */
+  lockWallet: () => void;
 }
 
 const WalletContext = createContext<WalletState | undefined>(undefined);
@@ -60,6 +77,8 @@ const WALLET_TYPE_KEY = "stellarmarket_wallet_type";
 const SESSION_KEY = "stellarmarket_wallet_session";
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 const SESSION_WARNING_MS = 5 * 60 * 1000;
+/** Auto-lock the wallet after 15 minutes of inactivity */
+const AUTO_LOCK_MS = 15 * 60 * 1000;
 
 function truncateAddress(address: string): string {
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
@@ -85,6 +104,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [walletType, setWalletType] = useState<WalletProviderType | null>(null);
   const [showWalletSelect, setShowWalletSelect] = useState(false);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  const [isVaultSetup, setIsVaultSetup] = useState(false);
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const [showSetupVaultModal, setShowSetupVaultModal] = useState(false);
+  const [vaultError, setVaultError] = useState<string | null>(null);
+  const [isUnlocking, setIsUnlocking] = useState(false);
   const pendingConnectResolve = useRef<((address: string | null) => void) | null>(null);
   const pendingDisconnectResolve = useRef<((value: string | null) => void) | null>(null);
   const switchingToProvider = useRef<WalletProviderType | null>(null);
@@ -93,6 +118,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const sessionTimeoutId = useRef<NodeJS.Timeout | null>(null);
   const sessionWarningId = useRef<NodeJS.Timeout | null>(null);
   const sessionCheckInterval = useRef<NodeJS.Timeout | null>(null);
+  const autoLockTimerId = useRef<NodeJS.Timeout | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
 
   const walletKitRef = useRef<any>(null);
 
@@ -180,6 +207,142 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       }, SESSION_TIMEOUT_MS);
     }
   }, [getStoredSession]);
+
+  // ─── Auto-lock & Vault Logic ─────────────────────────────────────────────
+
+  /** Reset the auto-lock idle timer */
+  const resetAutoLockTimer = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    if (autoLockTimerId.current) {
+      clearTimeout(autoLockTimerId.current);
+    }
+    autoLockTimerId.current = setTimeout(() => {
+      // Only lock if we have an active session
+      if (address) {
+        setIsLocked(true);
+        setShowUnlockModal(true);
+        window.dispatchEvent(new CustomEvent("stellarmarket:walletLocked"));
+      }
+    }, AUTO_LOCK_MS);
+  }, [address]);
+
+  /** Lock the wallet immediately — revoke in-memory session, require passphrase */
+  const lockWallet = useCallback(() => {
+    setIsLocked(true);
+    setShowUnlockModal(true);
+    if (autoLockTimerId.current) {
+      clearTimeout(autoLockTimerId.current);
+      autoLockTimerId.current = null;
+    }
+    window.dispatchEvent(new CustomEvent("stellarmarket:walletLocked"));
+  }, []);
+
+  /** Set up the encrypted vault for the first time (after wallet connect) */
+  const setupVault = useCallback(async (passphrase: string) => {
+    if (!address || !walletType) return;
+    const payload: VaultPayload = {
+      address,
+      walletType,
+      connectedAt: Date.now(),
+      lastActivityAt: Date.now(),
+    };
+    await saveToVault(passphrase, payload);
+    setIsVaultSetup(true);
+    setShowSetupVaultModal(false);
+    resetAutoLockTimer();
+  }, [address, walletType, resetAutoLockTimer]);
+
+  /** Unlock the wallet with a passphrase — decrypt vault and restore session */
+  const unlockVault = useCallback(async (passphrase: string) => {
+    setIsUnlocking(true);
+    setVaultError(null);
+    try {
+      const payload = await loadFromVault(passphrase);
+      // Restore session from decrypted vault data
+      setAddress(payload.address);
+      setWalletType(payload.walletType as WalletProviderType);
+      saveSession(payload.address);
+      updateSessionActivity();
+      setIsLocked(false);
+      setShowUnlockModal(false);
+      resetAutoLockTimer();
+
+      // Re-save with updated lastActivityAt
+      const updatedPayload: VaultPayload = {
+        ...payload,
+        lastActivityAt: Date.now(),
+      };
+      await saveToVault(passphrase, updatedPayload);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error && err.message.includes("decrypt")
+          ? "Incorrect passphrase. Please try again."
+          : "Failed to unlock vault. Please try again.";
+      setVaultError(message);
+      throw err;
+    } finally {
+      setIsUnlocking(false);
+    }
+  }, [saveSession, updateSessionActivity, resetAutoLockTimer]);
+
+  // Check for existing vault on mount
+  useEffect(() => {
+    hasVault().then((exists) => setIsVaultSetup(exists));
+  }, []);
+
+  // Auto-lock: Page Visibility API — lock when tab is hidden for too long
+  useEffect(() => {
+    if (!address) return;
+
+    const handleVisibilityForLock = () => {
+      if (document.hidden) {
+        // When the tab goes hidden, start the lock timer from the last activity
+        const idleTime = Date.now() - lastActivityRef.current;
+        const remaining = AUTO_LOCK_MS - idleTime;
+        if (remaining <= 0) {
+          lockWallet();
+        } else {
+          if (autoLockTimerId.current) clearTimeout(autoLockTimerId.current);
+          autoLockTimerId.current = setTimeout(() => {
+            lockWallet();
+          }, remaining);
+        }
+      } else {
+        // Tab became visible — check if we exceeded idle time
+        const idleTime = Date.now() - lastActivityRef.current;
+        if (idleTime >= AUTO_LOCK_MS) {
+          lockWallet();
+        } else {
+          resetAutoLockTimer();
+        }
+      }
+    };
+
+    // Track user activity to reset idle timer
+    const handleActivity = () => {
+      if (!isLocked) {
+        resetAutoLockTimer();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityForLock);
+    window.addEventListener("mousedown", handleActivity);
+    window.addEventListener("keydown", handleActivity);
+    window.addEventListener("touchstart", handleActivity);
+
+    // Start the auto-lock timer
+    resetAutoLockTimer();
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityForLock);
+      window.removeEventListener("mousedown", handleActivity);
+      window.removeEventListener("keydown", handleActivity);
+      window.removeEventListener("touchstart", handleActivity);
+      if (autoLockTimerId.current) {
+        clearTimeout(autoLockTimerId.current);
+      }
+    };
+  }, [address, isLocked, lockWallet, resetAutoLockTimer]);
 
   const checkFreighterInstalled = useCallback(async () => {
     try {
@@ -580,9 +743,17 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setBalance(null);
     setBalances([]);
     setWalletType(null);
+    setIsLocked(false);
+    setIsVaultSetup(false);
+    setShowUnlockModal(false);
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(WALLET_TYPE_KEY);
     clearSession();
+    clearVault(); // Remove encrypted vault from IndexedDB
+    if (autoLockTimerId.current) {
+      clearTimeout(autoLockTimerId.current);
+      autoLockTimerId.current = null;
+    }
     window.dispatchEvent(new CustomEvent("stellarmarket:walletDisconnected"));
   }, [clearSession]);
 
@@ -623,6 +794,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, [getWalletKit, walletType, address]);
 
   const signAndBroadcastTransaction = useCallback(async (xdr: string) => {
+    // Block signing when wallet is locked
+    if (isLocked) {
+      return { success: false, hash: "", error: "WalletLocked: Please unlock your wallet to sign transactions" };
+    }
     try {
       let signedResult: any;
 
@@ -700,11 +875,17 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       signMessage,
       signAndBroadcastTransaction,
       extendSession: updateSessionActivity,
+      isLocked,
+      isVaultSetup,
+      setupVault,
+      unlockVault,
+      lockWallet,
     }),
     [
       address, isConnecting, isFreighterInstalled, isLobstrInstalled, error,
       balance, balances, isLoadingBalance, walletType, isSessionActive, sessionExpiresIn,
       connect, disconnect, refreshBalance, signMessage, signAndBroadcastTransaction, updateSessionActivity,
+      isLocked, isVaultSetup, setupVault, unlockVault, lockWallet,
     ],
   );
 
@@ -865,6 +1046,35 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       )}
+
+      {/* Unlock Wallet Modal — shown when wallet is auto-locked or manually locked */}
+      {showUnlockModal && isVaultSetup && (
+        <UnlockWalletModal
+          isUnlocking={isUnlocking}
+          error={vaultError}
+          onUnlock={async (passphrase) => {
+            try {
+              await unlockVault(passphrase);
+            } catch {
+              // Error is already set in state by unlockVault
+            }
+          }}
+          onDisconnect={() => {
+            setShowUnlockModal(false);
+            disconnect();
+          }}
+        />
+      )}
+
+      {/* Setup Vault Modal — shown after first wallet connection */}
+      {showSetupVaultModal && (
+        <SetupVaultModal
+          onSetup={async (passphrase) => {
+            await setupVault(passphrase);
+          }}
+          onSkip={() => setShowSetupVaultModal(false)}
+        />
+      )}
     </WalletContext.Provider>
   );
 }
@@ -908,6 +1118,258 @@ function WalletOptionButton({
         ) : null}
       </span>
     </button>
+  );
+}
+
+/** Modal component for unlocking an auto-locked wallet */
+function UnlockWalletModal({
+  isUnlocking,
+  error,
+  onUnlock,
+  onDisconnect,
+}: {
+  isUnlocking: boolean;
+  error: string | null;
+  onUnlock: (passphrase: string) => Promise<void>;
+  onDisconnect: () => void;
+}) {
+  const [passphrase, setPassphrase] = useState("");
+  const [showPassphrase, setShowPassphrase] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passphrase.trim()) return;
+    await onUnlock(passphrase);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-sm rounded-lg border border-theme-border bg-theme-card p-6 shadow-xl">
+        <div className="mb-5 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-stellar-blue/10">
+            <Lock size={20} className="text-stellar-blue" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-theme-heading">Unlock Wallet</h2>
+            <p className="text-xs text-theme-text">Auto-locks after 15 min of inactivity</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <label htmlFor="unlock-passphrase" className="mb-1.5 block text-sm font-medium text-theme-text">
+            Enter your wallet passphrase to continue
+          </label>
+          <div className="relative mb-3">
+            <input
+              id="unlock-passphrase"
+              type={showPassphrase ? "text" : "password"}
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+              placeholder="Enter passphrase"
+              autoFocus
+              disabled={isUnlocking}
+              className="w-full rounded-lg border border-theme-border bg-theme-bg px-4 py-2.5 pr-10 text-sm text-theme-heading placeholder:text-theme-text/50 focus:border-stellar-blue focus:outline-none disabled:opacity-60"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassphrase(!showPassphrase)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-theme-text/60 hover:text-theme-text"
+              tabIndex={-1}
+            >
+              {showPassphrase ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+
+          {error && (
+            <p className="mb-3 rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-500">
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={isUnlocking || !passphrase.trim()}
+            className="w-full rounded-lg bg-stellar-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-stellar-blue/90 disabled:opacity-60 flex items-center justify-center gap-2"
+          >
+            {isUnlocking ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Unlocking…
+              </>
+            ) : (
+              <>
+                <ShieldCheck size={16} />
+                Unlock
+              </>
+            )}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          onClick={onDisconnect}
+          className="mt-3 w-full rounded-lg border border-theme-border px-4 py-2 text-xs text-theme-text hover:text-theme-heading"
+        >
+          Disconnect wallet instead
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Modal component for initial vault passphrase setup */
+function SetupVaultModal({
+  onSetup,
+  onSkip,
+}: {
+  onSetup: (passphrase: string) => Promise<void>;
+  onSkip: () => void;
+}) {
+  const [passphrase, setPassphrase] = useState("");
+  const [confirmPassphrase, setConfirmPassphrase] = useState("");
+  const [showPassphrase, setShowPassphrase] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [isSettingUp, setIsSettingUp] = useState(false);
+
+  const passphraseStrength = useMemo(() => {
+    if (passphrase.length === 0) return null;
+    if (passphrase.length < 8) return "weak";
+    if (passphrase.length < 12) return "fair";
+    if (/[a-z]/.test(passphrase) && /[A-Z]/.test(passphrase) && /\d/.test(passphrase) && passphrase.length >= 12) return "strong";
+    return "fair";
+  }, [passphrase]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSetupError(null);
+
+    if (passphrase.length < 8) {
+      setSetupError("Passphrase must be at least 8 characters");
+      return;
+    }
+    if (passphrase !== confirmPassphrase) {
+      setSetupError("Passphrases do not match");
+      return;
+    }
+
+    setIsSettingUp(true);
+    try {
+      await onSetup(passphrase);
+    } catch {
+      setSetupError("Failed to set up vault. Please try again.");
+    } finally {
+      setIsSettingUp(false);
+    }
+  };
+
+  const strengthColors: Record<string, string> = {
+    weak: "bg-red-500",
+    fair: "bg-yellow-500",
+    strong: "bg-green-500",
+  };
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-sm rounded-lg border border-theme-border bg-theme-card p-6 shadow-xl">
+        <div className="mb-5 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-stellar-blue/10">
+            <ShieldCheck size={20} className="text-stellar-blue" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-theme-heading">Secure Your Wallet</h2>
+            <p className="text-xs text-theme-text">Set a passphrase to encrypt your session</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <label htmlFor="setup-passphrase" className="mb-1.5 block text-sm font-medium text-theme-text">
+            Create a passphrase
+          </label>
+          <div className="relative mb-2">
+            <input
+              id="setup-passphrase"
+              type={showPassphrase ? "text" : "password"}
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+              placeholder="At least 8 characters"
+              autoFocus
+              disabled={isSettingUp}
+              className="w-full rounded-lg border border-theme-border bg-theme-bg px-4 py-2.5 pr-10 text-sm text-theme-heading placeholder:text-theme-text/50 focus:border-stellar-blue focus:outline-none disabled:opacity-60"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassphrase(!showPassphrase)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-theme-text/60 hover:text-theme-text"
+              tabIndex={-1}
+            >
+              {showPassphrase ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+
+          {/* Strength indicator */}
+          {passphraseStrength && (
+            <div className="mb-3 flex items-center gap-2">
+              <div className="h-1 flex-1 rounded-full bg-theme-border">
+                <div
+                  className={`h-full rounded-full transition-all ${strengthColors[passphraseStrength]}`}
+                  style={{ width: passphraseStrength === "weak" ? "33%" : passphraseStrength === "fair" ? "66%" : "100%" }}
+                />
+              </div>
+              <span className="text-xs capitalize text-theme-text">{passphraseStrength}</span>
+            </div>
+          )}
+
+          <label htmlFor="confirm-passphrase" className="mb-1.5 block text-sm font-medium text-theme-text">
+            Confirm passphrase
+          </label>
+          <input
+            id="confirm-passphrase"
+            type={showPassphrase ? "text" : "password"}
+            value={confirmPassphrase}
+            onChange={(e) => setConfirmPassphrase(e.target.value)}
+            placeholder="Re-enter passphrase"
+            disabled={isSettingUp}
+            className="mb-3 w-full rounded-lg border border-theme-border bg-theme-bg px-4 py-2.5 text-sm text-theme-heading placeholder:text-theme-text/50 focus:border-stellar-blue focus:outline-none disabled:opacity-60"
+          />
+
+          {setupError && (
+            <p className="mb-3 rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-500">
+              {setupError}
+            </p>
+          )}
+
+          <p className="mb-3 rounded-md bg-stellar-blue/5 px-3 py-2 text-xs text-theme-text">
+            This passphrase encrypts your wallet session locally. It cannot be recovered — please remember it.
+          </p>
+
+          <button
+            type="submit"
+            disabled={isSettingUp || !passphrase.trim() || !confirmPassphrase.trim()}
+            className="w-full rounded-lg bg-stellar-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-stellar-blue/90 disabled:opacity-60 flex items-center justify-center gap-2"
+          >
+            {isSettingUp ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Encrypting…
+              </>
+            ) : (
+              <>
+                <ShieldCheck size={16} />
+                Set Up Vault
+              </>
+            )}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          onClick={onSkip}
+          className="mt-3 w-full rounded-lg border border-theme-border px-4 py-2 text-xs text-theme-text hover:text-theme-heading"
+        >
+          Skip for now
+        </button>
+      </div>
+    </div>
   );
 }
 
