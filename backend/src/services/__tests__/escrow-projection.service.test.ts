@@ -145,13 +145,13 @@ describe("Escrow State Projection Service", () => {
   });
 
   describe("projectJobState", () => {
-    it("should fetch events and project state in ascending order of ledger sequence", async () => {
+    it("should query events sorted by ledger sequence and project state", async () => {
       const event1 = createMockEvent(EscrowEventType.JOB_CREATED, 10);
       const event2 = createMockEvent(EscrowEventType.JOB_FUNDED, 20);
       const event3 = createMockEvent(EscrowEventType.PAYMENT_RELEASED, 30);
 
-      // Return out-of-order events from mock query to verify projection sorts them
-      prismaMock.escrowEvent.findMany.mockResolvedValueOnce([event3, event1, event2]);
+      // Return events sorted, as the database would do given the orderBy clause
+      prismaMock.escrowEvent.findMany.mockResolvedValueOnce([event1, event2, event3]);
 
       const state = await projectJobState("job-123");
 
@@ -160,7 +160,7 @@ describe("Escrow State Projection Service", () => {
         orderBy: { ledgerSeq: "asc" },
       });
 
-      // Events should be applied in ledgerSeq order: 10 -> 20 -> 30, resulting in COMPLETED
+      // Events applied in order: 10 -> 20 -> 30, resulting in COMPLETED
       expect(state).toEqual({
         status: "COMPLETED",
         escrowStatus: "COMPLETED",

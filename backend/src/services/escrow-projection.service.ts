@@ -84,9 +84,7 @@ export async function projectJobState(jobId: string): Promise<EscrowProjection> 
     orderBy: { ledgerSeq: "asc" },
   });
 
-  const sortedEvents = [...events].sort((a, b) => a.ledgerSeq - b.ledgerSeq);
-
-  return sortedEvents.reduce((state, event) => applyEvent(state, event), initialState);
+  return events.reduce((state, event) => applyEvent(state, event), initialState);
 }
 
 export interface HandleEscrowEventInput {
