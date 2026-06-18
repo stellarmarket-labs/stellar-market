@@ -199,11 +199,15 @@ export interface Vote {
 
 export interface DisputeEvidence {
   id: string;
-  ipfsHash: string;
+  disputeId: string;
+  fileUrl: string;
+  fileHash: string;
+  leafIndex: number;
+  merkleProof: string[];
   fileName: string;
   fileType: string;
+  fileSize: number;
   uploadedAt: string;
-  uploaderAddress: string;
 }
 
 export interface Dispute {
@@ -217,6 +221,30 @@ export interface Dispute {
   votesForClient: number;
   votesForFreelancer: number;
   minVotes: number;
+  evidenceMerkleRoot?: string;
+  createdAt: string;
+  updatedAt: string;
+  job: Job;
+  initiator: User;
+  respondent: User;
+  votes: Vote[];
+  evidence?: DisputeEvidence[];
+  arbitrators?: string[];
+}
+
+export interface Dispute {
+  id: string;
+  jobId: string;
+  contractDisputeId?: string;
+  initiatorId: string;
+  respondentId: string;
+  reason: string;
+  status: "OPEN" | "VOTING" | "RESOLVED_CLIENT" | "RESOLVED_FREELANCER" | "ESCALATED";
+  votesForClient: number;
+  votesForFreelancer: number;
+  minVotes: number;
+  evidenceMerkleRoot?: string;
+  evidenceCount: number;
   createdAt: string;
   updatedAt: string;
   job: Job;

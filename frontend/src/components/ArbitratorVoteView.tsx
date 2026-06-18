@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ExternalLink, Loader2, Scale } from "lucide-react";
+import { Scale, Loader2 } from "lucide-react";
 import type { Dispute } from "@/types";
+import EvidenceVerifier from "./EvidenceVerifier";
 
 interface ArbitratorVoteViewProps {
   dispute: Dispute;
@@ -96,36 +97,21 @@ export default function ArbitratorVoteView({
         <h3 className="font-semibold text-theme-heading">Arbitrator Panel</h3>
       </div>
 
-      {/* Evidence viewer */}
+      {/* Evidence verifier */}
       {dispute.evidence && dispute.evidence.length > 0 && (
-        <div>
-          <p className="text-xs font-medium text-theme-text-muted uppercase tracking-wider mb-2">
-            Submitted Evidence
-          </p>
-          <ul className="space-y-2">
-            {dispute.evidence.map((item) => (
-              <li
-                key={item.id}
-                className="flex items-center justify-between bg-theme-card border border-theme-border rounded-lg px-3 py-2"
-              >
-                <div>
-                  <p className="text-sm text-theme-heading truncate max-w-[200px]">
-                    {item.fileName}
-                  </p>
-                  <p className="text-[10px] text-theme-text-muted">{item.fileType}</p>
-                </div>
-                <a
-                  href={`https://ipfs.io/ipfs/${item.ipfsHash}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-stellar-blue hover:underline flex-shrink-0 ml-3"
-                >
-                  View <ExternalLink size={11} />
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <EvidenceVerifier
+          disputeId={dispute.id}
+          evidence={dispute.evidence.map((item) => ({
+            id: item.id,
+            fileUrl: item.fileUrl,
+            fileHash: item.fileHash,
+            leafIndex: item.leafIndex,
+            merkleProof: item.merkleProof,
+            fileName: item.fileName,
+            fileType: item.fileType,
+          }))}
+          onChainRoot={dispute.evidenceMerkleRoot}
+        />
       )}
 
       {/* Dispute reason */}
