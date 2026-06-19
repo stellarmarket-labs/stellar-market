@@ -1,7 +1,10 @@
 /**
  * Proposal diff computation and comparison utilities
  * Handles field-level diffs for milestone negotiations
+ * Uses jsdiff library for robust diff computation handling edge cases
  */
+
+import { diffWords } from "jsdiff";
 
 export interface MilestoneSnapshot {
   title: string;
@@ -38,79 +41,32 @@ export interface ProposalSnapshot {
 }
 
 /**
- * Simple word-level diff using word tokenization
- * Returns an array of WordDiff objects showing added, removed, or unchanged words
+ * Word-level diff using jsdiff library
+ * Returns an array of WordDiff objects showing added, removed, or unchanged words.
+ * Handles edge cases: empty strings, special characters, whitespace variations.
  */
 function computeWordDiff(prev: string, next: string): WordDiff[] {
-  const prevWords = prev.split(/\s+/).filter(Boolean);
-  const nextWords = next.split(/\s+/).filter(Boolean);
-
-  const diffs: WordDiff[] = [];
-  let i = 0,
-    j = 0;
-
-  // Simple longest common subsequence approach
-  const lcs = longestCommonSubsequence(prevWords, nextWords);
-  const lcsSet = new Set(lcs);
-
-  // Mark removed words
-  for (const word of prevWords) {
-    if (!lcsSet.has(word)) {
-      diffs.push({ type: "removed", text: word });
-    }
+  // Handle empty strings
+  if (!prev && !next) {
+    return [];
   }
 
-  // Mark added words and unchanged words
-  for (const word of nextWords) {
-    if (lcsSet.has(word)) {
-      diffs.push({ type: "unchanged", text: word });
+  const diffs: WordDiff[] = [];
+
+  // Use jsdiff for robust word-level comparison
+  const changes = diffWords(prev || "", next || "");
+
+  for (const change of changes) {
+    if (change.added) {
+      diffs.push({ type: "added", text: change.value });
+    } else if (change.removed) {
+      diffs.push({ type: "removed", text: change.value });
     } else {
-      diffs.push({ type: "added", text: word });
+      diffs.push({ type: "unchanged", text: change.value });
     }
   }
 
   return diffs;
-}
-
-/**
- * Simple longest common subsequence for word matching
- */
-function longestCommonSubsequence(
-  arr1: string[],
-  arr2: string[]
-): string[] {
-  const m = arr1.length;
-  const n = arr2.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () =>
-    Array(n + 1).fill(0)
-  );
-
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (arr1[i - 1] === arr2[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-  const result: string[] = [];
-  let i = m,
-    j = n;
-  while (i > 0 && j > 0) {
-    if (arr1[i - 1] === arr2[j - 1]) {
-      result.unshift(arr1[i - 1]);
-      i--;
-      j--;
-    } else if (dp[i - 1][j] > dp[i][j - 1]) {
-      i--;
-    } else {
-      j--;
-    }
-  }
-
-  return result;
 }
 
 /**

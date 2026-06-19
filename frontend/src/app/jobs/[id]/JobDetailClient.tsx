@@ -796,6 +796,7 @@ export default function JobDetailClient() {
               onAccept={() => void handleRevisionEscrow("accept")}
               onReject={() => void handleRevisionEscrow("reject")}
               processing={processing}
+              jobId={job.id}
             />
           )}
 

@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useCallback, useEffect } from "react";
 import { CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 import type { RevisionProposal } from "@/types";
 import DiffViewer from "./DiffViewer";
 import ProposalHistory, { type ProposalHistoryEntry } from "./ProposalHistory";
 import { computeProposalDiffs, type MilestoneSnapshot } from "@/utils/proposalDiff";
+import { useProposalSnapshot } from "@/hooks/useProposalSnapshot";
 
 interface RevisionProposalViewerProps {
   proposal: RevisionProposal;
@@ -15,6 +17,7 @@ interface RevisionProposalViewerProps {
   onAccept: () => void | Promise<void>;
   onReject: () => void | Promise<void>;
   processing: boolean;
+  jobId: string; // Required for snapshot persistence
 }
 
 // Helper to convert stroops to XLM
@@ -52,7 +55,8 @@ function convertCurrentMilestonesToSnapshots(
 
 /**
  * RevisionProposalViewer displays an incoming revision proposal with detailed diffs
- * and proposal history timeline
+ * and proposal history timeline. Stores accepted snapshots using Yjs awareness so
+ * both parties see the same diff and it survives page refreshes.
  */
 export default function RevisionProposalViewer({
   proposal,
@@ -62,7 +66,14 @@ export default function RevisionProposalViewer({
   onAccept,
   onReject,
   processing,
+  jobId,
 }: RevisionProposalViewerProps) {
+  const { user } = useAuth();
+  const userId = user?.id || "anonymous";
+
+  // Use Yjs awareness for snapshot persistence across page refreshes
+  const { lastAcceptedSnapshot, acceptSnapshot } = useProposalSnapshot(jobId, userId);
+
   const proposalSnapshots = useMemo(
     () => convertProposalMilestonesToSnapshots(proposal.milestones),
     [proposal.milestones]
@@ -73,10 +84,29 @@ export default function RevisionProposalViewer({
     [currentMilestones]
   );
 
-  const milestoneDiffs = useMemo(
-    () => computeProposalDiffs(currentSnapshots, proposalSnapshots),
-    [currentSnapshots, proposalSnapshots]
+  // Compute diffs against last-accepted snapshot if available, otherwise against current
+  const diffBaseSnapshots = useMemo(
+    () => lastAcceptedSnapshot || currentSnapshots,
+    [lastAcceptedSnapshot, currentSnapshots]
   );
+
+  const milestoneDiffs = useMemo(
+    () => computeProposalDiffs(diffBaseSnapshots, proposalSnapshots),
+    [diffBaseSnapshots, proposalSnapshots]
+  );
+
+  // Wrap onAccept to persist the snapshot when user accepts the revision
+  const handleAccept = useCallback(async () => {
+    try {
+      // Persist the accepted snapshot in shared awareness
+      acceptSnapshot(proposalSnapshots);
+      // Then call the original onAccept handler
+      await onAccept();
+    } catch (error) {
+      console.error("Error accepting revision:", error);
+      throw error;
+    }
+  }, [acceptSnapshot, onAccept, proposalSnapshots]);
 
   // Extract proposal history from the proposal data if available
   const historyEntries = useMemo<ProposalHistoryEntry[]>(() => {
@@ -130,7 +160,7 @@ export default function RevisionProposalViewer({
           <button
             type="button"
             disabled={processing}
-            onClick={onAccept}
+            onClick={() => void handleAccept()}
             className="btn-primary py-2 px-4 text-sm flex items-center gap-2"
           >
             {processing ? (
