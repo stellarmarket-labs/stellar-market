@@ -2,6 +2,7 @@ import re
 
 with open("contracts/reputation/src/lib.rs", "r") as f:
     content = f.read()
+    #
 
 # 1. Add new errors
 content = re.sub(
