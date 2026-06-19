@@ -16,5 +16,11 @@
   },
   "include": ["src/**/*", "src/**/__tests__/**/*.ts", "src/**/*.test.ts"],
   "exclude": ["node_modules", "dist"],
-  "types": ["node", "jest"]
+  "types": ["node", "jest"],
+  "ts-node": {
+    "transpileOnly": true,
+    "compilerOptions": {
+      "rootDir": "."
+    }
+  }
 }

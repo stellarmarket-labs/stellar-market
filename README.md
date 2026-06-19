@@ -74,6 +74,42 @@ cd backend && npm run dev
 cd frontend && npm run dev
 ```
 
+### Database Seeding
+
+Populate a local or staging database with realistic demo data (users, jobs,
+applications, escrows, disputes, and reviews):
+
+```bash
+cd backend
+
+# Apply migrations first (creates the schema)
+npx prisma migrate deploy
+
+# Seed the database (idempotent — safe to run repeatedly)
+npx prisma db seed
+```
+
+The seed is **idempotent**: every record uses a fixed primary key written with
+`upsert`, so running it twice produces the same row counts (no duplicates).
+
+To wipe all existing data and reseed from scratch, pass the `--reset` flag. It
+truncates every data table (`TRUNCATE ... RESTART IDENTITY CASCADE`) before
+seeding:
+
+```bash
+npx prisma db seed -- --reset
+```
+
+> ⚠️ `--reset` is destructive — it deletes **all** rows in the database. Use it
+> only against local or staging databases, never production.
+
+**Seeded data summary:** 5 clients, 10 freelancers, 20 jobs (across all
+categories with varied statuses), 30 applications, 10 escrow records (active +
+completed), 5 disputes, and reviews on completed jobs.
+
+Fixture login credentials are documented in
+[`docs/dev-accounts.md`](docs/dev-accounts.md).
+
 ### Post-Deploy Verification
 
 After applying backend migrations, verify persisted user review aggregates with:
