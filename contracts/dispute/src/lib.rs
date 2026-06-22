@@ -1748,11 +1748,14 @@ impl DisputeContract {
         proof: Vec<BytesN<32>>,
         leaf_index: u32,
     ) -> bool {
-        let dispute: Dispute = env
+        let dispute: Dispute = match env
             .storage()
             .persistent()
             .get(&DataKey::Dispute(dispute_id))
-            .unwrap_or_else(|| panic_with_error!(&env, DisputeError::DisputeNotFound));
+        {
+            Some(dispute) => dispute,
+            None => return false,
+        };
         bump_dispute_ttl(&env, dispute_id);
 
         let root = match dispute.evidence_merkle_root {
@@ -1770,9 +1773,9 @@ impl DisputeContract {
                 (sibling.clone(), current.clone())
             };
             let mut combined = Bytes::new(&env);
-            combined.append(&left);
-            combined.append(&right);
-            current = env.crypto().sha256(&combined).into_bytes::<32>();
+            append_hash_bytes(&mut combined, &left);
+            append_hash_bytes(&mut combined, &right);
+            current = env.crypto().sha256(&combined);
             idx /= 2;
         }
 
@@ -1787,10 +1790,15 @@ impl DisputeContract {
         let dispute: Dispute = env
             .storage()
             .persistent()
-            .get(&DataKey::Dispute(dispute_id))
-            .unwrap_or_else(|| panic_with_error!(&env, DisputeError::DisputeNotFound));
+            .get(&DataKey::Dispute(dispute_id))?;
         bump_dispute_ttl(&env, dispute_id);
         dispute.evidence_merkle_root
+    }
+}
+
+fn append_hash_bytes(bytes: &mut Bytes, hash: &BytesN<32>) {
+    for byte in hash.to_array().iter() {
+        bytes.push_back(*byte);
     }
 }
 

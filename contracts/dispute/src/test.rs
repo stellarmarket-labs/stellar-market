@@ -2612,27 +2612,27 @@ fn test_verify_evidence_correct_proof_passes() {
     let two_bytes = Bytes::from_slice(&env, &[2u8; 32]);
     let empty_bytes = Bytes::from_slice(&env, &[0u8; 32]);
 
-    let leaf0: BytesN<32> = env.crypto().sha256(&zero_bytes).into_bytes::<32>();
-    let leaf1: BytesN<32> = env.crypto().sha256(&one_bytes).into_bytes::<32>();
-    let leaf2: BytesN<32> = env.crypto().sha256(&two_bytes).into_bytes::<32>();
-    let leaf3: BytesN<32> = env.crypto().sha256(&empty_bytes).into_bytes::<32>();
+    let leaf0: BytesN<32> = env.crypto().sha256(&zero_bytes);
+    let leaf1: BytesN<32> = env.crypto().sha256(&one_bytes);
+    let leaf2: BytesN<32> = env.crypto().sha256(&two_bytes);
+    let leaf3: BytesN<32> = env.crypto().sha256(&empty_bytes);
 
     // Level 1:  parent0 = sha256(leaf0 || leaf1), parent1 = sha256(leaf2 || leaf3)
     let mut combined01 = Bytes::new(&env);
-    combined01.append(&leaf0);
-    combined01.append(&leaf1);
-    let parent0: BytesN<32> = env.crypto().sha256(&combined01).into_bytes::<32>();
+    append_hash_bytes(&mut combined01, &leaf0);
+    append_hash_bytes(&mut combined01, &leaf1);
+    let parent0: BytesN<32> = env.crypto().sha256(&combined01);
 
     let mut combined23 = Bytes::new(&env);
-    combined23.append(&leaf2);
-    combined23.append(&leaf3);
-    let parent1: BytesN<32> = env.crypto().sha256(&combined23).into_bytes::<32>();
+    append_hash_bytes(&mut combined23, &leaf2);
+    append_hash_bytes(&mut combined23, &leaf3);
+    let parent1: BytesN<32> = env.crypto().sha256(&combined23);
 
     // Root: sha256(parent0 || parent1)
     let mut combined_root = Bytes::new(&env);
-    combined_root.append(&parent0);
-    combined_root.append(&parent1);
-    let root: BytesN<32> = env.crypto().sha256(&combined_root).into_bytes::<32>();
+    append_hash_bytes(&mut combined_root, &parent0);
+    append_hash_bytes(&mut combined_root, &parent1);
+    let root: BytesN<32> = env.crypto().sha256(&combined_root);
 
     // Raise dispute with this Merkle root
     let dispute_id = client.raise_dispute(
@@ -2688,13 +2688,13 @@ fn test_verify_evidence_tampered_file_hash_fails() {
     let zero_bytes = Bytes::from_slice(&env, &[0u8; 32]);
     let one_bytes = Bytes::from_slice(&env, &[1u8; 32]);
 
-    let leaf0: BytesN<32> = env.crypto().sha256(&zero_bytes).into_bytes::<32>();
-    let leaf1: BytesN<32> = env.crypto().sha256(&one_bytes).into_bytes::<32>();
+    let leaf0: BytesN<32> = env.crypto().sha256(&zero_bytes);
+    let leaf1: BytesN<32> = env.crypto().sha256(&one_bytes);
 
     let mut combined = Bytes::new(&env);
-    combined.append(&leaf0);
-    combined.append(&leaf1);
-    let root: BytesN<32> = env.crypto().sha256(&combined).into_bytes::<32>();
+    append_hash_bytes(&mut combined, &leaf0);
+    append_hash_bytes(&mut combined, &leaf1);
+    let root: BytesN<32> = env.crypto().sha256(&combined);
 
     let dispute_id = client.raise_dispute(
         &1u64,
@@ -2710,7 +2710,7 @@ fn test_verify_evidence_tampered_file_hash_fails() {
 
     // Tampered hash (different from leaf0)
     let tampered_bytes = Bytes::from_slice(&env, &[99u8; 32]);
-    let tampered_hash: BytesN<32> = env.crypto().sha256(&tampered_bytes).into_bytes::<32>();
+    let tampered_hash: BytesN<32> = env.crypto().sha256(&tampered_bytes);
 
     let proof = vec![&env, leaf1.clone()];
     let valid = client.verify_evidence(&dispute_id, &tampered_hash, &proof, &0u32);
@@ -2752,7 +2752,7 @@ fn test_verify_evidence_no_merkle_root_returns_false() {
     );
 
     let fake_hash_bytes = Bytes::from_slice(&env, &[0u8; 32]);
-    let fake_hash: BytesN<32> = env.crypto().sha256(&fake_hash_bytes).into_bytes::<32>();
+    let fake_hash: BytesN<32> = env.crypto().sha256(&fake_hash_bytes);
     let empty_proof = vec![&env,];
 
     let valid = client.verify_evidence(&dispute_id, &fake_hash, &empty_proof, &0u32);
@@ -2782,13 +2782,13 @@ fn test_get_evidence_merkle_root() {
 
     let zero_bytes = Bytes::from_slice(&env, &[0u8; 32]);
     let one_bytes = Bytes::from_slice(&env, &[1u8; 32]);
-    let leaf0: BytesN<32> = env.crypto().sha256(&zero_bytes).into_bytes::<32>();
-    let leaf1: BytesN<32> = env.crypto().sha256(&one_bytes).into_bytes::<32>();
+    let leaf0: BytesN<32> = env.crypto().sha256(&zero_bytes);
+    let leaf1: BytesN<32> = env.crypto().sha256(&one_bytes);
 
     let mut combined = Bytes::new(&env);
-    combined.append(&leaf0);
-    combined.append(&leaf1);
-    let root: BytesN<32> = env.crypto().sha256(&combined).into_bytes::<32>();
+    append_hash_bytes(&mut combined, &leaf0);
+    append_hash_bytes(&mut combined, &leaf1);
+    let root: BytesN<32> = env.crypto().sha256(&combined);
 
     let dispute_id = client.raise_dispute(
         &1u64,
