@@ -626,4 +626,27 @@ router.put(
   }),
 );
 
+router.get(
+  "/:jobId/ttl",
+  authenticate,
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const jobId = req.params.jobId as string;
+    const job = await prisma.job.findUnique({
+      where: { id: jobId },
+      select: { contractJobId: true },
+    });
+
+    if (!job || !job.contractJobId) {
+      return res.status(404).json({ error: "Job or escrow not found." });
+    }
+
+    const ttlInfo = await ContractService.getEscrowTtl(job.contractJobId);
+    if (!ttlInfo) {
+      return res.status(404).json({ error: "Escrow not found on-chain." });
+    }
+
+    res.json(ttlInfo);
+  })
+);
+
 export default router;

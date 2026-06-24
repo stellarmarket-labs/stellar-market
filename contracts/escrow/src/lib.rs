@@ -381,12 +381,29 @@ const TTL_EXTEND_TO_LEDGERS: u32 = LEDGERS_PER_DAY * 30; // 30 days = 518,400 le
 const INSTANCE_TTL_THRESHOLD: u32 = 50_000_000;
 const INSTANCE_TTL_EXTEND_TO: u32 = 50_000_000;
 
+const ESCROW_TTL_LEDGERS: u32 = 535_000; // ~90 days at 5s/ledger
+type EscrowKey = DataKey;
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TtlExtendedEvent {
+    pub job_id: u64,
+    pub new_expiry_ledger: u32,
+}
+
+
+
+fn bump_escrow_ttl(env: &Env, job_id: u64) {
+    let key = EscrowKey::Job(job_id);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, ESCROW_TTL_LEDGERS, ESCROW_TTL_LEDGERS);
+    }
+}
+
 fn bump_job_ttl(env: &Env, job_id: u64) {
-    env.storage().persistent().extend_ttl(
-        &get_job_key(job_id),
-        TTL_THRESHOLD_LEDGERS,
-        TTL_EXTEND_TO_LEDGERS,
-    );
+    bump_escrow_ttl(env, job_id);
 }
 
 fn bump_job_count_ttl(env: &Env) {
@@ -722,6 +739,7 @@ impl EscrowContract {
     /// Return the exchange-rate parity snapshot recorded when the job was funded.
     /// `None` for jobs funded without oracle validation (legacy / XLM-only).
     pub fn get_rate_snapshot(env: Env, job_id: u64) -> Option<RateSnapshot> {
+        bump_escrow_ttl(&env, job_id);
         env.storage()
             .persistent()
             .get(&DataKey::RateSnapshot(job_id))
@@ -1175,6 +1193,7 @@ impl EscrowContract {
         agreed_value_stroops: i128,
         max_slippage_bps: u32,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         require_not_paused(&env)?;
 
         let mut job: Job = env
@@ -1262,6 +1281,7 @@ impl EscrowContract {
         job_id: u64,
         amount: i128,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         require_not_paused(&env)?;
 
         client.require_auth();
@@ -1312,6 +1332,7 @@ impl EscrowContract {
         job_id: u64,
         resolution: DisputeResolution,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         require_not_paused(&env)?;
 
         let mut job: Job = env
@@ -1432,6 +1453,7 @@ impl EscrowContract {
         milestone_id: u32,
         freelancer: Address,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         freelancer.require_auth();
         require_not_paused(&env)?;
 
@@ -1504,6 +1526,7 @@ impl EscrowContract {
         milestone_id: u32,
         client: Address,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         client.require_auth();
         require_not_paused(&env)?;
 
@@ -1625,6 +1648,7 @@ impl EscrowContract {
         milestone_indices: Vec<u32>,
         client: Address,
     ) -> Result<i128, EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         client.require_auth();
         require_not_paused(&env)?;
 
@@ -1763,6 +1787,7 @@ impl EscrowContract {
         milestone_id: u32,
         caller: Address,
     ) -> Result<u64, EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         caller.require_auth();
         require_not_paused(&env)?;
 
@@ -1822,6 +1847,7 @@ impl EscrowContract {
         milestone_id: u32,
         caller: Address,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         caller.require_auth();
         require_not_paused(&env)?;
 
@@ -1957,6 +1983,7 @@ impl EscrowContract {
         amount: i128,
         client: Address,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         client.require_auth();
         require_not_paused(&env)?;
 
@@ -2084,6 +2111,7 @@ impl EscrowContract {
         milestone_index: u32,
         client: Address,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         client.require_auth();
         require_not_paused(&env)?;
 
@@ -2207,6 +2235,7 @@ impl EscrowContract {
     /// * `WorkInProgress`    — at least one milestone is `InProgress` or `Submitted`;
     ///                         the client must open a dispute instead.
     pub fn cancel_job(env: Env, job_id: u64, client: Address) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         client.require_auth();
         require_not_paused(&env)?;
 
@@ -2266,6 +2295,7 @@ impl EscrowContract {
     /// Only the client can call this. Refund excludes amounts for already-approved milestones.
     /// Fails if the freelancer has a pending (submitted) milestone awaiting approval.
     pub fn claim_refund(env: Env, job_id: u64, client: Address) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         client.require_auth();
         require_not_paused(&env)?;
 
@@ -2349,6 +2379,7 @@ impl EscrowContract {
         job_id: u64,
         amount: i128,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         caller.require_auth();
         require_not_paused(&env)?;
 
@@ -2462,6 +2493,7 @@ impl EscrowContract {
         job_id: u64,
         new_milestones: Vec<Milestone>,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         require_not_paused(&env)?;
 
         caller.require_auth();
@@ -2585,6 +2617,7 @@ impl EscrowContract {
     /// * `NotAuthorizedForProposalAction` — if caller is the proposer or not a party
     /// * `InsufficientTopUp` — if new_total > old_total and top-up transfer fails
     pub fn accept_revision(env: Env, caller: Address, job_id: u64) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         require_not_paused(&env)?;
 
         caller.require_auth();
@@ -2722,6 +2755,7 @@ impl EscrowContract {
     /// * `ProposalNotPending` — if the proposal is not Pending
     /// * `NotAuthorizedForProposalAction` — if caller is the proposer or not a party
     pub fn reject_revision(env: Env, caller: Address, job_id: u64) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         require_not_paused(&env)?;
 
         caller.require_auth();
@@ -2796,6 +2830,7 @@ impl EscrowContract {
         caller: Address,
         job_id: u64,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         caller.require_auth();
 
         // 1. Load job
@@ -2853,6 +2888,7 @@ impl EscrowContract {
         caller: Address,
         job_id: u64,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         caller.require_auth();
 
         // Validate job exists.
@@ -2955,6 +2991,7 @@ impl EscrowContract {
     /// * `DeadlineNotPassed` — `env.ledger().timestamp() <= job.job_deadline`.
     /// * `InvalidStatus`     — job is already `Completed`, `Cancelled`, or `Expired`.
     pub fn expire_job(env: Env, job_id: u64) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         require_not_paused(&env)?;
 
         let mut job: Job = env
@@ -3004,6 +3041,7 @@ impl EscrowContract {
 
     /// Get job details by ID.
     pub fn get_job(env: Env, job_id: u64) -> Result<Job, EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         let job: Job = env
             .storage()
             .persistent()
@@ -3026,6 +3064,7 @@ impl EscrowContract {
 
     /// Check if a milestone is overdue.
     pub fn is_milestone_overdue(env: Env, job_id: u64, milestone_id: u32) -> bool {
+        bump_escrow_ttl(&env, job_id);
         if let Some(job) = env
             .storage()
             .persistent()
@@ -3045,6 +3084,7 @@ impl EscrowContract {
         milestone_id: u32,
         new_deadline: u64,
     ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
         require_not_paused(&env)?;
 
         let mut job: Job = env
@@ -3115,6 +3155,39 @@ impl EscrowContract {
         // Extend TTL for the escrow storage key
         bump_job_ttl(&env, escrow_id);
 
+        Ok(())
+    }
+
+    /// Extend the TTL of an active escrow.
+    /// Returns JobNotFound if the job is not found or archived.
+    pub fn extend_escrow_ttl(env: Env, job_id: u64) -> Result<(), EscrowError> {
+        let key = DataKey::Job(job_id);
+        if !env.storage().persistent().has(&key) {
+            return Err(EscrowError::JobNotFound);
+        }
+        bump_escrow_ttl(&env, job_id);
+
+        let new_expiry_ledger = env.ledger().sequence() + ESCROW_TTL_LEDGERS;
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("ttl_ext")),
+            TtlExtendedEvent {
+                job_id,
+                new_expiry_ledger,
+            },
+        );
+        Ok(())
+    }
+
+    /// Restore an archived escrow entry.
+    /// Bumps the TTL to keep the escrow active.
+    pub fn restore_escrow(env: Env, job_id: u64) -> Result<(), EscrowError> {
+        let key = DataKey::Job(job_id);
+
+        if !env.storage().persistent().has(&key) {
+            return Err(EscrowError::JobNotFound);
+        }
+
+        bump_escrow_ttl(&env, job_id);
         Ok(())
     }
 }

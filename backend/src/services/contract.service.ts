@@ -794,4 +794,74 @@ export class ContractService {
       });
     });
   }
+
+  /**
+   * Fetches current ledger, expiry ledger, and days remaining for an escrow.
+   */
+  static async getEscrowTtl(onChainJobId: string): Promise<{
+    currentLedger: number;
+    expiryLedger: number;
+    daysRemaining: number;
+  } | null> {
+    try {
+      const server = getRpcServer();
+      const keyScVal = xdr.ScVal.scvVec([
+        xdr.ScVal.scvSymbol("Job"),
+        xdr.ScVal.scvU64(new xdr.Uint64(BigInt(onChainJobId)))
+      ]);
+      
+      const ledgerKey = xdr.LedgerKey.contractData(
+        new xdr.LedgerKeyContractData({
+          contract: Address.fromString(contractId).toScAddress(),
+          key: keyScVal,
+          durability: xdr.ContractDataDurability.persistent(),
+        })
+      );
+
+      const response = await server.getLedgerEntries(ledgerKey);
+      if (!response.entries || response.entries.length === 0) {
+        return null;
+      }
+      
+      const entry = response.entries[0];
+      const currentLedger = response.latestLedger;
+      const expiryLedger = entry.liveUntilLedgerSeq ?? 0;
+      
+      const ledgersRemaining = Math.max(0, expiryLedger - currentLedger);
+      const daysRemaining = (ledgersRemaining * 5) / (24 * 60 * 60);
+      
+      return {
+        currentLedger,
+        expiryLedger,
+        daysRemaining: Number(daysRemaining.toFixed(2)),
+      };
+    } catch (error) {
+      logger.error({ err: error, onChainJobId }, "Error fetching escrow TTL");
+      return null;
+    }
+  }
+
+  /**
+   * Builds an unsigned transaction XDR to extend escrow TTL.
+   */
+  static async buildExtendEscrowTtlTx(callerPublicKey: string, onChainJobId: string): Promise<string> {
+    const server = getRpcServer();
+    const contract = new Contract(contractId);
+    const account = await server.getAccount(callerPublicKey);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "extend_escrow_ttl",
+          nativeToScVal(BigInt(onChainJobId)),
+        ),
+      )
+      .setTimeout(0)
+      .build();
+
+    return tx.toXDR();
+  }
 }
