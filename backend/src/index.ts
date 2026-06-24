@@ -12,6 +12,8 @@ import { errorHandler } from "./middleware/error";
 import { requestIdMiddleware } from "./middleware/request-id";
 import { initSocket } from "./socket";
 import { startExpiryJob } from "./jobs/expiry.job";
+import { startPendingTxJob } from "./jobs/pending-tx.job";
+import { startEscrowTtlJob } from "./jobs/escrow-ttl.job";
 import {
   startHorizonListener,
   stopHorizonListener,
@@ -20,6 +22,12 @@ import { installRequestIdConsolePatch, logger } from "./lib/logger";
 import { getHealthStatus } from "./lib/health";
 import { RecommendationQueueService } from "./services/recommendation-queue.service";
 import { initializeVirusScanner } from "./utils/virusScanner";
+import { ReputationCacheService } from "./services/reputation-cache.service";
+import { createBullBoard } from "@bull-board/api";
+import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
+import { ExpressAdapter } from "@bull-board/express";
+import { notificationQueue, stopNotificationWorker } from "./lib/notification-queue";
+import { requireAdmin } from "./middleware/auth";
 
 const app = express();
 import { swaggerUi, swaggerSpec } from "./config/swagger";
@@ -80,6 +88,15 @@ app.get("/health/db", async (_req, res) => {
   }
 });
 
+// Bull Board — queue dashboard (admin-gated)
+const bullBoardAdapter = new ExpressAdapter();
+bullBoardAdapter.setBasePath("/admin/queues");
+createBullBoard({
+  queues: [new BullMQAdapter(notificationQueue)],
+  serverAdapter: bullBoardAdapter,
+});
+app.use("/admin/queues", requireAdmin, bullBoardAdapter.getRouter());
+
 // Rate limiting (route-specific auth limiters are applied in auth router)
 
 // Write rate limiting (applied before routes for POST mutations)
@@ -105,11 +122,18 @@ function startServer(): void {
   httpServer.listen(config.port, async () => {
     logger.info({ port: config.port }, "StellarMarket API running");
     startExpiryJob();
+    startPendingTxJob();
+    startEscrowTtlJob();
     startHorizonListener();
     RecommendationQueueService.startWorker();
 
     // Initialize virus scanner (non-blocking)
     await initializeVirusScanner();
+
+    // Warm reputation cache and start periodic refresh
+    logger.info("Initializing reputation cache...");
+    await ReputationCacheService.warmCache();
+    ReputationCacheService.startPeriodicRefresh();
   });
 }
 
@@ -118,6 +142,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   stopHorizonListener();
   RecommendationQueueService.stopWorker();
+  ReputationCacheService.stopPeriodicRefresh();
+  await stopNotificationWorker();
 
   const { NotificationService } =
     await import("./services/notification.service");

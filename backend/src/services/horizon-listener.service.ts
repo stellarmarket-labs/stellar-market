@@ -6,6 +6,7 @@ import { logger } from "../lib/logger";
 import { CircuitBreaker } from "../lib/circuit-breaker";
 import type { CircuitBreakerStatus } from "../lib/circuit-breaker";
 import { handleEscrowEvent } from "./escrow-projection.service";
+import { ReputationCacheService } from "./reputation-cache.service";
 
 export type { CircuitBreakerStatus };
 export type { CircuitState } from "../lib/circuit-breaker";
@@ -224,7 +225,16 @@ async function handleDisputeResolved(event: SorobanEvent): Promise<void> {
 
   const dispute = await prisma.dispute.findUnique({
     where: { onChainDisputeId },
-    select: { jobId: true, job: { select: { contractJobId: true } } },
+    select: { 
+      jobId: true, 
+      job: { 
+        select: { 
+          contractJobId: true,
+          client: { select: { walletAddress: true } },
+          freelancer: { select: { walletAddress: true } },
+        } 
+      } 
+    },
   });
 
   if (!dispute) {
@@ -241,7 +251,18 @@ async function handleDisputeResolved(event: SorobanEvent): Promise<void> {
     payload: { onChainDisputeId, rawStatus },
   });
 
-  logger.info({ onChainDisputeId, rawStatus }, "[HorizonListener] DisputeResolved");
+  // Invalidate reputation cache for both client and freelancer (dispute affects reputation)
+  if (dispute.job.client?.walletAddress) {
+    await ReputationCacheService.invalidateCache(dispute.job.client.walletAddress);
+  }
+  if (dispute.job.freelancer?.walletAddress) {
+    await ReputationCacheService.invalidateCache(dispute.job.freelancer.walletAddress);
+  }
+
+  logger.info(
+    { onChainDisputeId, rawStatus }, 
+    "[HorizonListener] DisputeResolved - caches invalidated"
+  );
 }
 
 /**
@@ -287,13 +308,29 @@ async function handleBadgeAwarded(event: SorobanEvent): Promise<void> {
     });
   }
 
-  logger.info({ walletAddress, tier }, "[HorizonListener] BadgeAwarded");
+  // Invalidate reputation cache for this user
+  await ReputationCacheService.invalidateCache(walletAddress);
+  logger.info({ walletAddress, tier }, "[HorizonListener] BadgeAwarded - cache invalidated");
 }
 
 // ─── event dispatch ───────────────────────────────────────────────────────────
 
+async function resolvePreRegisteredTx(txHash: string, ledger: number): Promise<void> {
+  try {
+    await prisma.transaction.updateMany({
+      where: { txHash, status: "PENDING" },
+      data: { status: "SUCCESS", confirmedLedger: ledger },
+    });
+  } catch (err) {
+    logger.warn({ err, txHash }, "[HorizonListener] Failed to resolve pre-registered tx");
+  }
+}
+
 async function processEvent(event: SorobanEvent): Promise<void> {
   const [contract, name] = topicToStrings(event);
+
+  // Promote any PENDING pre-registration for this txHash to SUCCESS immediately.
+  await resolvePreRegisteredTx(event.txHash, event.ledger);
 
   try {
     if (contract === "escrow") {

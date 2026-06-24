@@ -1,6 +1,7 @@
 import { Router, Response } from "express";
 import { PrismaClient, UserRole, DisputeStatus } from "@prisma/client";
 import { AuthRequest, requireAdmin } from "../middleware/auth";
+import { getDlqJobs } from "../lib/notification-queue";
 import {
     flagJobSchema,
     suspendUserSchema,
@@ -15,6 +16,7 @@ import { logAdminAction } from "../utils/auditLogger";
 import { NotificationService } from "../services/notification.service";
 import { validate } from "../middleware/validation";
 import { projectJobState } from "../services/escrow-projection.service";
+import { ReputationCacheService } from "../services/reputation-cache.service";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -1186,6 +1188,93 @@ router.post(
       });
     } catch (error) {
       console.error("Error reprojecting job state:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
+/**
+ * POST /api/admin/reputation-cache/invalidate/:walletAddress
+ * Manually invalidate reputation cache for a specific wallet address
+ */
+router.post(
+  "/reputation-cache/invalidate/:walletAddress",
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { walletAddress } = req.params;
+
+      if (!walletAddress || Array.isArray(walletAddress)) {
+        res.status(400).json({ error: "Invalid wallet address" });
+        return;
+      }
+
+      await ReputationCacheService.invalidateCache(walletAddress);
+
+      await logAdminAction(
+        req.userId!,
+        "CACHE_INVALIDATE",
+        walletAddress,
+        { walletAddress }
+      );
+
+      res.json({
+        message: "Reputation cache invalidated successfully",
+        walletAddress,
+      });
+    } catch (error) {
+      console.error("Error invalidating reputation cache:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/reputation-cache/stats
+ * Get reputation cache statistics
+ */
+router.get(
+  "/reputation-cache/stats",
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const stats = await ReputationCacheService.getCacheStats();
+
+      res.json({
+        stats: {
+          cachedEntries: stats.cachedEntries,
+          isWarmedUp: stats.isWarmedUp,
+          circuitBreakerStatus: stats.circuitBreakerStatus,
+          hitRate: stats.hitRate,
+        },
+      });
+    } catch (error) {
+      console.error("Error getting reputation cache stats:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/notifications/dlq
+ * Returns failed notification jobs (dead-letter queue) for manual inspection.
+ */
+router.get(
+  "/notifications/dlq",
+  async (_req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const jobs = await getDlqJobs();
+      res.json({
+        total: jobs.length,
+        jobs: jobs.map((j) => ({
+          id: j.id,
+          data: j.data,
+          failedReason: j.failedReason,
+          attemptsMade: j.attemptsMade,
+          timestamp: j.timestamp,
+          finishedOn: j.finishedOn,
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching DLQ jobs:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   },
