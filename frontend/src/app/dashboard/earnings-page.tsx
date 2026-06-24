@@ -30,6 +30,18 @@ import { useAuth } from "@/context/AuthContext";
 import { buildSeries, type WeeklyEarning } from "./earnings/earnings-utils";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
+const NARROW_CHART_MEDIA_QUERY = "(max-width: 374px)";
+
+function getEarningsChartLayout(isNarrowChart: boolean) {
+  return {
+    marginLeft: isNarrowChart ? -18 : 0,
+    xAxisMinTickGap: isNarrowChart ? 18 : 8,
+    tickFontSize: isNarrowChart ? 10 : 12,
+    yAxisWidth: isNarrowChart ? 44 : 60,
+    showLegend: !isNarrowChart,
+    barSize: isNarrowChart ? 12 : 24,
+  };
+}
 
 interface EarningsSummary {
   totalEarned: number;
@@ -146,6 +158,7 @@ const EarningsPage = () => {
   const [reconciling, setReconciling] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isNarrowChart, setIsNarrowChart] = useState(false);
 
   const range = useMemo(() => resolveRange(preset), [preset]);
 
@@ -210,6 +223,16 @@ const EarningsPage = () => {
     fetchReconciliation();
   }, [fetchReconciliation]);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(NARROW_CHART_MEDIA_QUERY);
+    const syncNarrowChart = () => setIsNarrowChart(mediaQuery.matches);
+
+    syncNarrowChart();
+    mediaQuery.addEventListener("change", syncNarrowChart);
+
+    return () => mediaQuery.removeEventListener("change", syncNarrowChart);
+  }, []);
+
   // Reset to page 1 whenever the range changes.
   useEffect(() => {
     setCurrentPage(1);
@@ -244,6 +267,7 @@ const EarningsPage = () => {
       })),
     [weeklyEarnings]
   );
+  const chartLayout = getEarningsChartLayout(isNarrowChart);
 
   const handleExportCSV = async () => {
     setExporting(true);
@@ -390,40 +414,55 @@ const EarningsPage = () => {
           <h2 className="text-theme-heading text-lg font-semibold mb-4">
             Earnings Over Time
           </h2>
-          <div className="overflow-x-auto -mx-4 sm:mx-0">
-            <div className="min-w-[500px] px-4 sm:px-0">
-              <ResponsiveContainer width="100%" height={300}>
-                <ComposedChart data={series}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="label" />
-                  <YAxis />
-                  <Tooltip
-                    formatter={(value) => formatCurrency(Number(value))}
-                    contentStyle={{
-                      backgroundColor: "#1e293b",
-                      border: "1px solid #475569",
-                      borderRadius: "8px",
-                      color: "#f1f5f9",
-                    }}
-                  />
-                  <Legend />
-                  <Bar
-                    dataKey="earnings"
-                    name="Weekly earnings"
-                    fill="#10b981"
-                    radius={[4, 4, 0, 0]}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="movingAvg"
-                    name="30-day moving avg"
-                    stroke="#6366f1"
-                    strokeWidth={2}
-                    dot={false}
-                  />
+          <div data-testid="earnings-chart-container" className="w-full min-w-0">
+            <ResponsiveContainer width="100%" height={300}>
+              <ComposedChart
+                data={series}
+                margin={{
+                  top: 8,
+                  right: 12,
+                  bottom: 8,
+                  left: chartLayout.marginLeft,
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="label"
+                  interval="preserveStartEnd"
+                  minTickGap={chartLayout.xAxisMinTickGap}
+                  tick={{ fontSize: chartLayout.tickFontSize }}
+                />
+                <YAxis
+                  width={chartLayout.yAxisWidth}
+                  tick={{ fontSize: chartLayout.tickFontSize }}
+                />
+                <Tooltip
+                  formatter={(value) => formatCurrency(Number(value))}
+                  contentStyle={{
+                    backgroundColor: "#1e293b",
+                    border: "1px solid #475569",
+                    borderRadius: "8px",
+                    color: "#f1f5f9",
+                  }}
+                />
+                {chartLayout.showLegend && <Legend />}
+                <Bar
+                  dataKey="earnings"
+                  name="Weekly earnings"
+                  fill="#10b981"
+                  barSize={chartLayout.barSize}
+                  radius={[4, 4, 0, 0]}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="movingAvg"
+                  name="30-day moving avg"
+                  stroke="#6366f1"
+                  strokeWidth={2}
+                  dot={false}
+                />
                 </ComposedChart>
               </ResponsiveContainer>
-            </div>
           </div>
         </div>
       )}
@@ -722,4 +761,4 @@ const StatCard = ({ label, value, icon, color }: StatCardProps) => {
 };
 
 export default EarningsPage;
-export { EarningsPage };
+export { EarningsPage, NARROW_CHART_MEDIA_QUERY, getEarningsChartLayout };
