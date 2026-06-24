@@ -866,6 +866,10 @@ router.patch(
     await invalidateCacheKey(generateJobCacheKey(id));
     void RecommendationQueueService.enqueueRebuild(id);
 
+    const { getIo } = await import("../socket");
+    const io = getIo();
+    io.emit("job:updated", { id, status });
+
     res.json(updated);
   }),
 );
