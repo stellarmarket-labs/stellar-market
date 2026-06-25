@@ -1,12 +1,14 @@
 import { Router, Request, Response } from "express";
-import { DisputeStatus, UserRole } from "@prisma/client";
-import multer from "multer";
-import path from "path";
+import { DisputeStatus, UserRole, PrismaClient } from "@prisma/client";
+import crypto from "crypto";
 import fs from "fs";
+import path from "path";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { asyncHandler } from "../middleware/error";
 import { validate } from "../middleware/validation";
 import { DisputeService } from "../services/dispute.service";
+import { upload, UPLOAD_DIR } from "../config/upload";
+import { formatFileSize } from "../utils/fileValidation";
 import {
   confirmDisputeTransactionSchema,
   createDisputeSchema,
@@ -17,30 +19,9 @@ import {
   resolveDisputeSchema,
   webhookPayloadSchema,
 } from "../schemas/dispute";
-import { UPLOAD_DIR } from "../config/upload";
-
-const evidenceUploadDir = path.join(UPLOAD_DIR, "dispute-evidence");
-if (!fs.existsSync(evidenceUploadDir)) {
-  fs.mkdirSync(evidenceUploadDir, { recursive: true });
-}
-
-const evidenceStorage = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, evidenceUploadDir),
-    filename: (_req, file, cb) => {
-      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      cb(null, `${unique}-${file.originalname}`);
-    },
-  }),
-  limits: { fileSize: 10 * 1024 * 1024 },
-});
 
 const router = Router();
-
-const evidenceUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
-});
+const prisma = new PrismaClient();
 
 /**
  * GET /api/disputes/history
@@ -100,7 +81,6 @@ router.get(
       };
     });
 
-    // Community listing returns array for frontend compatibility
     res.json(disputes);
   }),
 );
@@ -226,7 +206,6 @@ router.post(
       return res.status(404).json({ error: "Dispute not found." });
     }
 
-    // Conflict-of-interest check: Job participants cannot vote
     if (
       dispute.job.clientId === req.userId ||
       dispute.job.freelancerId === req.userId
@@ -303,13 +282,13 @@ router.post(
 
 /**
  * POST /api/disputes/:id/evidence
- * Upload evidence files for a dispute, hash them, and build Merkle tree
+ * Upload evidence files for a dispute, hash them, and build Merkle tree.
  */
 router.post(
   "/:id/evidence",
   authenticate,
   validate({ params: disputeIdParamSchema }),
-  evidenceStorage.array("files", 5),
+  upload.array("files", 5),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const files = (req.files as Express.Multer.File[]) || [];
     if (files.length === 0) {
@@ -337,7 +316,7 @@ router.post(
 
 /**
  * GET /api/disputes/:id/evidence
- * Get all evidence records for a dispute
+ * Get all Merkle evidence records for a dispute.
  */
 router.get(
   "/:id/evidence",
@@ -353,7 +332,7 @@ router.get(
 
 /**
  * GET /api/disputes/:id/evidence/:evidenceId/proof
- * Get Merkle proof data for a specific evidence file
+ * Get Merkle proof data for a specific evidence file.
  */
 router.get(
   "/:id/evidence/:evidenceId/proof",
@@ -365,6 +344,58 @@ router.get(
       req.params.evidenceId as string,
     );
     res.json(result);
+  }),
+);
+
+/**
+ * GET /api/disputes/:id/attachments/:evidenceId/verify
+ * Re-compute SHA-256 of legacy attachment evidence and check integrity.
+ */
+router.get(
+  "/:id/attachments/:evidenceId/verify",
+  authenticate,
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const attachment = await prisma.attachment.findFirst({
+      where: {
+        id: req.params.evidenceId as string,
+        disputeId: req.params.id as string,
+      },
+    });
+
+    if (!attachment) {
+      return res.status(404).json({ error: "Evidence not found" });
+    }
+
+    if (!attachment.sha256) {
+      return res.status(400).json({
+        error: "No integrity hash recorded for this evidence",
+      });
+    }
+
+    const filePath = path.join(UPLOAD_DIR, attachment.filename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "File not found on server" });
+    }
+
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(filePath);
+
+    await new Promise<void>((resolve, reject) => {
+      stream.on("data", (chunk) => hash.update(chunk));
+      stream.on("end", resolve);
+      stream.on("error", reject);
+    });
+
+    const computedHash = hash.digest("hex");
+    const intact = computedHash === attachment.sha256;
+
+    res.json({
+      intact,
+      storedHash: attachment.sha256,
+      computedHash,
+      anchorTxHash: attachment.anchorTxHash,
+      fileName: attachment.originalName,
+    });
   }),
 );
 

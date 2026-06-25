@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Scale, Loader2 } from "lucide-react";
+import { Loader2, Scale } from "lucide-react";
 import type { Dispute } from "@/types";
 import EvidenceVerifier from "./EvidenceVerifier";
 
@@ -56,7 +56,6 @@ export default function ArbitratorVoteView({
     }
   };
 
-  // Read-only panel for non-arbitrators
   if (!isArbitrator) {
     return (
       <div className="card space-y-4">
@@ -89,7 +88,6 @@ export default function ArbitratorVoteView({
     );
   }
 
-  // Full arbitrator panel
   return (
     <div className="card space-y-5">
       <div className="flex items-center gap-2">
@@ -97,24 +95,24 @@ export default function ArbitratorVoteView({
         <h3 className="font-semibold text-theme-heading">Arbitrator Panel</h3>
       </div>
 
-      {/* Evidence verifier */}
       {dispute.evidence && dispute.evidence.length > 0 && (
         <EvidenceVerifier
           disputeId={dispute.id}
           evidence={dispute.evidence.map((item) => ({
             id: item.id,
-            fileUrl: item.fileUrl,
-            fileHash: item.fileHash,
-            leafIndex: item.leafIndex,
-            merkleProof: item.merkleProof,
+            fileUrl: item.fileUrl ?? item.url ?? "#",
+            fileHash: item.fileHash ?? item.sha256 ?? "",
+            leafIndex: item.leafIndex ?? 0,
+            merkleProof: item.merkleProof ?? [],
             fileName: item.fileName,
             fileType: item.fileType,
+            sha256: item.sha256,
+            anchorTxHash: item.anchorTxHash,
           }))}
           onChainRoot={dispute.evidenceMerkleRoot}
         />
       )}
 
-      {/* Dispute reason */}
       <div>
         <p className="text-xs font-medium text-theme-text-muted uppercase tracking-wider mb-1">
           Dispute Reason
@@ -122,7 +120,6 @@ export default function ArbitratorVoteView({
         <p className="text-sm text-theme-text">{dispute.reason}</p>
       </div>
 
-      {/* Vote options */}
       <div>
         <p className="text-xs font-medium text-theme-text-muted uppercase tracking-wider mb-2">
           Your Vote
@@ -158,7 +155,6 @@ export default function ArbitratorVoteView({
         </div>
       </div>
 
-      {/* Split sliders — shown only when SPLIT is selected */}
       {choice === "SPLIT" && (
         <div className="space-y-3 p-3 bg-theme-card border border-theme-border rounded-lg">
           <p className="text-xs font-medium text-theme-text-muted uppercase tracking-wider">
@@ -216,7 +212,7 @@ export default function ArbitratorVoteView({
         {submitting ? (
           <>
             <Loader2 size={16} className="animate-spin" />
-            Submitting Vote…
+            Submitting Vote...
           </>
         ) : (
           "Submit Vote"

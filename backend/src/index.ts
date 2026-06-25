@@ -12,6 +12,7 @@ import { errorHandler } from "./middleware/error";
 import { requestIdMiddleware } from "./middleware/request-id";
 import { initSocket } from "./socket";
 import { startExpiryJob } from "./jobs/expiry.job";
+import { startPendingTxJob } from "./jobs/pending-tx.job";
 import {
   startHorizonListener,
   stopHorizonListener,
@@ -20,6 +21,7 @@ import { installRequestIdConsolePatch, logger } from "./lib/logger";
 import { getHealthStatus } from "./lib/health";
 import { RecommendationQueueService } from "./services/recommendation-queue.service";
 import { initializeVirusScanner } from "./utils/virusScanner";
+import { ReputationCacheService } from "./services/reputation-cache.service";
 
 const app = express();
 import { swaggerUi, swaggerSpec } from "./config/swagger";
@@ -105,11 +107,17 @@ function startServer(): void {
   httpServer.listen(config.port, async () => {
     logger.info({ port: config.port }, "StellarMarket API running");
     startExpiryJob();
+    startPendingTxJob();
     startHorizonListener();
     RecommendationQueueService.startWorker();
 
     // Initialize virus scanner (non-blocking)
     await initializeVirusScanner();
+
+    // Warm reputation cache and start periodic refresh
+    logger.info("Initializing reputation cache...");
+    await ReputationCacheService.warmCache();
+    ReputationCacheService.startPeriodicRefresh();
   });
 }
 
@@ -118,6 +126,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   stopHorizonListener();
   RecommendationQueueService.stopWorker();
+  ReputationCacheService.stopPeriodicRefresh();
 
   const { NotificationService } =
     await import("./services/notification.service");

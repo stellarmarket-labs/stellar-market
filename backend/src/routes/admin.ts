@@ -14,6 +14,8 @@ import { z, ZodError } from "zod";
 import { logAdminAction } from "../utils/auditLogger";
 import { NotificationService } from "../services/notification.service";
 import { validate } from "../middleware/validation";
+import { projectJobState } from "../services/escrow-projection.service";
+import { ReputationCacheService } from "../services/reputation-cache.service";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -1125,6 +1127,129 @@ router.patch(
       res.status(500).json({ error: "Internal server error" });
     }
   },
+);
+
+/**
+ * GET /api/admin/jobs/:id/event-log
+ * Retrieve the full event log for a job
+ */
+router.get(
+  "/jobs/:id/event-log",
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const id = req.params.id as string;
+      const job = await prisma.job.findUnique({ where: { id } });
+      if (!job) {
+        res.status(404).json({ error: "Job not found" });
+        return;
+      }
+      const events = await prisma.escrowEvent.findMany({
+        where: { jobId: id },
+        orderBy: { ledgerSeq: "asc" },
+      });
+      res.json({ events });
+    } catch (error) {
+      console.error("Error fetching event log:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
+/**
+ * POST /api/admin/jobs/:id/reproject
+ * Reproject all events for a job and materialize the result
+ */
+router.post(
+  "/jobs/:id/reproject",
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const id = req.params.id as string;
+      const job = await prisma.job.findUnique({ where: { id } });
+      if (!job) {
+        res.status(404).json({ error: "Job not found" });
+        return;
+      }
+
+      const nextState = await projectJobState(id);
+      const updatedJob = await prisma.job.update({
+        where: { id },
+        data: nextState,
+      });
+
+      await logAdminAction(req.userId!, "REPROJECT_JOB_STATE", id, {
+        previousState: { status: job.status, escrowStatus: job.escrowStatus },
+        nextState,
+      });
+
+      res.json({
+        message: "Job state reprojected successfully",
+        job: updatedJob,
+      });
+    } catch (error) {
+      console.error("Error reprojecting job state:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
+/**
+ * POST /api/admin/reputation-cache/invalidate/:walletAddress
+ * Manually invalidate reputation cache for a specific wallet address
+ */
+router.post(
+  "/reputation-cache/invalidate/:walletAddress",
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { walletAddress } = req.params;
+
+      if (!walletAddress || Array.isArray(walletAddress)) {
+        res.status(400).json({ error: "Invalid wallet address" });
+        return;
+      }
+
+      await ReputationCacheService.invalidateCache(walletAddress);
+
+      await logAdminAction(
+        req.userId!,
+        "CACHE_INVALIDATE",
+        walletAddress,
+        { walletAddress }
+      );
+
+      res.json({
+        message: "Reputation cache invalidated successfully",
+        walletAddress,
+      });
+    } catch (error) {
+      console.error("Error invalidating reputation cache:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/reputation-cache/stats
+ * Get reputation cache statistics
+ */
+router.get(
+  "/reputation-cache/stats",
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const stats = await ReputationCacheService.getCacheStats();
+
+      res.json({
+        stats: {
+          cachedEntries: stats.cachedEntries,
+          isWarmedUp: stats.isWarmedUp,
+          circuitBreakerStatus: stats.circuitBreakerStatus,
+          hitRate: stats.hitRate,
+        },
+      });
+    } catch (error) {
+      console.error("Error getting reputation cache stats:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
 );
 
 export default router;
