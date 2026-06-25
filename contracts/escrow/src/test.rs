@@ -4824,3 +4824,111 @@ fn test_oracle_too_few_samples_unavailable() {
     let res = escrow.try_fund_job(&job_id, &client_addr, &100, &200);
     assert_eq!(res, Err(Ok(EscrowError::OracleUnavailable)));
 }
+
+#[test]
+fn test_escrow_ttl_flow_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000;
+        l.sequence_number = 1;
+    });
+
+    let (contract, client, freelancer, token, _admin) = setup_test(&env);
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+
+    // Extend TTL permissionlessly (should succeed because the job is active).
+    contract.extend_escrow_ttl(&job_id);
+
+    // Verify event is emitted.
+    let events = env.events().all();
+    let last_event = events.last().unwrap();
+    let topic0: Symbol = last_event.1.get(0).unwrap().into_val(&env);
+    let topic1: Symbol = last_event.1.get(1).unwrap().into_val(&env);
+    assert_eq!(topic0, symbol_short!("escrow"));
+    assert_eq!(topic1, symbol_short!("ttl_ext"));
+}
+
+#[test]
+#[should_panic]
+fn test_escrow_ttl_flow_archived_get_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000;
+        l.sequence_number = 1;
+    });
+
+    let (contract, client, freelancer, token, _admin) = setup_test(&env);
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+
+    // Advance sequence beyond ESCROW_TTL_LEDGERS.
+    env.ledger().with_mut(|l| {
+        l.sequence_number = 535002;
+    });
+
+    // This should panic because the job is archived.
+    let _job = contract.get_job(&job_id);
+}
+
+#[test]
+#[should_panic]
+fn test_escrow_ttl_flow_archived_extend_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000;
+        l.sequence_number = 1;
+    });
+
+    let (contract, client, freelancer, token, _admin) = setup_test(&env);
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+
+    // Advance sequence beyond ESCROW_TTL_LEDGERS.
+    env.ledger().with_mut(|l| {
+        l.sequence_number = 535002;
+    });
+
+    // This should panic because the job is archived.
+    contract.extend_escrow_ttl(&job_id);
+}
+
+#[test]
+fn test_escrow_ttl_flow_restore() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000;
+        l.sequence_number = 1;
+    });
+
+    let (contract, client, freelancer, token, _admin) = setup_test(&env);
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+
+    // Advance sequence beyond ESCROW_TTL_LEDGERS.
+    env.ledger().with_mut(|l| {
+        l.sequence_number = 535002;
+    });
+
+    // Simulate host-level RestoreFootprint by extending TTL before execution.
+    let key = crate::DataKey::Job(job_id);
+    env.ledger().with_mut(|l| {
+        l.sequence_number = 1;
+    });
+    env.as_contract(&contract.address, || {
+        env.storage().persistent().extend_ttl(&key, 600000, 600000);
+    });
+    env.ledger().with_mut(|l| {
+        l.sequence_number = 535002;
+    });
+
+    // Call restore_escrow which should succeed and bump the TTL.
+    contract.restore_escrow(&job_id);
+
+    // Verify the entry is readable.
+    let _job_after = contract.get_job(&job_id);
+}

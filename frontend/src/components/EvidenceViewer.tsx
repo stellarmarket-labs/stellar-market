@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   FileText,
   ExternalLink,
+  Download,
   Shield,
   ShieldAlert,
   ShieldCheck,
@@ -37,6 +38,27 @@ export default function EvidenceViewer({
   const [verifications, setVerifications] = useState<
     Record<string, VerificationState>
   >({});
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLUListElement>) => {
+    const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>('button[role="option"]');
+    if (!buttons || buttons.length === 0) return;
+
+    const activeEl = document.activeElement;
+    let currentIndex = Array.from(buttons).indexOf(activeEl as HTMLButtonElement);
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const nextIndex = (currentIndex + 1) % buttons.length;
+      buttons[nextIndex].focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const prevIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+      buttons[prevIndex].focus();
+    }
+  };
 
   const fetchEvidence = useCallback(async () => {
     try {
@@ -90,6 +112,28 @@ export default function EvidenceViewer({
     [disputeId],
   );
 
+  const downloadItem = useCallback(async (item: DisputeEvidence) => {
+    setDownloadingId(item.id);
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.get(
+        `${API_URL}/disputes/${disputeId}/evidence/${item.id}/download`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: "blob",
+        },
+      );
+      const url = URL.createObjectURL(response.data);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = item.fileName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingId(null);
+    }
+  }, [disputeId]);
+
   if (loading) {
     return (
       <div className="card">
@@ -127,36 +171,58 @@ export default function EvidenceViewer({
         </span>
       </div>
 
-      <ul className="space-y-3">
-        {evidence.map((item) => {
+      <ul
+        ref={listRef}
+        onKeyDown={handleKeyDown}
+        className="space-y-3"
+        role="listbox"
+        aria-label="Submitted evidence documents"
+      >
+        {evidence.map((item, index) => {
           const v = verifications[item.id];
+          const isSelected = selectedId === item.id;
           return (
             <li
               key={item.id}
-              className="bg-theme-card border border-theme-border rounded-lg p-3 space-y-2"
+              className={`bg-theme-card border rounded-lg p-3 space-y-2 transition-all ${
+                isSelected
+                  ? "border-stellar-blue ring-2 ring-stellar-blue/20"
+                  : "border-theme-border"
+              }`}
             >
               <div className="flex items-center justify-between">
-                <div className="min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(item.id)}
+                  className="min-w-0 text-left font-normal focus:outline-none focus-visible:ring-2 focus-visible:ring-stellar-blue rounded p-1"
+                  role="option"
+                  aria-selected={isSelected}
+                  tabIndex={selectedId === item.id || (selectedId === null && index === 0) ? 0 : -1}
+                >
                   <p className="text-sm font-medium text-theme-heading truncate max-w-[220px]">
                     {item.fileName}
                   </p>
-                  <p className="text-[10px] text-theme-text-muted">
-                    {item.fileType}
-                    {item.sizeFormatted && ` · ${item.sizeFormatted}`}
-                  </p>
-                </div>
-                {item.url && (
-                  <a
-                    href={`${API_URL.replace("/api", "")}${item.url}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-xs text-stellar-blue hover:underline flex-shrink-0 ml-3"
+                  <div className="mt-1 flex items-center gap-1.5 text-[10px] text-theme-text-muted">
+                    <span className="rounded-full bg-stellar-blue/10 px-1.5 py-0.5 font-medium text-stellar-blue">
+                      {item.fileType}
+                    </span>
+                    {item.sizeFormatted && <span>{item.sizeFormatted}</span>}
+                  </div>
+                </button>
+                <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                  <button
+                    type="button"
+                    onClick={() => downloadItem(item)}
+                    disabled={downloadingId === item.id}
+                    className="flex items-center gap-1 text-xs text-stellar-blue hover:underline disabled:opacity-50"
+                    aria-label={`Download ${item.fileName}`}
                   >
-                    View <ExternalLink size={11} />
-                  </a>
-                )}
+                    {downloadingId === item.id ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                    Download
+                  </button>
+                </div>
               </div>
-
+ 
               {item.sha256 && (
                 <div className="bg-theme-bg border border-theme-border rounded-md p-2 space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -168,7 +234,7 @@ export default function EvidenceViewer({
                       {item.sha256}
                     </span>
                   </div>
-
+ 
                   {item.anchorTxHash && (
                     <div className="flex items-center gap-2">
                       <ExternalLink
@@ -188,7 +254,7 @@ export default function EvidenceViewer({
                       </a>
                     </div>
                   )}
-
+ 
                   {v?.result && (
                     <div
                       className={`flex items-center gap-2 text-[10px] ${
@@ -210,18 +276,19 @@ export default function EvidenceViewer({
                       )}
                     </div>
                   )}
-
+ 
                   {v?.error && (
                     <p className="text-[10px] text-theme-error">
                       {v.error}
                     </p>
                   )}
-
+ 
                   <button
                     type="button"
                     onClick={() => verifyItem(item.id)}
                     disabled={v?.loading}
                     className="flex items-center gap-1 text-[10px] text-stellar-blue hover:underline disabled:opacity-50"
+                    aria-label={`Verify integrity of ${item.fileName}`}
                   >
                     {v?.loading ? (
                       <>
@@ -237,7 +304,7 @@ export default function EvidenceViewer({
                   </button>
                 </div>
               )}
-
+ 
               <p className="text-[10px] text-theme-text-muted">
                 Uploaded{" "}
                 {new Date(item.uploadedAt).toLocaleString()}

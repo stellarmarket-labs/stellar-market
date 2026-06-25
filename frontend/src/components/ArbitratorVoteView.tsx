@@ -24,7 +24,7 @@ export default function ArbitratorVoteView({
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const isArbitrator =
-    !!walletAddress && (dispute.arbitrators ?? []).includes(walletAddress);
+    !!walletAddress && (dispute.arbitrators ?? []).some(a => a.address === walletAddress);
 
   const freelancerPct = 100 - clientPct;
 

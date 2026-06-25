@@ -10,6 +10,12 @@ import { DisputeService } from "../services/dispute.service";
 import { upload, UPLOAD_DIR } from "../config/upload";
 import { formatFileSize } from "../utils/fileValidation";
 import {
+  createEvidenceDownloadUrl,
+  isEvidenceStorageConfigured,
+  readEvidenceObject,
+  uploadEvidenceObject,
+} from "../services/evidence-storage.service";
+import {
   confirmDisputeTransactionSchema,
   createDisputeSchema,
   castVoteSchema,
@@ -331,6 +337,57 @@ router.get(
 );
 
 /**
+ * GET /api/disputes/:id/evidence/:evidenceId/download
+ * Redirect an authorised reviewer to a private, one-minute S3 download URL.
+ */
+router.get(
+  "/:id/evidence/:evidenceId/download",
+  authenticate,
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const attachment = await prisma.attachment.findFirst({
+      where: {
+        id: req.params.evidenceId as string,
+        disputeId: req.params.id as string,
+      },
+      include: {
+        dispute: {
+          include: { votes: { where: { voterId: req.userId }, select: { id: true } } },
+        },
+      },
+    });
+
+    if (!attachment || !attachment.dispute) {
+      return res.status(404).json({ error: "Evidence not found" });
+    }
+
+    const dispute = attachment.dispute;
+    const canReview =
+      dispute.clientId === req.userId ||
+      dispute.freelancerId === req.userId ||
+      dispute.initiatorId === req.userId ||
+      dispute.votes.length > 0 ||
+      req.userRole === UserRole.ADMIN;
+    if (!canReview) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    try {
+      const url = await createEvidenceDownloadUrl({
+        key: attachment.filename,
+        filename: attachment.originalName,
+        contentType: attachment.mimeType,
+      });
+      return res.redirect(302, url);
+    } catch (error) {
+      if (error instanceof Error && error.message === "Evidence S3 storage is not configured") {
+        return res.status(503).json({ error: error.message });
+      }
+      throw error;
+    }
+  }),
+);
+
+/**
  * GET /api/disputes/:id/evidence/:evidenceId/proof
  * Get Merkle proof data for a specific evidence file.
  */
@@ -372,19 +429,26 @@ router.get(
       });
     }
 
-    const filePath = path.join(UPLOAD_DIR, attachment.filename);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "File not found on server" });
-    }
-
     const hash = crypto.createHash("sha256");
-    const stream = fs.createReadStream(filePath);
-
-    await new Promise<void>((resolve, reject) => {
-      stream.on("data", (chunk) => hash.update(chunk));
-      stream.on("end", resolve);
-      stream.on("error", reject);
-    });
+    if (attachment.filename.startsWith("disputes/")) {
+      try {
+        hash.update(await readEvidenceObject(attachment.filename));
+      } catch {
+        return res.status(404).json({ error: "File not found in evidence storage" });
+      }
+    } else {
+      // Legacy evidence uploaded before private S3 storage remains verifiable.
+      const filePath = path.join(UPLOAD_DIR, attachment.filename);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: "File not found on server" });
+      }
+      const stream = fs.createReadStream(filePath);
+      await new Promise<void>((resolve, reject) => {
+        stream.on("data", (chunk) => hash.update(chunk));
+        stream.on("end", resolve);
+        stream.on("error", reject);
+      });
+    }
 
     const computedHash = hash.digest("hex");
     const intact = computedHash === attachment.sha256;
