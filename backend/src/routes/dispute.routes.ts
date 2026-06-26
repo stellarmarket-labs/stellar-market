@@ -291,8 +291,22 @@ router.get(
  */
 router.post(
   "/webhook",
+  // In a real app we'd parse rawBody. For now, assume req.body is what we sign.
   validate({ body: webhookPayloadSchema }),
   asyncHandler(async (req: Request, res: Response) => {
+    const signature = req.headers["x-stellar-signature"];
+    if (!signature || typeof signature !== "string") {
+      return res.status(401).json({ error: "Missing signature" });
+    }
+    const secret = process.env.WEBHOOK_SECRET || "default_secret";
+    const computedSignature = crypto
+      .createHmac("sha256", secret)
+      .update(JSON.stringify(req.body))
+      .digest("hex");
+      
+    if (signature.length !== computedSignature.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(computedSignature))) {
+      return res.status(401).json({ error: "Invalid signature" });
+    }
     const payload = req.body;
 
     const result = await DisputeService.processWebhook(payload);
