@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
+  Image,
   FileText,
   ExternalLink,
   Download,
@@ -10,10 +11,65 @@ import {
   ShieldCheck,
   Loader2,
   RefreshCw,
+  Video,
+  FileArchive,
 } from "lucide-react";
 import axios from "axios";
 import type { DisputeEvidence, EvidenceVerification } from "@/types";
 import LocalTimestamp from "@/components/LocalTimestamp";
+
+const getFileInfo = (file: DisputeEvidence) => {
+  const mimeType = file.fileType?.toLowerCase() || "";
+  const fileName = file.fileName || "";
+  const fileExtension = fileName.split('.').pop()?.toLowerCase() || "";
+
+  if (mimeType.startsWith('image/')) {
+    return {
+      icon: <Image size={16} className="text-green-600 flex-shrink-0" />,
+      showThumbnail: true,
+      thumbnailUrl: file.url || null,
+      extension: fileExtension,
+    };
+  }
+
+  if (mimeType === 'application/pdf') {
+    return {
+      icon: <FileArchive size={16} className="text-red-600 flex-shrink-0" />,
+      showThumbnail: false,
+      extension: fileExtension,
+    };
+  }
+
+  if (mimeType.startsWith('video/')) {
+    return {
+      icon: <Video size={16} className="text-blue-600 flex-shrink-0" />,
+      showThumbnail: false,
+      extension: fileExtension,
+    };
+  }
+
+  return {
+    icon: <FileText size={16} className="text-gray-500 flex-shrink-0" />,
+    showThumbnail: false,
+    extension: fileExtension,
+  };
+};
+
+const getExtensionBadgeColor = (extension: string) => {
+  switch (extension.toLowerCase()) {
+    case 'pdf':
+      return 'bg-red-500';
+    case 'mp4':
+      return 'bg-blue-500';
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+    case 'gif':
+      return 'bg-green-500';
+    default:
+      return 'bg-gray-500';
+  }
+};
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
@@ -32,6 +88,7 @@ export default function EvidenceViewer({
   disputeId,
   evidence: initialEvidence,
 }: EvidenceViewerProps) {
+
   const [evidence, setEvidence] = useState<DisputeEvidence[]>(
     initialEvidence || [],
   );
@@ -203,9 +260,10 @@ export default function EvidenceViewer({
                   <p className="text-sm font-medium text-theme-heading truncate max-w-[220px]">
                     {item.fileName}
                   </p>
-                  <div className="mt-1 flex items-center gap-1.5 text-[10px] text-theme-text-muted">
-                    <span className="rounded-full bg-stellar-blue/10 px-1.5 py-0.5 font-medium text-stellar-blue">
-                      {item.fileType}
+<div className="mt-1 flex items-center gap-1.5 text-[10px] text-theme-text-muted">
+                    {getFileInfo(item).icon}
+                    <span className={`rounded-full px-1.5 py-0.5 font-medium text-white ${getExtensionBadgeColor(getFileInfo(item).extension || '')}`}
+                    >{`.${getFileInfo(item).extension || ''}`}
                     </span>
                     {item.sizeFormatted && <span>{item.sizeFormatted}</span>}
                   </div>
@@ -222,8 +280,18 @@ export default function EvidenceViewer({
                     Download
                   </button>
                 </div>
+</div>
+                {getFileInfo(item).showThumbnail && getFileInfo(item).thumbnailUrl && (
+                  <div className="mt-2">
+                    <img
+                      src={getFileInfo(item).thumbnailUrl}
+                      alt={item.fileName}
+                      className="w-full h-32 object-cover rounded border border-theme-border"
+                    />
+                  </div>
+                )}
               </div>
- 
+  
               {item.sha256 && (
                 <div className="bg-theme-bg border border-theme-border rounded-md p-2 space-y-1.5">
                   <div className="flex items-center gap-2">
