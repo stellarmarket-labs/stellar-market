@@ -252,7 +252,7 @@ fn test_create_job_empty_milestones() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #34)")] // TooManyMilestones
+#[should_panic(expected = "HostError: Error(Contract, #48)")] // TooManyMilestones
 fn test_create_job_too_many_milestones() {
     let env = Env::default();
     env.mock_all_auths();
@@ -261,7 +261,7 @@ fn test_create_job_too_many_milestones() {
     let (contract, user, freelancer, token, admin) = setup_test(&env);
 
     let mut milestones = vec![&env];
-    for _ in 0..51 {
+    for _ in 0..21 {
         milestones.push_back((String::from_str(&env, "Task"), 100_i128, 2000_u64));
     }
 
@@ -273,6 +273,51 @@ fn test_create_job_too_many_milestones() {
         &3000_u64,
         &GRACE_PERIOD,
     );
+}
+
+#[test]
+fn test_create_job_max_milestones() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, user, freelancer, token, admin) = setup_test(&env);
+
+    let mut milestones = vec![&env];
+    for _ in 0..20 {
+        milestones.push_back((String::from_str(&env, "Task"), 100_i128, 2000_u64));
+    }
+
+    let job_id = contract.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &3000_u64,
+        &GRACE_PERIOD,
+    );
+    assert!(job_id > 0);
+}
+
+#[test]
+fn test_create_job_single_milestone() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, user, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Only milestone"), 1000_i128, 2000_u64)];
+
+    let job_id = contract.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &3000_u64,
+        &GRACE_PERIOD,
+    );
+    assert!(job_id > 0);
 }
 
 #[test]
@@ -913,7 +958,7 @@ fn test_propose_revision_fails_when_pending_proposal_exists() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #34)")] // TooManyMilestones
+#[should_panic(expected = "HostError: Error(Contract, #48)")] // TooManyMilestones
 fn test_propose_revision_too_many_milestones() {
     let env = Env::default();
     env.mock_all_auths();
@@ -923,7 +968,7 @@ fn test_propose_revision_too_many_milestones() {
     let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD);
 
     let mut new_milestones = vec![&env];
-    for i in 0..51 {
+    for i in 0..21 {
         new_milestones.push_back(Milestone {
             id: i,
             description: String::from_str(&env, "New"),
