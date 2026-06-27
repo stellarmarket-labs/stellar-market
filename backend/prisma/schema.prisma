@@ -121,6 +121,8 @@ model User {
   suspendReason          String?
   suspendedAt            DateTime?
   isSuspiciousReporter   Boolean   @default(false)
+  tokenVersion           Int       @default(0)
+  deletedAt              DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
   availability           Boolean   @default(true)

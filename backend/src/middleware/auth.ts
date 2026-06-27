@@ -29,6 +29,7 @@ export const authenticate = async (
     const decoded = jwt.verify(token, config.jwtSecret) as {
       userId: string;
       purpose?: string;
+      tokenVersion?: number;
     };
 
     if (decoded.purpose === "2fa_pending") {
@@ -40,11 +41,21 @@ export const authenticate = async (
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { role: true, emailVerified: true },
+      select: { role: true, emailVerified: true, deletedAt: true, tokenVersion: true },
     });
 
     if (!user) {
       res.status(401).json({ error: "User not found." });
+      return;
+    }
+
+    if (user.deletedAt) {
+      res.status(401).json({ error: "Account deleted.", code: "ACCOUNT_DELETED" });
+      return;
+    }
+
+    if (typeof decoded.tokenVersion === "number" && decoded.tokenVersion !== user.tokenVersion) {
+      res.status(401).json({ error: "Token expired. Please log in again.", code: "TOKEN_EXPIRED" });
       return;
     }
 
@@ -95,17 +106,27 @@ export const requireAdmin = async (
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, config.jwtSecret) as { userId: string };
+    const decoded = jwt.verify(token, config.jwtSecret) as { userId: string; tokenVersion?: number };
     req.userId = decoded.userId;
 
     // Query database for user role
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { role: true },
+      select: { role: true, deletedAt: true, tokenVersion: true },
     });
 
     if (!user) {
       res.status(401).json({ error: "User not found." });
+      return;
+    }
+
+    if (user.deletedAt) {
+      res.status(401).json({ error: "Account deleted.", code: "ACCOUNT_DELETED" });
+      return;
+    }
+
+    if (typeof decoded.tokenVersion === "number" && decoded.tokenVersion !== user.tokenVersion) {
+      res.status(401).json({ error: "Token expired. Please log in again.", code: "TOKEN_EXPIRED" });
       return;
     }
 

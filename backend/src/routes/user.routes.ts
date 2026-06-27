@@ -512,6 +512,29 @@ router.get(
   }),
 );
 
+// DELETE /api/users/me — soft-delete the authenticated user's account
+router.delete("/me", authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.user.update({
+      where: { id: req.userId },
+      data: {
+        deletedAt: new Date(),
+        tokenVersion: { increment: 1 },
+      },
+    });
+
+    await prisma.refreshToken.updateMany({
+      where: { userId: req.userId, revoked: false },
+      data: { revoked: true },
+    });
+
+    res.json({ message: "Account deleted successfully." });
+  } catch (error) {
+    logger.error({ err: error }, "Delete account error");
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
 // PATCH /api/users/me/onboarding — mark onboarding complete
 router.patch("/me/onboarding", authenticate, async (req: AuthRequest, res: Response) => {
   try {

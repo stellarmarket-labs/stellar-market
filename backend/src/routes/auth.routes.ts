@@ -120,8 +120,9 @@ async function sendSession(res: Response, user: {
   role: "CLIENT" | "FREELANCER" | "ADMIN";
   emailVerified?: boolean;
   password?: string | null;
+  tokenVersion?: number;
 }, status = 200) {
-  const token = jwt.sign({ userId: user.id }, config.jwtSecret, {
+  const token = jwt.sign({ userId: user.id, tokenVersion: user.tokenVersion ?? 0 }, config.jwtSecret, {
     expiresIn: ACCESS_TOKEN_EXPIRY,
   });
   const refreshRaw = await issueRefreshToken(user.id);
@@ -284,6 +285,10 @@ router.post(
       return res.status(401).json({ error: "Invalid credentials." });
     }
 
+    if (user.deletedAt) {
+      return res.status(401).json({ error: "Account deleted.", code: "ACCOUNT_DELETED" });
+    }
+
     // Check if user is suspended
     if (user.isSuspended) {
       return res.status(403).json({
@@ -334,6 +339,10 @@ router.post(
           notificationPreference: { create: {} },
         },
       });
+    }
+
+    if (user.deletedAt) {
+      return res.status(401).json({ error: "Account deleted.", code: "ACCOUNT_DELETED" });
     }
 
     if (user.isSuspended) {
@@ -586,7 +595,7 @@ router.post(
     if (/^\d{6}$/.test(code)) {
       const result = verifySync({ token: code, secret });
       if (result.valid) {
-        const token = jwt.sign({ userId: user.id }, config.jwtSecret, {
+        const token = jwt.sign({ userId: user.id, tokenVersion: user.tokenVersion ?? 0 }, config.jwtSecret, {
           expiresIn: ACCESS_TOKEN_EXPIRY,
         });
         const refreshRaw = await issueRefreshToken(user.id);
@@ -617,7 +626,7 @@ router.post(
           data: { backupCodes: updatedCodes },
         });
 
-        const token = jwt.sign({ userId: user.id }, config.jwtSecret, {
+        const token = jwt.sign({ userId: user.id, tokenVersion: user.tokenVersion ?? 0 }, config.jwtSecret, {
           expiresIn: ACCESS_TOKEN_EXPIRY,
         });
         const refreshRaw = await issueRefreshToken(user.id);
@@ -757,7 +766,7 @@ router.post(
 
     const user = await prisma.user.findUnique({
       where: { id: stored.userId },
-      select: { id: true, isSuspended: true },
+      select: { id: true, isSuspended: true, deletedAt: true, tokenVersion: true },
     });
 
     if (!user) {
@@ -768,7 +777,11 @@ router.post(
       return res.status(403).json({ error: "Account suspended." });
     }
 
-    const token = jwt.sign({ userId: stored.userId }, config.jwtSecret, {
+    if (user.deletedAt) {
+      return res.status(401).json({ error: "Account deleted.", code: "ACCOUNT_DELETED" });
+    }
+
+    const token = jwt.sign({ userId: stored.userId, tokenVersion: user.tokenVersion }, config.jwtSecret, {
       expiresIn: ACCESS_TOKEN_EXPIRY,
     });
 

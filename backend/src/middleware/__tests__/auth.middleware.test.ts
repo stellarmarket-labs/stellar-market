@@ -42,8 +42,8 @@ describe("authenticate middleware", () => {
       path: "/dashboard",
     } as AuthRequest;
 
-    (jwt.verify as jest.Mock).mockReturnValue({ userId: "user-123" });
-    prismaMock.user.findUnique.mockResolvedValue({ role: UserRole.CLIENT, emailVerified: true });
+    (jwt.verify as jest.Mock).mockReturnValue({ userId: "user-123", tokenVersion: 0 });
+    prismaMock.user.findUnique.mockResolvedValue({ role: UserRole.CLIENT, emailVerified: true, deletedAt: null, tokenVersion: 0 });
 
     await authenticate(req, res, next);
 
@@ -78,6 +78,54 @@ describe("authenticate middleware", () => {
     expect(status).toHaveBeenCalledWith(401);
     expect(json).toHaveBeenCalledWith({
       error: "Access denied. No token provided.",
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 AccountDeleted when user has deletedAt set", async () => {
+    const req = {
+      headers: { authorization: "Bearer valid.token" },
+      path: "/dashboard",
+    } as AuthRequest;
+
+    (jwt.verify as jest.Mock).mockReturnValue({ userId: "deleted-user", tokenVersion: 0 });
+    prismaMock.user.findUnique.mockResolvedValue({
+      role: UserRole.CLIENT,
+      emailVerified: true,
+      deletedAt: new Date(),
+      tokenVersion: 1,
+    });
+
+    await authenticate(req, res, next);
+
+    expect(status).toHaveBeenCalledWith(401);
+    expect(json).toHaveBeenCalledWith({
+      error: "Account deleted.",
+      code: "ACCOUNT_DELETED",
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 TokenExpired when tokenVersion does not match", async () => {
+    const req = {
+      headers: { authorization: "Bearer valid.token" },
+      path: "/dashboard",
+    } as AuthRequest;
+
+    (jwt.verify as jest.Mock).mockReturnValue({ userId: "stale-token-user", tokenVersion: 0 });
+    prismaMock.user.findUnique.mockResolvedValue({
+      role: UserRole.CLIENT,
+      emailVerified: true,
+      deletedAt: null,
+      tokenVersion: 2,
+    });
+
+    await authenticate(req, res, next);
+
+    expect(status).toHaveBeenCalledWith(401);
+    expect(json).toHaveBeenCalledWith({
+      error: "Token expired. Please log in again.",
+      code: "TOKEN_EXPIRED",
     });
     expect(next).not.toHaveBeenCalled();
   });
