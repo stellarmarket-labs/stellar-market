@@ -90,6 +90,33 @@ const nextConfig = {
       },
     ],
   },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          {
+            key: "X-Frame-Options",
+            value: "DENY",
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+          // Note: CSP with nonce cannot be static — it is set dynamically in middleware.
+          // This static fallback is for non-middleware-matched routes only.
+          {
+            key: "Content-Security-Policy",
+            value: "default-src 'self'; frame-ancestors 'none'; object-src 'none'",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = withPWA(nextConfig);
