@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { randomBytes } from "crypto";
 
 const PROTECTED_ROUTES = ["/dashboard", "/post-job", "/messages", "/profile"];
 const AUTH_ROUTES = ["/auth/login", "/auth/register"];
@@ -18,15 +19,44 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/auth/login", request.url));
   }
 
-  return NextResponse.next();
+  // Generate a cryptographically random nonce for each request
+  const nonce = randomBytes(16).toString("base64");
+
+  const csp = [
+    `default-src 'self'`,
+    `script-src 'self' 'nonce-${nonce}'`,
+    `style-src 'self' 'nonce-${nonce}'`,
+    `img-src 'self' data: https://*.amazonaws.com https://*.cloudflare.com https://avatars.githubusercontent.com https://localhost:5000 https://*.stellarmarket.io`,
+    `font-src 'self'`,
+    `connect-src 'self'`,
+    `frame-ancestors 'none'`,
+    `object-src 'none'`,
+    `base-uri 'self'`,
+    `form-action 'self'`,
+  ].join("; ");
+
+  const requestHeaders = new Headers(request.headers);
+  // Pass nonce to the page via a header so layout can read it
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("x-csp", csp);
+
+  const response = NextResponse.next({
+    request: { headers: requestHeaders },
+  });
+
+  // Set security headers on every response
+  response.headers.set("Content-Security-Policy", csp);
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+
+  return response;
 }
 
 export const config = {
+  // Apply to all routes except Next.js internals and static files
   matcher: [
-    "/dashboard/:path*",
-    "/post-job/:path*",
-    "/messages/:path*",
-    "/profile/:path*",
-    "/auth/:path*",
+    "/((?!_next/static|_next/image|favicon.ico).*)",
   ],
+  runtime: "nodejs",
 };
