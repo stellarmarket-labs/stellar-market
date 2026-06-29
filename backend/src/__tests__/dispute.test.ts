@@ -7,6 +7,10 @@ jest.mock("../services/contract.service", () => ({
   },
 }));
 
+jest.mock("../services/dispute-event.service", () => ({
+  recordDisputeEvent: jest.fn().mockResolvedValue({ id: 1 }),
+}));
+
 // Local runtime-friendly enums for tests (use string literals to avoid TS value/type mismatch
 // when importing generated Prisma types). This keeps tests stable and avoids relying on the
 // runtime shape of @prisma/client exports during TypeScript compile.
