@@ -12,6 +12,7 @@ import SkillCombobox from "@/components/SkillCombobox";
 import { useForm, Controller } from "react-hook-form";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import UnsavedChangesModal from "@/components/UnsavedChangesModal";
+import { resizeImage, createImagePreview } from "@/utils/image";
 import {
   User,
   Settings,
@@ -35,7 +36,7 @@ import {
 } from "lucide-react";
 import { PortfolioItem } from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
 const BASE_URL = API_URL.replace(/\/api\/?$/, "");
 
 const PORTFOLIO_MIME_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"];
@@ -323,11 +324,31 @@ export default function SettingsPage() {
 
   // ─── Profile Functions ──────────────────────────────────────────────────────
 
-  function handleAvatarFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleAvatarFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) {
-      setAvatarFile(file);
-      setAvatarPreview(URL.createObjectURL(file));
+    if (!file) return;
+
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image must be less than 5MB");
+      return;
+    }
+
+    try {
+      const resizedFile = await resizeImage(file, {
+        maxWidth: 400,
+        maxHeight: 400,
+        quality: 0.85,
+        mimeType: file.type === "image/png" ? "image/png" : "image/jpeg",
+      });
+
+      setAvatarFile(resizedFile);
+      const preview = await createImagePreview(resizedFile);
+      setAvatarPreview(preview);
+    } catch (error) {
+      toast.error("Failed to process image. Please try another file.");
     }
   }
   async function handleAvatarUpload() {
