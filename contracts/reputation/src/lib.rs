@@ -1889,10 +1889,10 @@ impl ReputationContract {
     /// Internal function to update the leaderboard after a review is submitted.
     /// Maintains a sorted list of top 50 users by average rating.
     fn update_leaderboard(env: &Env, reviewee: &Address) {
-        let avg_rating = match Self::get_average_rating(env.clone(), reviewee.clone()) {
-            Ok(rating) => rating,
-            Err(_) => return, // Skip if reputation not found
-        };
+        // Compute the user's decayed totals once. These drive both the
+        // zero-score removal check (issue #785) and the average rating used for
+        // ranking, so we read them here instead of paying for two passes.
+        let (new_score, new_weight, _) = Self::get_decayed_totals(env, reviewee.clone());
 
         let leaderboard_key = DataKey::Leaderboard;
         let mut leaderboard: Vec<(Address, u64)> = env
@@ -1910,6 +1910,35 @@ impl ReputationContract {
             }
             idx += 1;
         }
+
+        // Issue #785: once a user's score and weight have fully decayed to zero,
+        // their entry must not linger on the leaderboard showing a 0 — that
+        // pushes legitimate active users out of the visible top list. Persist
+        // the leaderboard with the stale entry dropped (the loop above already
+        // removed it) and stop before re-inserting. We intentionally leave the
+        // user's reputation/review records intact: those hold history (and
+        // accumulator-only score such as dispute outcomes) that must survive a
+        // dormant period and is unrelated to leaderboard visibility.
+        if new_score == 0 && new_weight == 0 {
+            env.storage().instance().set(&leaderboard_key, &leaderboard);
+            env.storage()
+                .instance()
+                .extend_ttl(MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+            return;
+        }
+
+        let avg_rating = match Self::get_average_rating(env.clone(), reviewee.clone()) {
+            Ok(rating) => rating,
+            Err(_) => {
+                // Reputation vanished between reads — persist the removal so a
+                // stale entry is not left behind, then stop.
+                env.storage().instance().set(&leaderboard_key, &leaderboard);
+                env.storage()
+                    .instance()
+                    .extend_ttl(MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+                return;
+            }
+        };
 
         // Insert at correct position (descending by rating)
         let mut inserted = false;

@@ -2470,3 +2470,39 @@ fn test_set_max_decay_rate_hard_ceiling_enforced() {
     client.set_max_decay_rate(&admin, &51u32);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// #785 — Zero-score users are removed from the leaderboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_leaderboard_removes_fully_decayed_user() {
+    let env = setup_high_ttl_env();
+    env.mock_all_auths();
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+    client.initialize(&vec![&env, admin.clone()], &1u32, &50u32); // 50%/yr
+
+    let reviewer = Address::generate(&env);
+    let reviewee = Address::generate(&env);
+    setup_review_for(&env, &escrow_id, &client, 1, &reviewer, &reviewee, 5);
+
+    // User with a non-zero score is on the leaderboard.
+    let before = client.get_leaderboard();
+    assert_eq!(before.len(), 1);
+    assert!(before.iter().any(|(addr, _)| addr == reviewee));
+
+    // Dormant long enough to fully decay: 5yr * 50% = 250% -> saturates to 0.
+    advance_n_periods(&env, 5);
+
+    // A subsequent reputation write re-runs update_leaderboard while totals are
+    // zero. A zero-value bonus (current timestamp) triggers it without adding score.
+    let now = env.ledger().timestamp();
+    client.add_referral_bonus(&admin, &reviewee, &0u64, &0u64, &now);
+
+    // The fully-decayed user has been removed; the leaderboard shrinks.
+    let after = client.get_leaderboard();
+    assert_eq!(after.len(), 0);
+    assert!(!after.iter().any(|(addr, _)| addr == reviewee));
+}
