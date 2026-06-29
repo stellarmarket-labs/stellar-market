@@ -33,6 +33,7 @@ import {
   RevisionProposalView,
 } from "../services/contract.service";
 import { MAX_PAGE_SIZE } from "../config";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -723,9 +724,9 @@ router.get(
         });
         escrowStatus = onChainStatus;
       } catch (error) {
-        console.warn(
-          `Could not fetch on-chain status for job ${id}, falling back to DB:`,
-          error,
+        logger.warn(
+          { err: error, jobId: id },
+          "Could not fetch on-chain status for job, falling back to DB",
         );
       }
 
@@ -733,7 +734,7 @@ router.get(
         const p = await ContractService.getRevisionProposal(job.contractJobId);
         revisionProposal = p && p.status === "PENDING" ? p : null;
       } catch (error) {
-        console.warn(`Could not fetch revision proposal for job ${id}:`, error);
+        logger.warn({ err: error, jobId: id }, "Could not fetch revision proposal for job");
       }
     }
 

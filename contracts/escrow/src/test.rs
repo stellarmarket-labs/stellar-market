@@ -212,6 +212,48 @@ fn test_job_count_increments() {
 }
 
 #[test]
+fn test_claim_auto_release_after_ledger_delay() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000;
+        l.sequence_number = 100;
+    });
+
+    let (contract, client_addr, freelancer, token, admin) = setup_test(&env);
+    contract.set_auto_release_delay(&admin, &5);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Single milestone"), 750_i128, JOB_DEADLINE),
+    ];
+
+    let job_id = contract.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+
+    mint_tokens(&env, &token, &client_addr, 750_i128);
+    contract.fund_job(&job_id, &client_addr, &0, &0);
+    contract.submit_milestone(&job_id, &0, &freelancer);
+
+    env.ledger().with_mut(|l| l.sequence_number = 106);
+
+    contract.claim_auto_release(&job_id, &0, &freelancer);
+
+    let job = contract.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Completed);
+
+    let token_client = TokenClient::new(&env, &token);
+    assert_eq!(token_client.balance(&freelancer), 750_i128);
+}
+
+#[test]
 #[should_panic(expected = "HostError: Error(Contract, #7)")] // InvalidDeadline
 fn test_create_job_invalid_deadline() {
     let env = Env::default();

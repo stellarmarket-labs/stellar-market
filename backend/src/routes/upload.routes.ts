@@ -7,6 +7,7 @@ import path from "path";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validate } from "../middleware/validation";
 import { config } from "../config";
+import { logger } from "../lib/logger";
 import {
   upload,
   UPLOAD_DIR,
@@ -225,7 +226,7 @@ router.post(
         });
       }
 
-      console.error("Error uploading file:", error);
+      logger.error({ err: error }, "Error uploading file");
       res.status(500).json({ error: "Failed to upload file" });
     }
   },
@@ -309,7 +310,7 @@ router.get(
       const fileStream = fs.createReadStream(filePath);
       fileStream.pipe(res);
     } catch (error) {
-      console.error("Error downloading file:", error);
+      logger.error({ err: error }, "Error downloading file");
       res.status(500).json({ error: "Failed to download file" });
     }
   },
@@ -363,7 +364,7 @@ router.get(
         fileName: attachment.originalName,
       });
     } catch (error) {
-      console.error("Error verifying file integrity:", error);
+      logger.error({ err: error }, "Error verifying file integrity");
       res.status(500).json({ error: "Failed to verify file integrity" });
     }
   },
@@ -409,7 +410,7 @@ router.delete(
 
       res.json({ message: "File deleted successfully" });
     } catch (error) {
-      console.error("Error deleting file:", error);
+      logger.error({ err: error }, "Error deleting file");
       res.status(500).json({ error: "Failed to delete file" });
     }
   },
@@ -466,7 +467,7 @@ router.get(
         })),
       });
     } catch (error) {
-      console.error("Error fetching job attachments:", error);
+      logger.error({ err: error }, "Error fetching job attachments");
       res.status(500).json({ error: "Failed to fetch attachments" });
     }
   },

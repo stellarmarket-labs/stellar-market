@@ -6,7 +6,7 @@
 //! expected to implement [`ReputationVerifier`]; consumers gate their actions
 //! by calling it through this trait rather than re-deriving scores/badges.
 
-use soroban_sdk::{contracttype, Address, Env};
+use soroban_sdk::{contractclient, contracterror, contracttype, Address, Env};
 
 /// Achievement badges a user can earn, mirroring the reputation tiers exposed
 /// by the reputation contract.
@@ -18,6 +18,14 @@ pub enum Badge {
     Silver = 2,
     Gold = 3,
     Platinum = 4,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum CompletionError {
+    Unauthorized = 1,
+    InvalidInput = 2,
 }
 
 /// Cross-contract reputation verification interface.
@@ -32,6 +40,17 @@ pub trait ReputationVerifier {
 
     /// Returns whether the user holds the given badge.
     fn has_badge(&self, env: &Env, user: Address, badge: Badge) -> bool;
+}
+
+#[contractclient(name = "ReputationContractClient")]
+pub trait ReputationInterface {
+    fn record_completion(
+        env: Env,
+        client: Address,
+        freelancer: Address,
+        amount: i128,
+        rating: u32,
+    ) -> Result<(), CompletionError>;
 }
 
 #[cfg(test)]
