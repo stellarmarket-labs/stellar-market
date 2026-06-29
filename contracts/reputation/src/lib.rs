@@ -1928,6 +1928,9 @@ impl ReputationContract {
 mod test;
 
 #[cfg(test)]
+mod proptest_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use soroban_sdk::{testutils::Address as _, testutils::Ledger, vec, Env};

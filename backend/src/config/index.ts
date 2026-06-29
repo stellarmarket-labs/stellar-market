@@ -8,12 +8,18 @@ const platformMinBudgetXlm =
     ? configuredPlatformMinimum
     : 1;
 
+export const MAX_PAGE_SIZE = 100;
+
 export const config = {
   port: process.env.PORT || 5000,
   jwtSecret: process.env.JWT_SECRET || "default-secret-change-me",
   databaseUrl: process.env.DATABASE_URL,
   frontendUrl: process.env.FRONTEND_URL || "http://localhost:3000",
   encryptionKey: process.env.ENCRYPTION_KEY || "",
+  corsAllowedOrigins: (process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
   // The minimum is kept server-side so clients cannot create zero-value jobs
   // by bypassing the posting form.
   platformMinBudgetXlm,

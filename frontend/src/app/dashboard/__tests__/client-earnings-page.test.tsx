@@ -3,7 +3,10 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import axios from "axios";
 import ClientEarningsPage from "../client-earnings-page";
 
-jest.mock("axios");
+jest.mock("axios", () => ({
+  get: jest.fn(),
+  isAxiosError: jest.fn(),
+}));
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 const mockPush = jest.fn();
@@ -11,9 +14,13 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
-jest.mock("@/context/AuthContext", () => ({
-  useAuth: () => ({ user: { id: "client-1", role: "CLIENT" } }),
-}));
+// Return a stable user reference; a fresh object per call would change the
+// identity of the page's `useCallback`/`useEffect` deps and re-trigger the fetch
+// on every render, flipping the component back into its loading state.
+jest.mock("@/context/AuthContext", () => {
+  const user = { id: "client-1", role: "CLIENT" };
+  return { useAuth: () => ({ user }) };
+});
 
 // Recharts' ResponsiveContainer relies on layout measurements jsdom doesn't
 // provide; stub the pieces this page uses so the chart renders deterministically.
@@ -89,7 +96,7 @@ describe("ClientEarningsPage", () => {
 
   it("shows an error message when the request fails with 403", async () => {
     mockedAxios.get.mockRejectedValue({ isAxiosError: true, response: { status: 403 } });
-    mockedAxios.isAxiosError = jest.fn().mockReturnValue(true) as any;
+    (mockedAxios.isAxiosError as jest.Mock).mockReturnValue(true);
 
     render(<ClientEarningsPage />);
 

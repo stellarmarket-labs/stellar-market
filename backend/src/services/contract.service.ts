@@ -553,12 +553,47 @@ export class ContractService {
     const tx = await this.buildReadonlySimTx(operation);
     const simulation = await server.simulateTransaction(tx);
     if (rpc.Api.isSimulationError(simulation)) {
+      const traceId = getRequestId();
+      const txXdr = tx.toXDR();
+      logger.error({
+        traceId,
+        xdr: txXdr,
+        events: (simulation as any).events ?? [],
+        error: simulation.error,
+      }, "Soroban simulation failed");
+      if (process.env.NODE_ENV !== "production") {
+        void this.writeFailedSimulation(txXdr);
+      }
       throw new ContractSimulationError(simulation.error);
     }
     if (!rpc.Api.isSimulationSuccess(simulation)) {
+      const traceId = getRequestId();
+      const txXdr = tx.toXDR();
+      logger.error({
+        traceId,
+        xdr: txXdr,
+        events: (simulation as any).events ?? [],
+        error: "Simulation did not succeed — state restore may be required",
+      }, "Soroban simulation did not succeed");
+      if (process.env.NODE_ENV !== "production") {
+        void this.writeFailedSimulation(txXdr);
+      }
       throw new ContractSimulationError("Simulation did not succeed — state restore may be required");
     }
     return scValToNative(simulation.result!.retval);
+  }
+
+  private static async writeFailedSimulation(xdrBase64: string): Promise<void> {
+    try {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const dir = path.resolve("logs/failed-simulations");
+      await fs.mkdir(dir, { recursive: true });
+      const filename = path.join(dir, `${Date.now()}.xdr.txt`);
+      await fs.writeFile(filename, xdrBase64, "utf8");
+    } catch {
+      // best-effort; never let logging break the main flow
+    }
   }
 
   /**

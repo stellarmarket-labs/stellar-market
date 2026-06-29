@@ -9,7 +9,7 @@ import { searchFreelancers } from "../services/freelancer-search.service";
 import { ReputationService } from "../services/reputation.service";
 import { fetchOnChainPayments } from "../services/earnings-reconciliation.service";
 import { logger } from "../lib/logger";
-import { config } from "../config";
+import { config, MAX_PAGE_SIZE } from "../config";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -629,6 +629,7 @@ router.get(
 
     const total = await prisma.user.count({ where });
 
+    res.setHeader("X-Max-Page-Size", String(MAX_PAGE_SIZE));
     res.json({
       data: freelancersWithReputation,
       pagination: {
@@ -667,6 +668,7 @@ router.get(
       skills: q.skills,
     });
 
+    res.setHeader("X-Max-Page-Size", String(MAX_PAGE_SIZE));
     res.json(result);
   })
 );

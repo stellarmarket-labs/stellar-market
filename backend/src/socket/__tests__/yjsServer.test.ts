@@ -14,7 +14,11 @@ const mockJobFindUnique = jest.fn();
 
 jest.mock("@prisma/client", () => ({
   PrismaClient: jest.fn().mockImplementation(() => ({
-    job: { findUnique: mockJobFindUnique },
+    // Use an arrow function so mockJobFindUnique is captured by reference (lazy
+    // evaluation at call-time, not at import-time) — avoids TDZ error because
+    // the outer `const mockJobFindUnique` declaration is hoisted above jest.mock
+    // but only initialized after the import phase completes.
+    job: { findUnique: (...args: any[]) => mockJobFindUnique(...args) },
   })),
 }));
 
@@ -38,19 +42,30 @@ function connectWs(
     const ws = new WebSocket(url);
     let closeCode: number | null = null;
     let closeReason = "";
+    let timer: ReturnType<typeof setTimeout>;
+    let settled = false;
+
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ws, closeCode, closeReason });
+    };
 
     ws.on("open", () => {
-      resolve({ ws, closeCode, closeReason });
+      // Give the server 200 ms to close immediately-rejected connections
+      // before treating the connection as successfully open.
+      timer = setTimeout(settle, 200);
     });
 
     ws.on("close", (code, reason) => {
       closeCode = code;
       closeReason = reason.toString();
-      resolve({ ws, closeCode, closeReason });
+      settle();
     });
 
     ws.on("error", () => {
-      resolve({ ws, closeCode: closeCode ?? -1, closeReason });
+      settle();
     });
   });
 }
