@@ -422,6 +422,17 @@ pub struct TtlExtendedEvent {
     pub new_expiry_ledger: u32,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Paused {
+    pub paused_by: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Unpaused {
+    pub unpaused_by: Address,
+}
 
 
 fn bump_escrow_ttl(env: &Env, job_id: u64) {
@@ -998,15 +1009,19 @@ impl EscrowContract {
             AdminAction::Pause => {
                 env.storage().instance().set(&DataKey::Paused, &true);
                 env.events().publish(
-                    (symbol_short!("paused"),),
-                    (env.current_contract_address(), env.ledger().timestamp()),
+                    (symbol_short!("escrow"), symbol_short!("paused")),
+                    Paused {
+                        paused_by: proposal.proposer.clone()
+                    },
                 );
             }
             AdminAction::Unpause => {
                 env.storage().instance().set(&DataKey::Paused, &false);
                 env.events().publish(
-                    (symbol_short!("unpaused"),),
-                    (env.current_contract_address(), env.ledger().timestamp()),
+                    (symbol_short!("escrow"), symbol_short!("unpaused")),
+                    Unpaused {
+                        unpaused_by: proposal.proposer.clone()
+                    },
                 );
             }
             AdminAction::SetFeeBps(fee) => {
