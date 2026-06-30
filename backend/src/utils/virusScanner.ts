@@ -1,6 +1,7 @@
 import NodeClam from "clamscan";
 import fs from "fs";
 import { auditLogger } from "./auditLogger";
+import { logger } from "../lib/logger";
 
 let clamScanInstance: NodeClam | null = null;
 let clamAvailable = false;
@@ -13,9 +14,7 @@ const ENABLE_VIRUS_SCAN = process.env.ENABLE_VIRUS_SCAN !== "false";
  */
 export async function initializeVirusScanner(): Promise<void> {
   if (!ENABLE_VIRUS_SCAN) {
-    console.log(
-      "[VirusScanner] Virus scanning disabled via ENABLE_VIRUS_SCAN=false",
-    );
+    logger.info("[VirusScanner] Virus scanning disabled via ENABLE_VIRUS_SCAN=false");
     return;
   }
 
@@ -38,13 +37,12 @@ export async function initializeVirusScanner(): Promise<void> {
     // Test connection
     const version = await clamScanInstance.getVersion();
     clamAvailable = true;
-    console.log(
-      `[VirusScanner] ClamAV initialized successfully. Version: ${version}`,
-    );
+    logger.info({ version }, "[VirusScanner] ClamAV initialized successfully");
   } catch (error: any) {
     clamAvailable = false;
-    console.warn(
-      `[VirusScanner] ClamAV initialization failed: ${error.message}. Virus scanning will be skipped.`,
+    logger.warn(
+      { err: error },
+      "[VirusScanner] ClamAV initialization failed. Virus scanning will be skipped.",
     );
     auditLogger.log({
       action: "VIRUS_SCANNER_INIT_FAILED",
@@ -121,7 +119,7 @@ export async function scanFile(filePath: string): Promise<ScanResult> {
     };
   } catch (error: any) {
     // Log error but don't fail the upload - degrade gracefully
-    console.error(`[VirusScanner] Scan error for ${filePath}:`, error.message);
+    logger.error({ err: error, filePath }, "[VirusScanner] Scan error");
     auditLogger.log({
       action: "VIRUS_SCAN_ERROR",
       userId: "system",

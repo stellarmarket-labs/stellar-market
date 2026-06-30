@@ -1,47 +1,70 @@
 import { Request, Response, NextFunction } from "express";
-import { ZodSchema, ZodError } from "zod";
-import { createError } from "./error";
+import { ZodTypeAny } from "zod";
+import { logger } from "../lib/logger";
 
 export const validate = (schema: {
-  body?: ZodSchema;
-  query?: ZodSchema;
-  params?: ZodSchema;
+  body?: ZodTypeAny;
+  query?: ZodTypeAny;
+  params?: ZodTypeAny;
 }) => {
   return (req: Request, res: Response, next: NextFunction) => {
-    try {
-      // Validate request body
-      if (schema.body) {
-        req.body = schema.body.parse(req.body);
-      }
+    const errors: Array<{ field: string; message: string }> = [];
 
-      // Validate query parameters
-      if (schema.query) {
-        req.query = schema.query.parse(req.query) as any;
-      }
-
-      // Validate route parameters
-      if (schema.params) {
-        req.params = schema.params.parse(req.params) as any;
-      }
-
-      next();
-    } catch (error) {
-      if (error instanceof ZodError) {
-        const budgetMinimumError = error.issues.find(
-          (issue) =>
-            issue.path.length === 1 &&
-            issue.path[0] === "budget" &&
-            issue.message.startsWith("Budget must be at least "),
+    if (schema.body) {
+      const result = schema.body.safeParse(req.body);
+      if (result.success) {
+        req.body = result.data;
+      } else {
+        errors.push(
+          ...result.error.issues.map((issue) => ({
+            field: issue.path.join(".") || "body",
+            message: issue.message,
+          })),
         );
-        if (budgetMinimumError) {
-          return res.status(422).json({
-            code: "BudgetBelowMinimum",
-            message: budgetMinimumError.message,
-          });
-        }
-        return next(createError("Validation failed", 400, error.issues));
       }
-      next(error);
     }
+
+    if (schema.query) {
+      const result = schema.query.safeParse(req.query);
+      if (result.success) {
+        req.query = result.data as any;
+      } else {
+        errors.push(
+          ...result.error.issues.map((issue) => ({
+            field: issue.path.join(".") || "query",
+            message: issue.message,
+          })),
+        );
+      }
+    }
+
+    if (schema.params) {
+      const result = schema.params.safeParse(req.params);
+      if (result.success) {
+        req.params = result.data as any;
+      } else {
+        errors.push(
+          ...result.error.issues.map((issue) => ({
+            field: issue.path.join(".") || "params",
+            message: issue.message,
+          })),
+        );
+      }
+    }
+
+    if (errors.length > 0) {
+      logger.warn(
+        {
+          requestId: req.requestId,
+          method: req.method,
+          path: req.originalUrl,
+          errors,
+        },
+        "Validation failed",
+      );
+      return res.status(400).json({ errors });
+    }
+
+    next();
   };
 };

@@ -4,6 +4,7 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env,
     IntoVal, String, Symbol, Vec,
 };
+use stellar_market_reputation_interface::ReputationContractClient;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -332,9 +333,12 @@ enum DataKey {
     MultiSigExecutionNotBefore(u64),
     RevisionHistory(u64), // Vec<MilestoneRevision> keyed by job_id
     MilestoneSubmittedAt(u64, u32),
+    MilestoneSubmittedLedger(u64, u32),
     InactivityAutoApproveAt(u64, u32),
+    AutoReleaseDelay,
     /// Address of the price oracle contract used for exchange-rate parity checks.
     PriceOracle,
+    ReputationContract,
     /// Stored RateSnapshot from the parity check performed at funding time.
     RateSnapshot(u64),
     /// Per-caller nonce to prevent replay attacks within the TTL window.
@@ -359,6 +363,7 @@ const INACTIVITY_THRESHOLD_SECS: u64 = 7 * 24 * 3600;
 const INACTIVITY_GRACE_SECS: u64 = 3 * 24 * 3600;
 const MULTISIG_TIME_LOCK_SECS: u64 = 48 * 60 * 60;
 const PROPOSAL_TTL: u64 = 7 * 24 * 60 * 60;
+const AUTO_RELEASE_DELAY_DEFAULT: u64 = 1_296_000;
 
 const NONCE_EXPIRY_LEDGERS: u32 = 3;
 
@@ -374,6 +379,43 @@ fn consume_nonce(env: &Env, caller: &Address, function: &Symbol, nonce: u64) -> 
     env.storage().temporary().set(&key, &true);
     env.storage().temporary().extend_ttl(&key, NONCE_EXPIRY_LEDGERS, NONCE_EXPIRY_LEDGERS);
     Ok(())
+}
+
+fn record_reputation_completion(
+    env: &Env,
+    job_id: u64,
+    client: &Address,
+    freelancer: &Address,
+    amount: i128,
+) {
+    const COMPLETION_RATING: u32 = 5;
+
+    let Some(reputation_contract) = env
+        .storage()
+        .instance()
+        .get::<DataKey, Address>(&DataKey::ReputationContract) else {
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("rep_fail")),
+                (job_id, client.clone(), freelancer.clone(), amount, Symbol::new(env, "missing_config")),
+            );
+            return;
+        };
+
+    let reputation_client = ReputationContractClient::new(env, &reputation_contract);
+    match reputation_client.try_record_completion(
+        client,
+        freelancer,
+        &amount,
+        &COMPLETION_RATING,
+    ) {
+        Ok(Ok(())) => {}
+        _ => {
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("rep_fail")),
+                (job_id, client.clone(), freelancer.clone(), amount, Symbol::new(env, "call_failed")),
+            );
+        }
+    }
 }
 
 fn require_not_paused(env: &Env) -> Result<(), EscrowError> {
@@ -765,6 +807,47 @@ impl EscrowContract {
     /// Return the configured price oracle address, if any.
     pub fn get_price_oracle(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::PriceOracle)
+    }
+
+    pub fn set_auto_release_delay(
+        env: Env,
+        admin: Address,
+        delay_ledgers: u64,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+        if !is_signer(&env, &admin) {
+            return Err(EscrowError::NotAdmin);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::AutoReleaseDelay, &delay_ledgers);
+        Ok(())
+    }
+
+    pub fn get_auto_release_delay(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::AutoReleaseDelay)
+            .unwrap_or(AUTO_RELEASE_DELAY_DEFAULT)
+    }
+
+    pub fn set_reputation_contract(
+        env: Env,
+        admin: Address,
+        reputation_contract: Address,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+        if !is_signer(&env, &admin) {
+            return Err(EscrowError::NotAdmin);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ReputationContract, &reputation_contract);
+        Ok(())
+    }
+
+    pub fn get_reputation_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::ReputationContract)
     }
 
     /// Register the dispute contract address. Only a registered multisig signer may call this.
@@ -1659,6 +1742,16 @@ impl EscrowContract {
             TTL_EXTEND_TO_LEDGERS,
         );
 
+        let submitted_ledger_key = DataKey::MilestoneSubmittedLedger(job_id, milestone_id);
+        env.storage()
+            .persistent()
+            .set(&submitted_ledger_key, &env.ledger().sequence());
+        env.storage().persistent().extend_ttl(
+            &submitted_ledger_key,
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
+
         let auto_key = DataKey::InactivityAutoApproveAt(job_id, milestone_id);
         if env.storage().persistent().has(&auto_key) {
             env.storage().persistent().remove(&auto_key);
@@ -1759,6 +1852,10 @@ impl EscrowContract {
         if env.storage().persistent().has(&submitted_key) {
             env.storage().persistent().remove(&submitted_key);
         }
+        let submitted_ledger_key = DataKey::MilestoneSubmittedLedger(job_id, milestone_id);
+        if env.storage().persistent().has(&submitted_ledger_key) {
+            env.storage().persistent().remove(&submitted_ledger_key);
+        }
         let auto_key = DataKey::InactivityAutoApproveAt(job_id, milestone_id);
         if env.storage().persistent().has(&auto_key) {
             env.storage().persistent().remove(&auto_key);
@@ -1781,6 +1878,13 @@ impl EscrowContract {
             env.events().publish(
                 (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
                 (job_id, job.freelancer.clone(), freelancer_amount),
+            );
+            record_reputation_completion(
+                &env,
+                job_id,
+                &job.client,
+                &job.freelancer,
+                milestone.amount,
             );
         }
 
@@ -1849,6 +1953,10 @@ impl EscrowContract {
             let submitted_key = DataKey::MilestoneSubmittedAt(job_id, index);
             if env.storage().persistent().has(&submitted_key) {
                 env.storage().persistent().remove(&submitted_key);
+            }
+            let submitted_ledger_key = DataKey::MilestoneSubmittedLedger(job_id, index);
+            if env.storage().persistent().has(&submitted_ledger_key) {
+                env.storage().persistent().remove(&submitted_ledger_key);
             }
             let auto_key = DataKey::InactivityAutoApproveAt(job_id, index);
             if env.storage().persistent().has(&auto_key) {
@@ -1921,6 +2029,13 @@ impl EscrowContract {
             env.events().publish(
                 (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
                 (job_id, job.freelancer.clone(), total_released),
+            );
+            record_reputation_completion(
+                &env,
+                job_id,
+                &job.client,
+                &job.freelancer,
+                total_released,
             );
         }
 
@@ -2095,6 +2210,10 @@ impl EscrowContract {
         bump_job_ttl(&env, job_id);
 
         env.storage().persistent().remove(&submitted_key);
+        let submitted_ledger_key = DataKey::MilestoneSubmittedLedger(job_id, milestone_id);
+        if env.storage().persistent().has(&submitted_ledger_key) {
+            env.storage().persistent().remove(&submitted_ledger_key);
+        }
         env.storage().persistent().remove(&auto_key);
 
         env.events().publish(
@@ -2105,9 +2224,212 @@ impl EscrowContract {
         if all_approved {
             env.events().publish(
                 (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
-                (job_id, job.freelancer, freelancer_amount),
+                (job_id, job.freelancer.clone(), freelancer_amount),
+            );
+            record_reputation_completion(
+                &env,
+                job_id,
+                &job.client,
+                &job.freelancer,
+                milestone.amount,
             );
         }
+
+        Ok(())
+    }
+
+    /// Freelancer claims auto-release after the submission delay has elapsed.
+    pub fn claim_auto_release(
+        env: Env,
+        job_id: u64,
+        milestone_id: u32,
+        freelancer: Address,
+    ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
+        freelancer.require_auth();
+        require_not_paused(&env)?;
+
+        let mut job: Job = env
+            .storage()
+            .persistent()
+            .get(&get_job_key(job_id))
+            .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
+
+        if job.freelancer != freelancer {
+            return Err(EscrowError::Unauthorized);
+        }
+
+        require_state_not_disputed(&job)?;
+
+        let mut milestones = job.milestones.clone();
+        let milestone = milestones
+            .get(milestone_id)
+            .ok_or(EscrowError::MilestoneNotFound)?;
+        if milestone.status != MilestoneStatus::Submitted {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        let submitted_ledger_key = DataKey::MilestoneSubmittedLedger(job_id, milestone_id);
+        let submitted_ledger: u32 = env
+            .storage()
+            .persistent()
+            .get(&submitted_ledger_key)
+            .ok_or(EscrowError::InvalidStatus)?;
+        let delay = Self::get_auto_release_delay(env.clone());
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger < submitted_ledger as u64 + delay {
+            return Err(EscrowError::GracePeriodNotMet);
+        }
+
+        let token_client = token::Client::new(&env, &job.token);
+        let fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("FEE"))
+            .unwrap_or(0);
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("TRE"))
+            .unwrap_or(env.current_contract_address());
+
+        let fee_amount = (milestone.amount * fee_bps as i128) / 10_000;
+        let freelancer_amount = milestone.amount - fee_amount;
+
+        if fee_amount > 0 {
+            token_client.transfer(&env.current_contract_address(), &treasury, &fee_amount);
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("fee")),
+                (job_id, milestone_id, fee_amount, treasury.clone()),
+            );
+        }
+
+        token_client.transfer(
+            &env.current_contract_address(),
+            &job.freelancer,
+            &freelancer_amount,
+        );
+
+        let updated = Milestone {
+            id: milestone.id,
+            description: milestone.description.clone(),
+            amount: milestone.amount,
+            status: MilestoneStatus::Approved,
+            deadline: milestone.deadline,
+        };
+        milestones.set(milestone_id, updated);
+        job.milestones = milestones.clone();
+
+        let all_approved = milestones
+            .iter()
+            .all(|m| m.status == MilestoneStatus::Approved);
+        if all_approved {
+            job.status = JobStatus::Completed;
+        }
+
+        env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
+
+        env.storage().persistent().remove(&submitted_ledger_key);
+        let submitted_key = DataKey::MilestoneSubmittedAt(job_id, milestone_id);
+        if env.storage().persistent().has(&submitted_key) {
+            env.storage().persistent().remove(&submitted_key);
+        }
+        let auto_key = DataKey::InactivityAutoApproveAt(job_id, milestone_id);
+        if env.storage().persistent().has(&auto_key) {
+            env.storage().persistent().remove(&auto_key);
+        }
+
+        env.events().publish(
+            (symbol_short!("escrow"), Symbol::new(&env, "MilestoneAutoReleased")),
+            (
+                job_id,
+                milestone_id,
+                job.client.clone(),
+                job.freelancer.clone(),
+                milestone.amount,
+            ),
+        );
+
+        if all_approved {
+            env.events().publish(
+                (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
+                (job_id, job.freelancer.clone(), freelancer_amount),
+            );
+            record_reputation_completion(
+                &env,
+                job_id,
+                &job.client,
+                &job.freelancer,
+                milestone.amount,
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Client rejects a submitted milestone and returns it to Pending.
+    pub fn reject_milestone(
+        env: Env,
+        job_id: u64,
+        milestone_id: u32,
+        client: Address,
+    ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
+        client.require_auth();
+        require_not_paused(&env)?;
+
+        let mut job: Job = env
+            .storage()
+            .persistent()
+            .get(&get_job_key(job_id))
+            .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
+
+        if job.client != client {
+            return Err(EscrowError::Unauthorized);
+        }
+
+        require_state_not_disputed(&job)?;
+
+        let mut milestones = job.milestones.clone();
+        let milestone = milestones
+            .get(milestone_id)
+            .ok_or(EscrowError::MilestoneNotFound)?;
+        if milestone.status != MilestoneStatus::Submitted {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        let updated = Milestone {
+            id: milestone.id,
+            description: milestone.description.clone(),
+            amount: milestone.amount,
+            status: MilestoneStatus::Pending,
+            deadline: milestone.deadline,
+        };
+        milestones.set(milestone_id, updated);
+        job.milestones = milestones;
+        env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
+
+        let submitted_key = DataKey::MilestoneSubmittedAt(job_id, milestone_id);
+        if env.storage().persistent().has(&submitted_key) {
+            env.storage().persistent().remove(&submitted_key);
+        }
+        let submitted_ledger_key = DataKey::MilestoneSubmittedLedger(job_id, milestone_id);
+        if env.storage().persistent().has(&submitted_ledger_key) {
+            env.storage().persistent().remove(&submitted_ledger_key);
+        }
+        let auto_key = DataKey::InactivityAutoApproveAt(job_id, milestone_id);
+        if env.storage().persistent().has(&auto_key) {
+            env.storage().persistent().remove(&auto_key);
+        }
+
+        env.events().publish(
+            (symbol_short!("escrow"), Symbol::new(&env, "MilestoneRejected")),
+            (job_id, milestone_id, client),
+        );
 
         Ok(())
     }

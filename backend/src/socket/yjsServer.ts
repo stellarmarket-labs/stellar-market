@@ -4,6 +4,7 @@ import { Server as HttpServer } from "http";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
 import { config } from "../config";
+import { logger } from "../lib/logger";
 
 const prisma = new PrismaClient();
 
@@ -231,8 +232,9 @@ export function initYjsServer(httpServer: HttpServer): WebSocketServer {
         }
 
         if (origin !== null && origin !== userId) {
-          console.warn(
-            `[yjsServer] Rejected CRDT update from unexpected origin. userId=${userId} origin=${origin} jobId=${jobId}`
+          logger.warn(
+            { userId, origin, jobId },
+            "[yjsServer] Rejected CRDT update from unexpected origin",
           );
           return; // drop — do not broadcast
         }
