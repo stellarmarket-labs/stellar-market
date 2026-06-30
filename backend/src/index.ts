@@ -23,6 +23,7 @@ import {
 import { installRequestIdConsolePatch, logger } from "./lib/logger";
 import { connectWithRetry } from "./lib/db-connect";
 import { getHealthStatus } from "./lib/health";
+import { requestLogMiddleware } from "./middleware/request-log";
 import { RecommendationQueueService } from "./services/recommendation-queue.service";
 import { initializeVirusScanner } from "./utils/virusScanner";
 import { ReputationCacheService } from "./services/reputation-cache.service";
@@ -138,6 +139,7 @@ if (process.env.NODE_ENV !== "production") {
 app.use(cors(corsOptions));
 app.use(cookieParser());
 app.use(requestIdMiddleware);
+app.use(requestLogMiddleware);
 app.use(requestTimeoutMiddleware);
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));

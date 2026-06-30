@@ -4,6 +4,7 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, String,
     Symbol, Vec,
 };
+use stellar_market_reputation_interface::CompletionError;
 mod escrow {
     use soroban_sdk::{contracttype, Address, String, Vec};
 
@@ -269,6 +270,7 @@ enum DataKey {
     MultiSigSigners,
     MultiSigThreshold,
     MultiSigProposal(u64),
+    EscrowContract,
     MultiSigProposalCount,
     Leaderboard,
     StakeBalance(Address),
@@ -1121,6 +1123,82 @@ impl ReputationContract {
         env.events().publish(
             (symbol_short!("reput"), Symbol::new(&env, "dispute_set")),
             (signer, dispute_contract),
+        );
+
+        Ok(())
+    }
+
+    /// Configure the escrow contract allowed to report job completions.
+    pub fn set_escrow_contract(
+        env: Env,
+        signer: Address,
+        escrow_contract: Address,
+    ) -> Result<(), ReputationError> {
+        signer.require_auth();
+        if !is_signer(&env, &signer) {
+            return Err(ReputationError::NotAdmin);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::EscrowContract, &escrow_contract);
+        bump_instance_ttl(&env);
+
+        env.events().publish(
+            (symbol_short!("reput"), Symbol::new(&env, "escrow_set")),
+            (signer, escrow_contract),
+        );
+
+        Ok(())
+    }
+
+    /// Record an on-chain job completion reported by the escrow contract.
+    pub fn record_completion(
+        env: Env,
+        client: Address,
+        freelancer: Address,
+        amount: i128,
+        rating: u32,
+    ) -> Result<(), CompletionError> {
+        if !(1..=5).contains(&rating) || amount <= 0 {
+            return Err(CompletionError::InvalidInput);
+        }
+
+        let escrow_contract: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::EscrowContract)
+            .ok_or(CompletionError::Unauthorized)?;
+        if env.invoker() != escrow_contract {
+            return Err(CompletionError::Unauthorized);
+        }
+
+        let weight = amount as u64;
+        let rep_key = DataKey::Reputation(freelancer.clone());
+        let mut reputation: UserReputation =
+            env.storage()
+                .persistent()
+                .get(&rep_key)
+                .unwrap_or(UserReputation {
+                    user: freelancer.clone(),
+                    total_score: 0,
+                    total_weight: 0,
+                    review_count: 0,
+                    last_updated_ledger: env.ledger().timestamp() as u32,
+                });
+
+        apply_lazy_decay(&env, &mut reputation);
+        reputation.total_score += (rating as u64) * weight;
+        reputation.total_weight += weight;
+        reputation.review_count += 1;
+        reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+
+        env.storage().persistent().set(&rep_key, &reputation);
+        bump_reputation_ttl(&env, &freelancer);
+
+        env.events().publish(
+            (symbol_short!("reput"), Symbol::new(&env, "completion")),
+            (client, freelancer, amount, rating),
         );
 
         Ok(())

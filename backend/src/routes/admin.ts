@@ -17,6 +17,7 @@ import { NotificationService } from "../services/notification.service";
 import { validate } from "../middleware/validation";
 import { projectJobState } from "../services/escrow-projection.service";
 import { ReputationCacheService } from "../services/reputation-cache.service";
+import { logger } from "../lib/logger";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -90,7 +91,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error("Error fetching users:", error);
+      logger.error({ err: error }, "Error fetching users");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -111,7 +112,7 @@ router.get(
       });
       res.json({ failed });
     } catch (error) {
-      console.error("Error fetching failed notifications:", error);
+      logger.error({ err: error }, "Error fetching failed notifications");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -210,7 +211,7 @@ router.delete(
 
       res.json({ message: "Job removed successfully" });
     } catch (error) {
-      console.error("Error removing job:", error);
+      logger.error({ err: error }, "Error removing job");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -274,7 +275,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error("Error fetching jobs:", error);
+      logger.error({ err: error }, "Error fetching jobs");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -315,7 +316,7 @@ router.post(
         job: restoredJob,
       });
     } catch (error) {
-      console.error("Error restoring job:", error);
+      logger.error({ err: error }, "Error restoring job");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -345,7 +346,7 @@ router.get(
 
       res.json({ disputes });
     } catch (error) {
-      console.error("Error fetching disputes:", error);
+      logger.error({ err: error }, "Error fetching disputes");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -484,7 +485,7 @@ router.get(
         suspendedUsers: suspendedUsers,
       });
     } catch (error) {
-      console.error("Error fetching flagged content:", error);
+      logger.error({ err: error }, "Error fetching flagged content");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -539,7 +540,7 @@ router.get("/stats", async (req: AuthRequest, res: Response): Promise<void> => {
       disputeRate: parseFloat(disputeRate),
     });
   } catch (error) {
-    console.error("Error fetching stats:", error);
+    logger.error({ err: error }, "Error fetching stats");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -612,7 +613,7 @@ router.get(
           .json({ error: "Validation error", details: error.issues });
         return;
       }
-      console.error("Error fetching pending disputes:", error);
+      logger.error({ err: error }, "Error fetching pending disputes");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -664,7 +665,7 @@ router.get(
           .json({ error: "Validation error", details: error.issues });
         return;
       }
-      console.error("Error fetching users:", error);
+      logger.error({ err: error }, "Error fetching users");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -694,7 +695,7 @@ router.get(
 
       res.json({ disputes });
     } catch (error) {
-      console.error("Error fetching disputes:", error);
+      logger.error({ err: error }, "Error fetching disputes");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -725,7 +726,7 @@ router.get(
 
       res.json({ disputes });
     } catch (error) {
-      console.error("Error fetching pending disputes:", error);
+      logger.error({ err: error }, "Error fetching pending disputes");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -864,7 +865,7 @@ router.get(
         suspendedUsers: suspendedUsers,
       });
     } catch (error) {
-      console.error("Error fetching flagged content:", error);
+      logger.error({ err: error }, "Error fetching flagged content");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -892,7 +893,7 @@ router.get(
 
       res.json({ users });
     } catch (error) {
-      console.error("Error fetching flagged users:", error);
+      logger.error({ err: error }, "Error fetching flagged users");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -919,7 +920,7 @@ router.get("/stats", async (req: AuthRequest, res: Response): Promise<void> => {
       suspendedUsers,
     });
   } catch (error) {
-    console.error("Error fetching stats:", error);
+    logger.error({ err: error }, "Error fetching stats");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -1131,7 +1132,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error("Error fetching reports:", error);
+      logger.error({ err: error }, "Error fetching reports");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1217,7 +1218,7 @@ router.get(
       });
       res.json({ events });
     } catch (error) {
-      console.error("Error fetching event log:", error);
+      logger.error({ err: error }, "Error fetching event log");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1254,7 +1255,7 @@ router.post(
         job: updatedJob,
       });
     } catch (error) {
-      console.error("Error reprojecting job state:", error);
+      logger.error({ err: error }, "Error reprojecting job state");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1286,7 +1287,7 @@ router.post(
         walletAddress,
       });
     } catch (error) {
-      console.error("Error invalidating reputation cache:", error);
+      logger.error({ err: error }, "Error invalidating reputation cache");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1311,7 +1312,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error("Error getting reputation cache stats:", error);
+      logger.error({ err: error }, "Error getting reputation cache stats");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1338,7 +1339,7 @@ router.get(
         })),
       });
     } catch (error) {
-      console.error("Error fetching DLQ jobs:", error);
+      logger.error({ err: error }, "Error fetching DLQ jobs");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1357,7 +1358,7 @@ router.get(
       const status = await getHorizonStatus();
       res.json(status);
     } catch (error) {
-      console.error("Error getting Horizon status:", error);
+      logger.error({ err: error }, "Error getting Horizon status");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1393,7 +1394,7 @@ router.post(
         cursor,
       });
     } catch (error) {
-      console.error("Error updating Horizon cursor:", error);
+      logger.error({ err: error }, "Error updating Horizon cursor");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1423,7 +1424,7 @@ router.post(
         ...result,
       });
     } catch (error) {
-      console.error("Error replaying DLQ:", error);
+      logger.error({ err: error }, "Error replaying DLQ");
       res.status(500).json({ error: "Internal server error" });
     }
   },

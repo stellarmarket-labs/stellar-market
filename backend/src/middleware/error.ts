@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from "express";
 import { ZodError } from 'zod';
 import { AppError } from "../errors/AppError";
 import { ErrorCodes } from "../errors/codes";
@@ -21,11 +21,14 @@ export const errorHandler = (
   let message = err.message || 'Internal Server Error';
   let details: any = err.details;
 
+  let isHandled = false;
+
   if (err instanceof AppError) {
     code = err.code;
     statusCode = err.statusCode;
     message = err.message;
     details = err.details;
+    isHandled = statusCode < 500;
   } else if (err instanceof ZodError) {
     code = ErrorCodes.VALIDATION_ERROR;
     statusCode = 400;
@@ -35,6 +38,7 @@ export const errorHandler = (
       message: error.message,
       code: error.code
     }));
+    isHandled = true;
   } else if (err.name === 'PrismaClientKnownRequestError') {
     code = ErrorCodes.DATABASE_ERROR;
     statusCode = 400;
@@ -43,18 +47,22 @@ export const errorHandler = (
       prismaCode: (err as any).code,
       target: (err as any).meta?.target,
     };
+    isHandled = true;
   } else if (err.name === 'ContractSimulationError') {
     code = ErrorCodes.CONTRACT_SIMULATION_ERROR;
     statusCode = 422;
     message = err.message;
+    isHandled = true;
   } else if (err.name === 'JsonWebTokenError') {
     code = ErrorCodes.INVALID_TOKEN;
     statusCode = 401;
     message = 'Invalid token';
+    isHandled = true;
   } else if (err.name === 'TokenExpiredError') {
     code = ErrorCodes.TOKEN_EXPIRED;
     statusCode = 401;
     message = 'Token expired';
+    isHandled = true;
   } else if (err.name === 'MulterError') {
     code = ErrorCodes.FILE_UPLOAD_FAILED;
     statusCode = 400;
@@ -68,19 +76,29 @@ export const errorHandler = (
     } else {
       message = 'File upload failed.';
     }
+    isHandled = true;
   }
 
-  logger.error(
-    {
-      err,
-      errorCode: code,
-      requestId: req.requestId,
-      url: req.url,
-      method: req.method,
-      ip: req.ip,
-    },
-    "Request error",
-  );
+  const logPayload = {
+    err,
+    errorCode: code,
+    requestId: req.requestId,
+    url: req.url,
+    method: req.method,
+    ip: req.ip,
+  };
+
+  if (isHandled) {
+    logger.warn(
+      logPayload,
+      "Request handled with error",
+    );
+  } else {
+    logger.error(
+      logPayload,
+      "Unhandled request error",
+    );
+  }
 
   if (statusCode === 503) {
     res.setHeader("Retry-After", "30");

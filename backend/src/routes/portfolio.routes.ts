@@ -12,6 +12,7 @@ import {
   PORTFOLIO_MAX_FILE_SIZE,
 } from "../config/upload";
 import { formatFileSize } from "../utils/fileValidation";
+import { logger } from "../lib/logger";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -90,7 +91,7 @@ router.get("/user/:userId", async (req, res) => {
     });
     res.json({ items });
   } catch (error) {
-    console.error("Error fetching portfolio items:", error);
+    logger.error({ err: error }, "Error fetching portfolio items");
     res.status(500).json({ error: "Failed to fetch portfolio items" });
   }
 });
@@ -159,7 +160,7 @@ router.post(
           error: `File too large. Maximum size is ${formatFileSize(PORTFOLIO_MAX_FILE_SIZE)}`,
         });
       }
-      console.error("Error creating portfolio item:", error);
+      logger.error({ err: error }, "Error creating portfolio item");
       res.status(500).json({ error: "Failed to create portfolio item" });
     }
   },
@@ -199,7 +200,7 @@ router.put(
 
       res.json({ message: "Portfolio items reordered successfully" });
     } catch (error) {
-      console.error("Error reordering portfolio items:", error);
+      logger.error({ err: error }, "Error reordering portfolio items");
       res.status(500).json({ error: "Failed to reorder portfolio items" });
     }
   },
@@ -239,7 +240,7 @@ router.put(
 
       res.json({ ...updated, sizeFormatted: formatFileSize(updated.size) });
     } catch (error) {
-      console.error("Error updating portfolio item:", error);
+      logger.error({ err: error }, "Error updating portfolio item");
       res.status(500).json({ error: "Failed to update portfolio item" });
     }
   },
@@ -275,7 +276,7 @@ router.delete(
 
       res.json({ message: "Portfolio item deleted successfully" });
     } catch (error) {
-      console.error("Error deleting portfolio item:", error);
+      logger.error({ err: error }, "Error deleting portfolio item");
       res.status(500).json({ error: "Failed to delete portfolio item" });
     }
   },
