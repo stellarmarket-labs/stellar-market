@@ -14,6 +14,15 @@ export function requestTimeoutMiddleware(
   res: Response,
   next: NextFunction,
 ): void {
+  const acceptHeader = req.headers.accept ?? "";
+  if (
+    req.path.endsWith("/stream") ||
+    (typeof acceptHeader === "string" && acceptHeader.includes("text/event-stream"))
+  ) {
+    next();
+    return;
+  }
+
   const startedAt = Date.now();
   let timedOut = false;
 
