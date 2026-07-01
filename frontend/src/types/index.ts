@@ -251,6 +251,7 @@ export interface Dispute {
   minVotes: number;
   createdAt: string;
   updatedAt: string;
+  voteDeadline?: string;
   job: Job;
   initiator: User;
   respondent: User;

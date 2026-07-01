@@ -13,6 +13,7 @@ import DisputeTiming from "@/components/DisputeTiming";
 import EvidenceViewer from "@/components/EvidenceViewer";
 import EvidenceUpload from "@/components/EvidenceUpload";
 import DisputeOutcomeBanner from "@/components/DisputeOutcomeBanner";
+import DisputeTimeInfo from "@/components/DisputeTimeInfo";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
 
@@ -217,6 +218,10 @@ export default function DisputeDetailPage() {
               <span className="text-sm text-theme-text">
                 Job: <Link href={`/jobs/${dispute.job.id}`} className="text-stellar-blue hover:underline">{dispute.job.title}</Link>
               </span>
+            </div>
+
+            <div className="mb-6">
+              <DisputeTimeInfo createdAt={dispute.createdAt} voteDeadline={dispute.voteDeadline} />
             </div>
 
             <h1 className="text-2xl font-bold text-theme-heading mb-6">

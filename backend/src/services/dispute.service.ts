@@ -71,7 +71,10 @@ export class DisputeService {
       throw createError("A dispute already exists for this job", 400);
     }
 
-    // Create dispute
+    // Create dispute with vote deadline (7 days from now)
+    const voteDeadline = new Date();
+    voteDeadline.setDate(voteDeadline.getDate() + 7);
+
     const dispute = await prisma.dispute.create({
       data: {
         jobId,
@@ -80,6 +83,7 @@ export class DisputeService {
         initiatorId,
         reason,
         status: DisputeStatus.OPEN,
+        voteDeadline,
       },
       include: {
         job: { select: { title: true, budget: true } },
