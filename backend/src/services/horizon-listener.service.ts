@@ -1,5 +1,13 @@
 import { rpc, scValToNative, Contract } from "@stellar/stellar-sdk";
 import { PrismaClient, BadgeTier, EscrowEventType } from "@prisma/client";
+import { rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
+import {
+  PrismaClient,
+  BadgeTier,
+  Prisma,
+  Notification,
+  NotificationType,
+} from "@prisma/client";
 import { config } from "../config";
 import { NotificationService } from "./notification.service";
 import { logger } from "../lib/logger";
@@ -18,7 +26,9 @@ const server = new rpc.Server(config.stellar.rpcUrl);
 
 const POLL_INTERVAL_MS = 5_000;
 const MAX_EVENTS_PER_POLL = 200;
-const SYNC_STATE_ID = "default";
+const CURSOR_ID = 1;
+const MAX_PROCESSING_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 250;
 
 // ─── Reconnect backoff (independent of the circuit breaker's open/half-open
 // gating below — this controls how soon we *retry* after a failed poll) ──────
@@ -209,20 +219,24 @@ export async function getHorizonStatus(): Promise<{
 
 // ─── sync-state persistence (legacy — kept for badges) ────────────────────────
 
-async function getLastIndexedLedger(): Promise<number> {
-  const row = await prisma.syncState.upsert({
-    where: { id: SYNC_STATE_ID },
+async function getCursor(): Promise<string> {
+  const row = await prisma.horizonCursor.upsert({
+    where: { id: CURSOR_ID },
     update: {},
-    create: { id: SYNC_STATE_ID, lastIndexedLedger: 0 },
+    create: { id: CURSOR_ID, cursor: "0" },
   });
-  return row.lastIndexedLedger;
+  return row.cursor;
 }
 
-async function setLastIndexedLedger(ledger: number): Promise<void> {
-  await prisma.syncState.upsert({
-    where: { id: SYNC_STATE_ID },
-    update: { lastIndexedLedger: ledger },
-    create: { id: SYNC_STATE_ID, lastIndexedLedger: ledger },
+async function setCursor(
+  tx: TransactionClient,
+  cursor: string,
+  lastEventAt?: Date,
+): Promise<void> {
+  await tx.horizonCursor.upsert({
+    where: { id: CURSOR_ID },
+    update: { cursor, ...(lastEventAt ? { lastEventAt } : {}) },
+    create: { id: CURSOR_ID, cursor, lastEventAt },
   });
 }
 
@@ -231,9 +245,12 @@ async function setLastIndexedLedger(ledger: number): Promise<void> {
 /**
  * escrow / created — (job_count: u64, client: Address, freelancer: Address)
  */
-async function handleJobCreated(event: SorobanEvent): Promise<void> {
+async function handleJobCreated(
+  tx: TransactionClient,
+  event: SorobanEvent,
+): Promise<PendingNotification[]> {
   const data = scValToNative(event.value) as unknown[];
-  if (!Array.isArray(data) || data.length < 1) return;
+  if (!Array.isArray(data) || data.length < 1) return [];
 
   const onChainJobId = bigintToStr(data[0]);
 
@@ -260,14 +277,18 @@ async function handleJobCreated(event: SorobanEvent): Promise<void> {
   });
 
   logger.info({ contractJobId: onChainJobId }, "[HorizonListener] JobCreated");
+  return [];
 }
 
 /**
  * escrow / funded — (job_id: u64, client: Address)
  */
-async function handleJobFunded(event: SorobanEvent): Promise<void> {
+async function handleJobFunded(
+  tx: TransactionClient,
+  event: SorobanEvent,
+): Promise<PendingNotification[]> {
   const data = scValToNative(event.value) as unknown[];
-  if (!Array.isArray(data) || data.length < 1) return;
+  if (!Array.isArray(data) || data.length < 1) return [];
 
   const onChainJobId = bigintToStr(data[0]);
 
@@ -294,21 +315,28 @@ async function handleJobFunded(event: SorobanEvent): Promise<void> {
   });
 
   logger.info({ contractJobId: onChainJobId }, "[HorizonListener] JobFunded");
+  return [];
 }
 
 /**
  * escrow / pmt_released — (job_id: u64, freelancer: Address, amount: i128)
  */
-async function handlePaymentReleased(event: SorobanEvent): Promise<void> {
+async function handlePaymentReleased(
+  tx: TransactionClient,
+  event: SorobanEvent,
+): Promise<PendingNotification[]> {
   const data = scValToNative(event.value) as unknown[];
-  if (!Array.isArray(data) || data.length < 1) return;
+  if (!Array.isArray(data) || data.length < 1) return [];
 
   const onChainJobId = bigintToStr(data[0]);
   const amount = data.length >= 3 ? bigintToStr(data[2]) : "0";
 
-  const job = await prisma.job.findFirst({
-    where: { contractJobId: onChainJobId },
-    select: { id: true },
+  const updated = await tx.job.updateMany({
+    where: {
+      contractJobId: onChainJobId,
+      status: { not: "COMPLETED" },
+    },
+    data: { escrowStatus: "COMPLETED", status: "COMPLETED" },
   });
 
   if (!job) {
@@ -337,14 +365,17 @@ async function handlePaymentReleased(event: SorobanEvent): Promise<void> {
 /**
  * dispute / raised — (dispute_id: u64, job_id: u64, initiator: Address)
  */
-async function handleDisputeOpened(event: SorobanEvent): Promise<void> {
+async function handleDisputeOpened(
+  tx: TransactionClient,
+  event: SorobanEvent,
+): Promise<PendingNotification[]> {
   const data = scValToNative(event.value) as unknown[];
-  if (!Array.isArray(data) || data.length < 3) return;
+  if (!Array.isArray(data) || data.length < 3) return [];
 
   const onChainDisputeId = bigintToStr(data[0]);
   const onChainJobId = bigintToStr(data[1]);
 
-  const job = await prisma.job.findFirst({
+  const job = await tx.job.findFirst({
     where: { contractJobId: onChainJobId },
     select: { id: true },
   });
@@ -357,29 +388,69 @@ async function handleDisputeOpened(event: SorobanEvent): Promise<void> {
     return;
   }
 
-  await handleEscrowEvent({
-    jobId: job.id,
-    contractJobId: onChainJobId,
-    eventType: EscrowEventType.DISPUTE_OPENED,
-    ledgerSeq: event.ledger,
-    txHash: event.txHash,
-    payload: { onChainDisputeId },
+  await tx.job.update({
+    where: { id: job.id },
+    data: { status: "DISPUTED", escrowStatus: "DISPUTED" },
+  });
+
+  await tx.dispute.upsert({
+    where: { onChainDisputeId },
+    update: { status: "OPEN" },
+    create: {
+      jobId: job.id,
+      onChainDisputeId,
+      clientId: job.clientId,
+      freelancerId: job.freelancerId ?? job.clientId,
+      initiatorId: job.clientId,
+      reason: "Raised on-chain",
+      status: "OPEN",
+    },
   });
 
   logger.info({ onChainDisputeId }, "[HorizonListener] DisputeOpened");
+  return [job.clientId, job.freelancerId]
+    .filter(Boolean)
+    .map((userId) => ({
+      userId: userId as string,
+      type: NotificationType.DISPUTE_RAISED,
+      title: "Dispute Opened",
+      message: "A dispute has been opened on-chain for your job.",
+      metadata: { onChainDisputeId, contractJobId: onChainJobId },
+    }));
 }
 
 /**
  * dispute / resolved — (dispute_id: u64, dispute_status: DisputeStatus)
  */
-async function handleDisputeResolved(event: SorobanEvent): Promise<void> {
+async function handleDisputeResolved(
+  tx: TransactionClient,
+  event: SorobanEvent,
+): Promise<PendingNotification[]> {
   const data = scValToNative(event.value) as unknown[];
-  if (!Array.isArray(data) || data.length < 2) return;
+  if (!Array.isArray(data) || data.length < 2) return [];
 
   const onChainDisputeId = bigintToStr(data[0]);
   const rawStatus = enumVariant(data[1]);
 
-  const dispute = await prisma.dispute.findUnique({
+  let dbDisputeStatus: "OPEN" | "IN_PROGRESS" | "RESOLVED" = "RESOLVED";
+  let jobStatus: "COMPLETED" | "CANCELLED" | null = null;
+  let outcome: string = rawStatus;
+
+  if (rawStatus === "ResolvedForClient") {
+    jobStatus = "CANCELLED";
+    outcome = "CLIENT_WINS";
+  } else if (rawStatus === "ResolvedForFreelancer") {
+    jobStatus = "COMPLETED";
+    outcome = "FREELANCER_WINS";
+  } else if (rawStatus === "RefundedBoth") {
+    jobStatus = "CANCELLED";
+    outcome = "REFUND_BOTH";
+  } else if (rawStatus === "Escalated") {
+    dbDisputeStatus = "IN_PROGRESS";
+    outcome = "ESCALATED";
+  }
+
+  const dispute = await tx.dispute.findUnique({
     where: { onChainDisputeId },
     select: {
       jobId: true,
@@ -401,13 +472,13 @@ async function handleDisputeResolved(event: SorobanEvent): Promise<void> {
     return;
   }
 
-  await handleEscrowEvent({
-    jobId: dispute.jobId,
-    contractJobId: dispute.job.contractJobId ?? "",
-    eventType: EscrowEventType.DISPUTE_RESOLVED,
-    ledgerSeq: event.ledger,
-    txHash: event.txHash,
-    payload: { onChainDisputeId, rawStatus },
+  await tx.dispute.update({
+    where: { id: dispute.id },
+    data: {
+      status: dbDisputeStatus,
+      outcome,
+      resolvedAt: dbDisputeStatus === "RESOLVED" ? new Date() : null,
+    },
   });
 
   // Invalidate reputation cache for both client and freelancer (dispute affects reputation)
@@ -431,26 +502,29 @@ async function handleDisputeResolved(event: SorobanEvent): Promise<void> {
 /**
  * reput / badge — (user_address: Address, tier: ReputationTier)
  */
-async function handleBadgeAwarded(event: SorobanEvent): Promise<void> {
+async function handleBadgeAwarded(
+  tx: TransactionClient,
+  event: SorobanEvent,
+): Promise<PendingNotification[]> {
   const data = scValToNative(event.value) as unknown[];
-  if (!Array.isArray(data) || data.length < 2) return;
+  if (!Array.isArray(data) || data.length < 2) return [];
 
   const walletAddress = String(data[0] ?? "");
   const tier = toBadgeTier(data[1]);
 
-  if (!walletAddress || !tier) return;
+  if (!walletAddress || !tier) return [];
 
-  const user = await prisma.user.findUnique({
+  const user = await tx.user.findUnique({
     where: { walletAddress },
     select: { id: true },
   });
 
   if (!user) {
     logger.warn({ walletAddress }, "[HorizonListener] BadgeAwarded — no user");
-    return;
+    return [];
   }
 
-  const result = await prisma.badge.upsert({
+  const result = await tx.badge.upsert({
     where: { userId_tier: { userId: user.id, tier } },
     update: {},
     create: {
@@ -461,14 +535,14 @@ async function handleBadgeAwarded(event: SorobanEvent): Promise<void> {
   });
 
   if (result.awardedLedger === event.ledger) {
-    await NotificationService.sendNotification({
+    return [{
       userId: user.id,
-      type: "BADGE_AWARDED",
+      type: NotificationType.BADGE_AWARDED,
       title: `${tier.charAt(0) + tier.slice(1).toLowerCase()} Badge Earned!`,
       message: `Congratulations! You earned a ${tier.toLowerCase()} reputation badge on-chain.`,
       metadata: { tier, awardedLedger: event.ledger },
       skipBatching: true,
-    });
+    }];
   }
 
   // Invalidate reputation cache for this user
@@ -477,6 +551,48 @@ async function handleBadgeAwarded(event: SorobanEvent): Promise<void> {
     { walletAddress, tier },
     "[HorizonListener] BadgeAwarded - cache invalidated",
   );
+}
+
+/**
+ * escrow / paused — Paused { paused_by: Address }
+ */
+async function handleContractPaused(event: SorobanEvent): Promise<void> {
+  const data = scValToNative(event.value) as Record<string, unknown>;
+  const pausedBy = String(data?.paused_by ?? "");
+
+  // Mark all active jobs as paused in PostgreSQL
+  await prisma.job.updateMany({
+    where: {
+      status: {
+        in: ["CREATED", "FUNDED", "IN_PROGRESS", "DISPUTED"],
+      },
+    },
+    data: {
+      contractPaused: true,
+    },
+  });
+
+  logger.info({ pausedBy, ledger: event.ledger }, "[HorizonListener] ContractPaused");
+}
+
+/**
+ * escrow / unpaused — Unpaused { unpaused_by: Address }
+ */
+async function handleContractUnpaused(event: SorobanEvent): Promise<void> {
+  const data = scValToNative(event.value) as Record<string, unknown>;
+  const unpausedBy = String(data?.unpaused_by ?? "");
+
+  // Unmark all paused jobs
+  await prisma.job.updateMany({
+    where: {
+      contractPaused: true,
+    },
+    data: {
+      contractPaused: false,
+    },
+  });
+
+  logger.info({ unpausedBy, ledger: event.ledger }, "[HorizonListener] ContractUnpaused");
 }
 
 // ─── event dispatch ───────────────────────────────────────────────────────────
@@ -524,30 +640,76 @@ async function processEventWithRetry(
       "[HorizonListener] Event processing failed after retries, moved to DLQ",
     );
   }
+
+  if (contract === "reput" && name === "badge") {
+    return handleBadgeAwarded(tx, event);
+  }
+
+  return [];
 }
 
-async function processEvent(event: SorobanEvent): Promise<void> {
-  const [contract, name] = topicToStrings(event);
+function eventCursor(event: SorobanEvent): string {
+  const cursor = event.pagingToken;
+  if (!cursor) {
+    throw new Error("Stellar RPC event did not include a paging token");
+  }
+  return cursor;
+}
 
-  // Promote any PENDING pre-registration for this txHash to SUCCESS immediately.
-  await resolvePreRegisteredTx(event.txHash, event.ledger);
+function eventTimestamp(event: SorobanEvent): Date {
+  const value = (event as SorobanEvent & { ledgerClosedAt?: string }).ledgerClosedAt;
+  const timestamp = value ? new Date(value) : new Date();
+  return Number.isNaN(timestamp.getTime()) ? new Date() : timestamp;
+}
 
-  if (contract === "escrow") {
-    if (name === "created") return await handleJobCreated(event);
-    if (name === "funded") return await handleJobFunded(event);
-    if (name === "pmt_released") return await handlePaymentReleased(event);
-    if (name === "token_allowed") return await handleTokenAllowed(event);
-    if (name === "token_revoked") return await handleTokenRevoked(event);
+if (contract === "escrow") {
+  if (name === "created") return await handleJobCreated(event);
+  if (name === "funded") return await handleJobFunded(event);
+  if (name === "pmt_released") return await handlePaymentReleased(event);
+  if (name === "token_allowed") return await handleTokenAllowed(event);
+  if (name === "token_revoked") return await handleTokenRevoked(event);
+  try {
+    if (contract === "escrow") {
+      if (name === "created") return await handleJobCreated(event);
+      if (name === "funded") return await handleJobFunded(event);
+      if (name === "pmt_released") return await handlePaymentReleased(event);
+      if (name === "paused") return await handleContractPaused(event);
+      if (name === "unpaused") return await handleContractUnpaused(event);
+    }
+
+    if (contract === "dispute") {
+      if (name === "raised") return await handleDisputeOpened(event);
+      if (name === "resolved") return await handleDisputeResolved(event);
+    }
+
+    if (contract === "reput") {
+      if (name === "badge") return await handleBadgeAwarded(event);
+    }
+  } catch (err) {
+    logger.error(
+      { err, contract, name, ledger: event.ledger },
+      "[HorizonListener] processEvent handler threw",
+    );
+    throw err; // re-throw so processEventWithRetry can handle retries/DLQ
   }
 
-  if (contract === "dispute") {
-    if (name === "raised") return await handleDisputeOpened(event);
-    if (name === "resolved") return await handleDisputeResolved(event);
-  }
+  const cursor = eventCursor(event);
+  await prisma.$transaction(async (tx) => {
+    await tx.horizonDlq.create({
+      data: {
+        cursor,
+        payload: serializeEvent(event),
+        error: errorMessage(lastError),
+        attempt: MAX_PROCESSING_ATTEMPTS,
+      },
+    });
+    await setCursor(tx, cursor, eventTimestamp(event));
+  });
 
-  if (contract === "reput") {
-    if (name === "badge") return await handleBadgeAwarded(event);
-  }
+  logger.error(
+    { cursor, err: lastError },
+    "[HorizonListener] Event moved to DLQ; stream will continue",
+  );
 }
 
 async function handleTokenAllowed(event: SorobanEvent): Promise<void> {
@@ -568,7 +730,7 @@ async function handleTokenRevoked(event: SorobanEvent): Promise<void> {
 
 // ─── polling loop (circuit-breaker guarded) ───────────────────────────────────
 
-async function poll(): Promise<void> {
+export async function pollHorizonOnce(): Promise<void> {
   // Circuit breaker gate
   if (!horizonCB.allowRequest()) {
     const status = horizonCB.getStatus();
@@ -625,10 +787,9 @@ async function poll(): Promise<void> {
 
   try {
     const result = await server.getEvents({
-      startLedger,
       filters: [{ type: "contract", contractIds }],
-      limit: MAX_EVENTS_PER_POLL,
-    });
+      pagination: { cursor, limit: MAX_EVENTS_PER_POLL },
+    } as Parameters<typeof server.getEvents>[0]);
     events = result.events;
     horizonCB.onSuccess(); // successful Horizon call
     onPollSuccess();
@@ -661,11 +822,81 @@ async function poll(): Promise<void> {
     await processEventWithRetry(event);
     if (event.ledger > maxEventLedger) maxEventLedger = event.ledger;
   }
+}
 
-  if (maxEventLedger > Number(cursor)) {
-    await setCursor(String(maxEventLedger));
-    await setLastIndexedLedger(maxEventLedger); // Keep legacy sync for badges
+// ─── admin operations ─────────────────────────────────────────────────────────
+
+export async function getHorizonStatus(): Promise<{
+  cursor: string;
+  dlqDepth: number;
+  lastEventTimestamp: Date | null;
+}> {
+  const [cursor, dlqDepth] = await Promise.all([
+    prisma.horizonCursor.upsert({
+      where: { id: CURSOR_ID },
+      update: {},
+      create: { id: CURSOR_ID, cursor: "0" },
+    }),
+    prisma.horizonDlq.count({ where: { replayedAt: null } }),
+  ]);
+
+  return {
+    cursor: cursor.cursor,
+    dlqDepth,
+    lastEventTimestamp: cursor.lastEventAt,
+  };
+}
+
+if (maxEventLedger > Number(cursor)) {
+  await setCursor(String(maxEventLedger));
+  await setLastIndexedLedger(maxEventLedger); // Keep legacy sync for badges
+}
+await prisma.horizonCursor.upsert({
+  where: { id: CURSOR_ID },
+  update: { cursor },
+  create: { id: CURSOR_ID, cursor },
+});
+}
+
+export async function replayHorizonDlq(): Promise<{
+  replayed: number;
+  failed: number;
+}> {
+  const entries = await prisma.horizonDlq.findMany({
+    where: { replayedAt: null },
+    orderBy: [{ cursor: "asc" }, { id: "asc" }],
+  });
+
+  let replayed = 0;
+  let failed = 0;
+
+  for (const entry of entries) {
+    try {
+      const event = deserializeEvent(entry.payload);
+      const notifications = await prisma.$transaction(async (tx) => {
+        const pending = await dispatchEvent(tx, event);
+        const persisted = await persistNotifications(tx, pending);
+        await tx.horizonDlq.update({
+          where: { id: entry.id },
+          data: { replayedAt: new Date() },
+        });
+        return persisted;
+      });
+      await deliverNotifications(notifications);
+      replayed += 1;
+    } catch (err) {
+      failed += 1;
+      await prisma.horizonDlq.update({
+        where: { id: entry.id },
+        data: {
+          attempt: { increment: 1 },
+          error: errorMessage(err),
+        },
+      });
+    }
   }
+
+  return { replayed, failed };
 }
 
 // ─── public API ───────────────────────────────────────────────────────────────
@@ -701,8 +932,11 @@ export function startHorizonListener(): void {
   // poll can back off exponentially — 1s, 2s, 4s, 8s... capped at 60s —
   // instead of hammering an unreachable Horizon every POLL_INTERVAL_MS.
   const runPoll = async () => {
+    if (activePoll) return;
+
     try {
-      await poll();
+      activePoll = pollHorizonOnce();
+      await activePoll;
     } catch (err) {
       logger.error({ err }, "[HorizonListener] Poll error");
       onPollFailure(err);
@@ -720,43 +954,46 @@ export function startHorizonListener(): void {
 }
 
 export function stopHorizonListener(): void {
-  running = false;
-  if (timerId) {
-    clearTimeout(timerId);
-    timerId = null;
-    logger.info("[HorizonListener] Stopped");
-  }
-}
-
-async function initializeAllowedTokens(): Promise<void> {
-  const contractId = config.stellar.escrowContractId;
-  if (!contractId) {
-    logger.warn("[HorizonListener] Missing escrowContractId, skipping token cache init");
-    return;
-  }
-  try {
-    const { Contract, TransactionBuilder, Account } = await import("@stellar/stellar-sdk");
-    const contract = new Contract(contractId);
-    const result = await server.simulateTransaction(
-      new TransactionBuilder(
-        new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0"),
-        { fee: "100", networkPassphrase: config.stellar.networkPassphrase }
-      )
-        .addOperation(contract.call("get_allowed_tokens"))
-        .setTimeout(30)
-        .build()
-    );
-
-    if ("result" in result && result.result) {
-      const native = scValToNative(result.result.retval);
-      if (Array.isArray(native)) {
-        for (const token of native) {
-          allowedTokensStore.add(String(token));
-        }
-        logger.info({ count: native.length }, "[HorizonListener] Initialized allowedTokensStore");
-      }
+  if (intervalId) {
+    clearInterval(intervalId);
+    intervalId = null;
+    running = false;
+    if (timerId) {
+      clearTimeout(timerId);
+      timerId = null;
+      logger.info("[HorizonListener] Stopped");
     }
-  } catch (error) {
-    logger.warn({ err: error }, "[HorizonListener] Failed to initialize allowedTokensStore");
   }
-}
+
+  async function initializeAllowedTokens(): Promise<void> {
+    const contractId = config.stellar.escrowContractId;
+    if (!contractId) {
+      logger.warn("[HorizonListener] Missing escrowContractId, skipping token cache init");
+      return;
+    }
+    try {
+      const { Contract, TransactionBuilder, Account } = await import("@stellar/stellar-sdk");
+      const contract = new Contract(contractId);
+      const result = await server.simulateTransaction(
+        new TransactionBuilder(
+          new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0"),
+          { fee: "100", networkPassphrase: config.stellar.networkPassphrase }
+        )
+          .addOperation(contract.call("get_allowed_tokens"))
+          .setTimeout(30)
+          .build()
+      );
+
+      if ("result" in result && result.result) {
+        const native = scValToNative(result.result.retval);
+        if (Array.isArray(native)) {
+          for (const token of native) {
+            allowedTokensStore.add(String(token));
+          }
+          logger.info({ count: native.length }, "[HorizonListener] Initialized allowedTokensStore");
+        }
+      }
+    } catch (error) {
+      logger.warn({ err: error }, "[HorizonListener] Failed to initialize allowedTokensStore");
+    }
+  }
