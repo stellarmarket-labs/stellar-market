@@ -86,8 +86,8 @@ fn test_create_job() {
 
     let milestones = vec![
         &env,
-        (String::from_str(&env, "Design mockups"), 500_i128, JOB_DEADLINE),
-        (String::from_str(&env, "Frontend implementation"), 1000_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Design mockups"), 500_i128, JOB_DEADLINE / 3),
+        (String::from_str(&env, "Frontend implementation"), 1000_i128, JOB_DEADLINE * 2 / 3),
         (String::from_str(&env, "Backend integration"), 1500_i128, JOB_DEADLINE),
     ];
 
@@ -212,7 +212,7 @@ fn test_job_count_increments() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #7)")] // InvalidDeadline
+#[should_panic(expected = "HostError: Error(Contract, #49)")] // MilestoneDeadlineInPast
 fn test_create_job_invalid_deadline() {
     let env = Env::default();
     env.mock_all_auths();
@@ -292,8 +292,8 @@ fn test_create_job_max_milestones_succeeds() {
     let (contract, user, freelancer, token, admin) = setup_test(&env);
 
     let mut milestones = vec![&env];
-    for _ in 0..20 {
-        milestones.push_back((String::from_str(&env, "Task"), 100_i128, 2000_u64));
+    for i in 0u64..20 {
+        milestones.push_back((String::from_str(&env, "Task"), 100_i128, 1001 + i));
     }
 
     let job_id = contract.create_job(
@@ -2515,7 +2515,7 @@ fn test_fund_job_underfunding_rejected() {
     // Two milestones summing to 100
     let milestones = vec![
         &env,
-        (String::from_str(&env, "Phase 1"), 60_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Phase 1"), 60_i128, JOB_DEADLINE / 2),
         (String::from_str(&env, "Phase 2"), 40_i128, JOB_DEADLINE),
     ];
 
@@ -2552,7 +2552,7 @@ fn test_fund_job_overfunding_rejected() {
     // Two milestones summing to 100
     let milestones = vec![
         &env,
-        (String::from_str(&env, "Phase 1"), 60_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Phase 1"), 60_i128, JOB_DEADLINE / 2),
         (String::from_str(&env, "Phase 2"), 40_i128, JOB_DEADLINE),
     ];
 
@@ -2765,7 +2765,7 @@ fn test_payment_released_event_not_emitted_on_partial_approval() {
 
     let milestones = vec![
         &env,
-        (String::from_str(&env, "Phase 1"), 500_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Phase 1"), 500_i128, JOB_DEADLINE / 2),
         (String::from_str(&env, "Phase 2"), 500_i128, JOB_DEADLINE),
     ];
     let job_id = contract.create_job(&client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
@@ -2799,7 +2799,7 @@ fn test_payment_released_event_emitted_via_batch_approval() {
 
     let milestones = vec![
         &env,
-        (String::from_str(&env, "Phase 1"), 400_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Phase 1"), 400_i128, JOB_DEADLINE / 2),
         (String::from_str(&env, "Phase 2"), 600_i128, JOB_DEADLINE),
     ];
     let job_id = contract.create_job(&client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
@@ -3529,14 +3529,14 @@ fn test_submit_milestone_fails_when_completed() {
 
     let milestones = vec![
         &env,
-        (String::from_str(&env, "Work 1"), 500_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Work 1"), 500_i128, JOB_DEADLINE / 2),
         (String::from_str(&env, "Work 2"), 500_i128, JOB_DEADLINE),
     ];
     let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
     contract.fund_job(&job_id, &client, &0, &0);
     contract.submit_milestone(&job_id, &0, &freelancer);
     contract.approve_milestone(&job_id, &0, &client);
-    
+
     // Job is now InProgress (first milestone approved, second pending)
     contract.submit_milestone(&job_id, &1, &freelancer);
     contract.approve_milestone(&job_id, &1, &client);
@@ -3772,13 +3772,13 @@ fn test_expire_job_succeeds_when_in_progress() {
 
     let milestones = vec![
         &env,
-        (String::from_str(&env, "Work 1"), 500_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Work 1"), 500_i128, JOB_DEADLINE / 2),
         (String::from_str(&env, "Work 2"), 500_i128, JOB_DEADLINE),
     ];
     let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
     contract.fund_job(&job_id, &client, &0, &0);
     contract.submit_milestone(&job_id, &0, &freelancer);
-    
+
     // Job is now InProgress
     // Advance time past deadline
     env.ledger().with_mut(|l| l.timestamp = JOB_DEADLINE + 1);
@@ -3947,7 +3947,7 @@ fn test_release_milestone_success() {
 
     let milestones = vec![
         &env,
-        (String::from_str(&env, "Design"), 500_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Design"), 500_i128, JOB_DEADLINE / 2),
         (String::from_str(&env, "Implementation"), 1000_i128, JOB_DEADLINE),
     ];
 
@@ -4139,7 +4139,7 @@ fn test_partial_refund_success() {
 
     let milestones = vec![
         &env,
-        (String::from_str(&env, "Milestone 1"), 400_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Milestone 1"), 400_i128, JOB_DEADLINE / 2),
         (String::from_str(&env, "Milestone 2"), 600_i128, JOB_DEADLINE),
     ];
 
@@ -4191,8 +4191,8 @@ fn test_partial_refund_balance_tracked_accurately() {
 
     let milestones = vec![
         &env,
-        (String::from_str(&env, "M1"), 300_i128, JOB_DEADLINE),
-        (String::from_str(&env, "M2"), 300_i128, JOB_DEADLINE),
+        (String::from_str(&env, "M1"), 300_i128, JOB_DEADLINE / 3),
+        (String::from_str(&env, "M2"), 300_i128, JOB_DEADLINE * 2 / 3),
         (String::from_str(&env, "M3"), 400_i128, JOB_DEADLINE),
     ];
 
@@ -5281,7 +5281,7 @@ fn test_create_job_valid_milestones_succeeds() {
 
     let milestones = vec![
         &env,
-        (String::from_str(&env, "M1"), 500_i128, JOB_DEADLINE),
+        (String::from_str(&env, "M1"), 500_i128, JOB_DEADLINE / 2),
         (String::from_str(&env, "M2"), 1000_i128, JOB_DEADLINE),
     ];
 
@@ -5315,7 +5315,7 @@ fn test_release_milestone_nonce_replay_rejected() {
 
     let milestones = vec![
         &env,
-        (String::from_str(&env, "M1"), 500_i128, JOB_DEADLINE),
+        (String::from_str(&env, "M1"), 500_i128, JOB_DEADLINE / 2),
         (String::from_str(&env, "M2"), 500_i128, JOB_DEADLINE),
     ];
 
@@ -5562,4 +5562,125 @@ fn test_calculate_payout_sum_invariant() {
             }
         }
     }
+}
+
+// ── Issue #772: milestone deadline validation ────────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #49)")]
+fn test_create_job_rejects_past_milestone_deadline() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, user_client, freelancer, token_address, _admin) = setup_test(&env);
+    client.add_allowed_token(&_admin, &token_address);
+
+    // Advance ledger so we can create a "past" deadline
+    env.ledger().with_mut(|l| l.timestamp = 1_000_000);
+
+    // milestone deadline in the past (timestamp = 0 ≤ current 1_000_000)
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task"), 100_i128, 500_000u64),
+    ];
+
+    client.create_job(
+        &user_client,
+        &freelancer,
+        &token_address,
+        &milestones,
+        &9_999_999_999u64,
+        &86400u64,
+        &(env.ledger().sequence() + 518_400),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #47)")]
+fn test_create_job_rejects_non_ascending_milestone_deadlines() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, user_client, freelancer, token_address, _admin) = setup_test(&env);
+    client.add_allowed_token(&_admin, &token_address);
+
+    // milestone 1 deadline > milestone 2 deadline → non-ascending
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 50_i128, 2_000_000u64),
+        (String::from_str(&env, "Task 2"), 50_i128, 1_000_000u64),
+    ];
+
+    client.create_job(
+        &user_client,
+        &freelancer,
+        &token_address,
+        &milestones,
+        &9_999_999_999u64,
+        &86400u64,
+        &(env.ledger().sequence() + 518_400),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #47)")]
+fn test_create_job_rejects_equal_milestone_deadlines() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, user_client, freelancer, token_address, _admin) = setup_test(&env);
+    client.add_allowed_token(&_admin, &token_address);
+
+    // milestone 1 and 2 share the same deadline → not strictly ascending
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 50_i128, 1_000_000u64),
+        (String::from_str(&env, "Task 2"), 50_i128, 1_000_000u64),
+    ];
+
+    client.create_job(
+        &user_client,
+        &freelancer,
+        &token_address,
+        &milestones,
+        &9_999_999_999u64,
+        &86400u64,
+        &(env.ledger().sequence() + 518_400),
+    );
+}
+
+#[test]
+fn test_create_job_accepts_valid_ascending_future_deadlines() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, user_client, freelancer, token_address, _admin) = setup_test(&env);
+    client.add_allowed_token(&_admin, &token_address);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 50_i128, 1_000_000u64),
+        (String::from_str(&env, "Task 2"), 50_i128, 2_000_000u64),
+        (String::from_str(&env, "Task 3"), 50_i128, 3_000_000u64),
+    ];
+
+    let job_id = client.create_job(
+        &user_client,
+        &freelancer,
+        &token_address,
+        &milestones,
+        &9_999_999_999u64,
+        &86400u64,
+        &(env.ledger().sequence() + 518_400),
+    );
+
+    assert_eq!(job_id, 1);
+    let job = client.get_job(&job_id);
+    assert_eq!(job.milestones.len(), 3);
+}
+
+#[test]
+fn test_milestone_deadline_in_past_error_code_is_49() {
+    assert_eq!(EscrowError::MilestoneDeadlineInPast as u32, 49);
+}
+
+#[test]
+fn test_milestone_deadlines_not_ordered_error_code_is_47() {
+    assert_eq!(EscrowError::MilestoneDeadlinesNotOrdered as u32, 47);
 }

@@ -87,6 +87,10 @@ pub enum EscrowError {
     SlippageExceeded = 45,
     /// A replayed nonce was detected within the TTL window.
     NonceReplay = 46,
+    /// A milestone deadline is not strictly after the previous milestone's deadline.
+    MilestoneDeadlinesNotOrdered = 47,
+    /// A milestone deadline is in the past or equal to the current ledger timestamp.
+    MilestoneDeadlineInPast = 49,
 }
 
 /// Privileged actions that can be proposed and approved through the multi-sig flow.
@@ -1225,6 +1229,7 @@ impl EscrowContract {
 
         let mut total: i128 = 0;
         let mut milestone_vec: Vec<Milestone> = Vec::new(&env);
+        let mut prev_deadline: u64 = 0;
 
         for (i, m) in milestones.iter().enumerate() {
             let (desc, amount, deadline) = m;
@@ -1232,11 +1237,15 @@ impl EscrowContract {
                 return Err(EscrowError::InvalidMilestone);
             }
             if deadline <= env.ledger().timestamp() {
-                return Err(EscrowError::InvalidDeadline);
+                return Err(EscrowError::MilestoneDeadlineInPast);
             }
             if deadline > job_deadline {
                 return Err(EscrowError::InvalidDeadline);
             }
+            if i > 0 && deadline <= prev_deadline {
+                return Err(EscrowError::MilestoneDeadlinesNotOrdered);
+            }
+            prev_deadline = deadline;
             total += amount;
             if total > i128::MAX / 2 {
                 return Err(EscrowError::InvalidMilestone);
