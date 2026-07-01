@@ -91,6 +91,8 @@ pub enum EscrowError {
     MilestoneDeadlinesNotOrdered = 47,
     /// A milestone deadline is in the past or equal to the current ledger timestamp.
     MilestoneDeadlineInPast = 49,
+    /// The grace period for late release has not elapsed yet.
+    NotYetLate = 50,
 }
 
 /// Privileged actions that can be proposed and approved through the multi-sig flow.
@@ -108,6 +110,8 @@ pub enum AdminAction {
     /// Emergency withdrawal: recover escrowed funds from a specific job to a recipient address.
     /// Only executable when the contract is paused. Requires multi-sig approval.
     EmergencyWithdraw(u64, Address),
+    /// Configure the late-release grace period in ledgers.
+    SetLateReleaseGraceLedgers(u32),
 }
 
 /// A pending multi-sig proposal. Executed when `approvals.len() >= threshold`.
@@ -250,6 +254,8 @@ pub struct Milestone {
     pub amount: i128,
     pub status: MilestoneStatus,
     pub deadline: u64,
+    /// Ledger sequence at which the milestone deadline becomes late-release eligible.
+    pub deadline_ledger: u32,
 }
 
 #[contracttype]
@@ -274,6 +280,7 @@ pub struct Job {
 
 const MAX_FEE_BPS: u32 = 500; // 5%
 const MAX_MILESTONES: u32 = 50;
+const LATE_RELEASE_GRACE_LEDGERS: u32 = 720;
 
 /// A formal proposal to revise the milestones and total budget of an active job.
 #[contracttype]
@@ -337,6 +344,7 @@ enum DataKey {
     RevisionHistory(u64), // Vec<MilestoneRevision> keyed by job_id
     MilestoneSubmittedAt(u64, u32),
     InactivityAutoApproveAt(u64, u32),
+    LateReleaseGraceLedgers,
     /// Address of the price oracle contract used for exchange-rate parity checks.
     PriceOracle,
     /// Stored RateSnapshot from the parity check performed at funding time.
@@ -650,6 +658,23 @@ fn validate_deposit_value(
     })
 }
 
+fn calculate_deadline_ledger(env: &Env, deadline_timestamp: u64) -> u32 {
+    let current_sequence = env.ledger().sequence();
+    let current_timestamp = env.ledger().timestamp();
+    if deadline_timestamp <= current_timestamp {
+        return current_sequence;
+    }
+    let ledger_delta = ((deadline_timestamp - current_timestamp) / 5).max(1) as u32;
+    current_sequence.saturating_add(ledger_delta)
+}
+
+fn get_late_release_grace_ledgers(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::LateReleaseGraceLedgers)
+        .unwrap_or(LATE_RELEASE_GRACE_LEDGERS)
+}
+
 #[contract]
 pub struct EscrowContract;
 
@@ -780,6 +805,27 @@ impl EscrowContract {
     /// Return the configured price oracle address, if any.
     pub fn get_price_oracle(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::PriceOracle)
+    }
+
+    /// Configure the ledger-grace value that gates late-release eligibility.
+    pub fn set_late_release_grace_ledgers(
+        env: Env,
+        admin: Address,
+        grace_ledgers: u32,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+        if !is_signer(&env, &admin) {
+            return Err(EscrowError::NotAdmin);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::LateReleaseGraceLedgers, &grace_ledgers);
+        Ok(())
+    }
+
+    /// Return the configured late-release grace period in ledgers.
+    pub fn get_late_release_grace_ledgers(env: Env) -> u32 {
+        get_late_release_grace_ledgers(&env)
     }
 
     /// Register the dispute contract address. Only a registered multisig signer may call this.
@@ -1039,6 +1085,11 @@ impl EscrowContract {
                     .instance()
                     .set(&symbol_short!("TRE"), &treasury);
             }
+            AdminAction::SetLateReleaseGraceLedgers(grace_ledgers) => {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::LateReleaseGraceLedgers, &grace_ledgers);
+            }
             AdminAction::AddSigner(signer) => {
                 let mut signers: Vec<Address> = env
                     .storage()
@@ -1256,6 +1307,7 @@ impl EscrowContract {
                 amount,
                 status: MilestoneStatus::Pending,
                 deadline,
+                deadline_ledger: calculate_deadline_ledger(&env, deadline),
             });
         }
 
@@ -1665,6 +1717,7 @@ impl EscrowContract {
             amount: milestone.amount,
             status: MilestoneStatus::Submitted,
             deadline: milestone.deadline,
+            deadline_ledger: milestone.deadline_ledger,
         };
         milestones.set(milestone_id, updated);
 
@@ -1689,6 +1742,47 @@ impl EscrowContract {
         }
 
         Ok(())
+    }
+
+    /// Release a submitted milestone after the configured grace window has elapsed.
+    pub fn late_release(
+        env: Env,
+        job_id: u64,
+        milestone_id: u32,
+        client: Address,
+    ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
+        let job: Job = env
+            .storage()
+            .persistent()
+            .get(&get_job_key(job_id))
+            .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
+
+        if job.client != client {
+            return Err(EscrowError::Unauthorized);
+        }
+
+        let milestone = job
+            .milestones
+            .get(milestone_id)
+            .ok_or(EscrowError::MilestoneNotFound)?;
+        let grace_ledgers = get_late_release_grace_ledgers(&env);
+        if env.ledger().sequence() < milestone.deadline_ledger.saturating_add(grace_ledgers) {
+            return Err(EscrowError::NotYetLate);
+        }
+
+        Self::approve_milestone(env, job_id, milestone_id, client)
+    }
+
+    /// Convenience alias for late-release flows.
+    pub fn auto_release(
+        env: Env,
+        job_id: u64,
+        milestone_id: u32,
+        client: Address,
+    ) -> Result<(), EscrowError> {
+        Self::late_release(env, job_id, milestone_id, client)
     }
 
     /// Client approves a milestone and releases payment to the freelancer.
@@ -1856,6 +1950,7 @@ impl EscrowContract {
                 amount: milestone.amount,
                 status: MilestoneStatus::Approved,
                 deadline: milestone.deadline,
+                deadline_ledger: milestone.deadline_ledger,
             };
             milestones.set(index, updated);
 
@@ -2082,6 +2177,7 @@ impl EscrowContract {
             amount: milestone.amount,
             status: MilestoneStatus::Approved,
             deadline: milestone.deadline,
+            deadline_ledger: milestone.deadline_ledger,
         };
         milestones.set(milestone_id, updated);
         job.milestones = milestones.clone();
@@ -2184,6 +2280,7 @@ impl EscrowContract {
             amount: remaining,
             status: new_status,
             deadline: milestone.deadline,
+            deadline_ledger: milestone.deadline_ledger,
         };
         milestones.set(milestone_index, updated);
         job.milestones = milestones.clone();
@@ -2411,6 +2508,7 @@ impl EscrowContract {
             amount: milestone.amount,
             status: MilestoneStatus::Approved,
             deadline: milestone.deadline,
+            deadline_ledger: milestone.deadline_ledger,
         };
         milestones.set(milestone_index, updated);
         job.milestones = milestones.clone();
@@ -3381,6 +3479,7 @@ impl EscrowContract {
             .ok_or(EscrowError::MilestoneNotFound)?;
 
         milestone.deadline = new_deadline;
+        milestone.deadline_ledger = calculate_deadline_ledger(&env, new_deadline);
         milestones.set(milestone_id, milestone);
 
         job.milestones = milestones;

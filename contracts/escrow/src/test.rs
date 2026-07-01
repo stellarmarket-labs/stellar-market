@@ -429,6 +429,80 @@ fn test_extend_deadline() {
     assert_eq!(job.milestones.get(0).unwrap().deadline, 4000);
 }
 
+#[test]
+fn test_late_release_before_grace_returns_not_yet_late() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000;
+        l.sequence_number = 100;
+    });
+
+    let (contract, client_addr, freelancer, token, _admin) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+
+    contract.fund_job(&job_id, &client_addr, &0, &0);
+    contract.submit_milestone(&job_id, &0, &freelancer);
+
+    let job = contract.get_job(&job_id);
+    let milestone = job.milestones.get(0).unwrap();
+    let grace_ledgers = contract.get_late_release_grace_ledgers();
+    env.ledger().with_mut(|l| l.sequence_number = milestone.deadline_ledger + grace_ledgers - 1);
+
+    let result = contract.try_late_release(&job_id, &0, &client_addr);
+    assert_eq!(result, Err(Ok(EscrowError::NotYetLate)));
+
+    let job_after = contract.get_job(&job_id);
+    assert_eq!(job_after.milestones.get(0).unwrap().status, MilestoneStatus::Submitted);
+}
+
+#[test]
+fn test_late_release_after_grace_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000;
+        l.sequence_number = 100;
+    });
+
+    let (contract, client_addr, freelancer, token, _admin) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+
+    contract.fund_job(&job_id, &client_addr, &0, &0);
+    contract.submit_milestone(&job_id, &0, &freelancer);
+
+    let job = contract.get_job(&job_id);
+    let milestone = job.milestones.get(0).unwrap();
+    let grace_ledgers = contract.get_late_release_grace_ledgers();
+    env.ledger().with_mut(|l| l.sequence_number = milestone.deadline_ledger + grace_ledgers);
+
+    let result = contract.try_late_release(&job_id, &0, &client_addr);
+    assert_eq!(result, Ok(Ok(())));
+
+    let job_after = contract.get_job(&job_id);
+    assert_eq!(job_after.milestones.get(0).unwrap().status, MilestoneStatus::Approved);
+}
+
 // ── Helpers for claim_refund tests ───────────────────────────────────────────
 
 fn setup_refund_env(env: &Env) -> (EscrowContractClient<'_>, Address) {
