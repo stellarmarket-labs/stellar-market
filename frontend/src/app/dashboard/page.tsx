@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   Briefcase,
@@ -34,12 +34,14 @@ import StatusBadge from "@/components/StatusBadge";
 import OnboardingWizard from "@/components/OnboardingWizard";
 import { DashboardStatsSkeleton, DashboardTabContentSkeleton } from "@/components/skeletons/DashboardSkeleton";
 import DisputeCardSkeleton from "@/components/skeletons/DisputeCardSkeleton";
+import StatsRow from "@/components/StatsRow";
 import { useDelay } from "@/hooks/useDelay";
 import { useAuth } from "@/context/AuthContext";
 import { useSocket } from "@/context/SocketContext";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { Job, Application, PaginatedResponse } from "@/types";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
 
 interface DashboardStats {
   postedJobs: number;
@@ -116,6 +118,8 @@ export default function DashboardPage() {
   // Withdraw-application state (freelancer)
   const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
   const [withdrawConfirmId, setWithdrawConfirmId] = useState<string | null>(null);
+  const withdrawConfirmRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(withdrawConfirmRef, { open: !!withdrawConfirmId, onClose: () => setWithdrawConfirmId(null) });
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
@@ -342,7 +346,9 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats */}
-      {dataLoading && ready ? (
+      {!isClient ? (
+        <StatsRow />
+      ) : dataLoading && ready ? (
         <DashboardStatsSkeleton />
       ) : dataLoading ? null : (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -455,7 +461,7 @@ export default function DashboardPage() {
             const jobTitle = (app as Application & { job?: { title?: string } } | undefined)?.job?.title ?? "this job";
             return (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                <div className="bg-theme-card border border-theme-border rounded-xl shadow-2xl w-full max-w-md p-6">
+                <div ref={withdrawConfirmRef} className="bg-theme-card border border-theme-border rounded-xl shadow-2xl w-full max-w-md p-6">
                   <h2 className="text-lg font-semibold text-theme-heading mb-2">
                     Withdraw Application?
                   </h2>

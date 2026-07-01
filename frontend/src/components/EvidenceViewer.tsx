@@ -18,60 +18,7 @@ import axios from "axios";
 import type { DisputeEvidence, EvidenceVerification } from "@/types";
 import LocalTimestamp from "@/components/LocalTimestamp";
 
-const getFileInfo = (file: DisputeEvidence) => {
-  const mimeType = file.fileType?.toLowerCase() || "";
-  const fileName = file.fileName || "";
-  const fileExtension = fileName.split('.').pop()?.toLowerCase() || "";
-
-  if (mimeType.startsWith('image/')) {
-    return {
-      icon: <Image size={16} className="text-green-600 flex-shrink-0" />,
-      showThumbnail: true,
-      thumbnailUrl: file.url || null,
-      extension: fileExtension,
-    };
-  }
-
-  if (mimeType === 'application/pdf') {
-    return {
-      icon: <FileArchive size={16} className="text-red-600 flex-shrink-0" />,
-      showThumbnail: false,
-      extension: fileExtension,
-    };
-  }
-
-  if (mimeType.startsWith('video/')) {
-    return {
-      icon: <Video size={16} className="text-blue-600 flex-shrink-0" />,
-      showThumbnail: false,
-      extension: fileExtension,
-    };
-  }
-
-  return {
-    icon: <FileText size={16} className="text-gray-500 flex-shrink-0" />,
-    showThumbnail: false,
-    extension: fileExtension,
-  };
-};
-
-const getExtensionBadgeColor = (extension: string) => {
-  switch (extension.toLowerCase()) {
-    case 'pdf':
-      return 'bg-red-500';
-    case 'mp4':
-      return 'bg-blue-500';
-    case 'jpg':
-    case 'jpeg':
-    case 'png':
-    case 'gif':
-      return 'bg-green-500';
-    default:
-      return 'bg-gray-500';
-  }
-};
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
 
 type EvidenceViewerProps = {
   disputeId: string;
