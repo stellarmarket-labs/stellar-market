@@ -255,6 +255,7 @@ export interface Dispute {
   initiator: User;
   respondent: User;
   votes: Vote[];
+  voteDeadline?: string;
   evidence?: DisputeEvidence[];
   arbitrators?: Array<{ address: string; displayName: string; avatarUrl: string | null }>;
 }

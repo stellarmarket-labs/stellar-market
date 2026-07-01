@@ -9,6 +9,7 @@ import { useWallet } from "@/context/WalletContext";
 import { useAuth } from "@/context/AuthContext";
 import { Dispute, Vote } from "@/types";
 import DisputeVoteProgress from "@/components/DisputeVoteProgress";
+import DisputeTiming from "@/components/DisputeTiming";
 import EvidenceViewer from "@/components/EvidenceViewer";
 import EvidenceUpload from "@/components/EvidenceUpload";
 import DisputeOutcomeBanner from "@/components/DisputeOutcomeBanner";
@@ -223,10 +224,20 @@ export default function DisputeDetailPage() {
             </h1>
             
             <div className="p-4 bg-theme-bg-secondary rounded-lg border border-theme-border mb-6">
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-start gap-2 mb-2">
                 <UserIcon size={16} className="text-theme-text" />
-                <span className="font-medium text-theme-heading pr-2 border-r border-theme-border">Initiated by {dispute.initiator.username}</span>
-                <span className="text-sm text-theme-text">{new Date(dispute.createdAt).toLocaleString()}</span>
+                <div>
+                  <div className="font-medium text-theme-heading mb-1">
+                    Initiated by {dispute.initiator.username}
+                  </div>
+                  <div className="text-sm text-theme-text mb-2">
+                    {new Date(dispute.createdAt).toLocaleString()}
+                  </div>
+                  <DisputeTiming
+                    createdAt={dispute.createdAt}
+                    voteDeadline={dispute.voteDeadline}
+                  />
+                </div>
               </div>
               <p className="text-theme-text whitespace-pre-line text-sm leading-relaxed">
                 {dispute.reason}

@@ -338,6 +338,7 @@ export class DisputeService {
     const splitVotes = totalVotes - clientVotes - freelancerVotes;
 
     let arbitrators: Array<{ address: string; displayName: string; avatarUrl: string | null }> = [];
+    let voteDeadline: string | undefined;
     if (dispute.onChainDisputeId) {
       try {
         const addresses = await ContractService.getOnChainAssignedArbitrators(dispute.onChainDisputeId);
@@ -367,12 +368,22 @@ export class DisputeService {
       } catch (err) {
         logger.warn({ err, onChainDisputeId: dispute.onChainDisputeId }, "Failed to get on-chain arbitrators");
       }
+
+      try {
+        const deadline = await ContractService.getOnChainDisputeVoteDeadline(dispute.onChainDisputeId);
+        if (deadline) {
+          voteDeadline = deadline;
+        }
+      } catch (err) {
+        logger.warn({ err, onChainDisputeId: dispute.onChainDisputeId }, "Failed to fetch on-chain dispute deadline");
+      }
     }
 
     const { votes: _votes, _count, ...rest } = dispute;
 
     return {
       ...rest,
+      voteDeadline,
       voteSummary: {
         totalVotes,
         clientVotes,
