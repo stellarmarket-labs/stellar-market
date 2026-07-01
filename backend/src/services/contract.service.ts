@@ -985,4 +985,43 @@ export class ContractService {
       return [];
     }
   }
+
+  static async getOnChainDisputeVoteDeadline(
+    onChainDisputeId: string
+  ): Promise<string | null> {
+    try {
+      const contract = new Contract(config.stellar.disputeContractId);
+      const native = await this.simulateContractRead(
+        contract.call(
+          "get_dispute",
+          nativeToScVal(BigInt(onChainDisputeId))
+        )
+      );
+      const dispute = native as Record<string, unknown>;
+      const rawDeadline =
+        dispute.voting_deadline ?? dispute.votingDeadline ?? dispute["voting_deadline"];
+      const deadlineSeconds =
+        typeof rawDeadline === "bigint"
+          ? Number(rawDeadline)
+          : typeof rawDeadline === "number"
+          ? rawDeadline
+          : typeof rawDeadline === "string"
+          ? Number(rawDeadline)
+          : Array.isArray(rawDeadline) && rawDeadline.length > 0
+          ? Number(rawDeadline[0])
+          : NaN;
+
+      if (!Number.isFinite(deadlineSeconds) || deadlineSeconds <= 0) {
+        return null;
+      }
+
+      return new Date(deadlineSeconds * 1000).toISOString();
+    } catch (error) {
+      logger.warn(
+        { err: error, onChainDisputeId },
+        "get_dispute simulation failed or could not parse voting deadline",
+      );
+      return null;
+    }
+  }
 }

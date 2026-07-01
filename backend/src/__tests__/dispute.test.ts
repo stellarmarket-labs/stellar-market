@@ -4,6 +4,7 @@ import { ContractService } from "../services/contract.service";
 jest.mock("../services/contract.service", () => ({
   ContractService: {
     getOnChainAssignedArbitrators: jest.fn(),
+    getOnChainDisputeVoteDeadline: jest.fn(),
   },
 }));
 
@@ -270,6 +271,22 @@ describe("Dispute Management System", () => {
           avatarUrl: null,
         },
       ]);
+    });
+
+    it("should include voteDeadline when the on-chain dispute has a deadline", async () => {
+      const fullDispute = {
+        ...mockDispute,
+        onChainDisputeId: "12345",
+        votes: [],
+        attachments: [],
+      };
+      prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
+      (ContractService.getOnChainAssignedArbitrators as jest.Mock).mockResolvedValueOnce([]);
+      (ContractService.getOnChainDisputeVoteDeadline as jest.Mock).mockResolvedValueOnce("2026-07-01T14:00:00.000Z");
+
+      const dispute = await DisputeService.getDisputeById(disputeId);
+
+      expect(dispute.voteDeadline).toBe("2026-07-01T14:00:00.000Z");
     });
   });
 

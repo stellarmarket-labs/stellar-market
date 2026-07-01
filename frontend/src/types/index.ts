@@ -251,10 +251,12 @@ export interface Dispute {
   minVotes: number;
   createdAt: string;
   updatedAt: string;
+  voteDeadline?: string;
   job: Job;
   initiator: User;
   respondent: User;
   votes: Vote[];
+  voteDeadline?: string;
   evidence?: DisputeEvidence[];
   arbitrators?: Array<{ address: string; displayName: string; avatarUrl: string | null }>;
 }
