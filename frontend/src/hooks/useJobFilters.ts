@@ -13,9 +13,9 @@ const CANONICAL_CATEGORIES = [
   "DevOps",
 ];
 
-function categoryToSlug(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, "-");
-}
+// function categoryToSlug(name: string): string {
+//   return name.toLowerCase().replace(/\s+/g, "-");
+// }
 
 function slugToCanonical(slug: string): string {
   const fromSlug = CANONICAL_CATEGORIES.find(
@@ -76,7 +76,7 @@ export function parseFiltersFromParams(searchParams: URLSearchParams): JobFilter
 export function filtersToParams(filters: JobFilters): URLSearchParams {
   const params = new URLSearchParams();
   if (filters.search) params.set("q", filters.search);
-  if (filters.category !== "All") params.set("category", categoryToSlug(filters.category));
+  if (filters.category !== "All") params.set("category", filters.category);
   if (filters.skills.length) params.set("skills", filters.skills.join(","));
   if (filters.status.length) params.set("status", filters.status.join(","));
   if (filters.minBudget) params.set("min", filters.minBudget);

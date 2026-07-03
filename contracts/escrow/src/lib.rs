@@ -1852,12 +1852,10 @@ impl EscrowContract {
             &freelancer_amount,
         );
 
+        
         let updated = Milestone {
-            id: milestone.id,
-            description: milestone.description.clone(),
-            amount: milestone.amount,
             status: MilestoneStatus::Approved,
-            deadline: milestone.deadline,
+            ..milestone.clone()
         };
         milestones.set(milestone_id, updated);
         job.milestones = milestones.clone();
