@@ -2535,7 +2535,7 @@ mod tests {
             timestamp: env.ledger().timestamp(),
         };
 
-        let reviews = vec![env, r1, r2, r3];
+        let reviews = vec![&env, r1, r2, r3];
         // Set persisted reviews and review_exists flags and a legacy reputation record
         env.as_contract(&contract_id, || {
             env.storage()
@@ -2571,7 +2571,7 @@ mod tests {
         });
 
         // Sanity check: average rating should be 400 ( (12/3)*100 )
-        let before = client.get_average_rating(&reviewee).unwrap();
+        let before = client.get_average_rating(&reviewee);
         assert_eq!(before, 400);
 
         // Admin removes index 1 (the middle review with rating 3)
@@ -2581,7 +2581,7 @@ mod tests {
         assert_eq!(client.get_reviews(&reviewee).len(), 2);
 
         // New average should be ((5+4)/2)*100 = 450
-        let after = client.get_average_rating(&reviewee).unwrap();
+        let after = client.get_average_rating(&reviewee);
         assert_eq!(after, 450);
     }
 

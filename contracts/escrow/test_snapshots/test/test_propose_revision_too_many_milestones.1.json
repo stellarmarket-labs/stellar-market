@@ -2295,7 +2295,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 220000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2346,7 +2350,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 230000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2397,7 +2405,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 240000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2448,7 +2460,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 250000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2499,7 +2515,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 260000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2550,7 +2570,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 270000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2601,7 +2625,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 280000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2652,7 +2680,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 290000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2703,7 +2735,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 300000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2754,7 +2790,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 310000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2805,7 +2845,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 320000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2856,7 +2900,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 330000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2907,7 +2955,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 340000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -2958,7 +3010,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 350000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3009,7 +3065,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 360000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3060,7 +3120,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 370000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3111,7 +3175,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 380000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3162,7 +3230,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 390000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3213,7 +3285,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 400000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3264,7 +3340,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 410000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3315,7 +3395,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 420000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3366,7 +3450,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 430000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3417,7 +3505,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 440000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3468,7 +3560,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 450000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3519,7 +3615,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 460000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3570,7 +3670,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 470000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3621,7 +3725,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 480000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3672,7 +3780,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 490000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3723,7 +3835,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 500000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -3774,7 +3890,11 @@
                             "symbol": "deadline"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u64": 510000
+=======
+                            "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                           }
                         },
                         {
@@ -4990,7 +5110,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 220000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5041,7 +5165,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 230000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5092,7 +5220,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 240000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5143,7 +5275,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 250000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5194,7 +5330,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 260000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5245,7 +5385,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 270000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5296,7 +5440,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 280000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5347,7 +5495,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 290000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5398,7 +5550,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 300000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5449,7 +5605,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 310000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5500,7 +5660,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 320000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5551,7 +5715,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 330000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5602,7 +5770,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 340000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5653,7 +5825,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 350000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5704,7 +5880,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 360000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5755,7 +5935,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 370000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5806,7 +5990,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 380000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5857,7 +6045,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 390000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5908,7 +6100,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 400000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -5959,7 +6155,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 410000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -6010,7 +6210,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 420000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -6061,7 +6265,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 430000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -6112,7 +6320,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 440000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -6163,7 +6375,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 450000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -6214,7 +6430,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 460000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -6265,7 +6485,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 470000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -6316,7 +6540,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 480000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -6367,7 +6595,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 490000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -6418,7 +6650,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 500000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {
@@ -6469,7 +6705,11 @@
                                 "symbol": "deadline"
                               },
                               "val": {
+<<<<<<< HEAD
                                 "u64": 510000
+=======
+                                "u64": 1000000
+>>>>>>> c0afc3c (fix: resolve backend build issues and fix contract test failures)
                               }
                             },
                             {

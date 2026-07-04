@@ -5,6 +5,10 @@ const pingMock = jest.fn();
 const isRedisConnectedMock = jest.fn();
 const getHealthMock = jest.fn();
 
+jest.mock("../../services/horizon-listener.service", () => ({
+  getHorizonListenerHealth: jest.fn().mockReturnValue("ok"),
+}));
+
 jest.mock("../redis", () => ({
   __esModule: true,
   default: {
@@ -52,6 +56,7 @@ describe("getHealthStatus", () => {
     expect(result.checks).toEqual({
       database: "ok",
       redis: "ok",
+      horizonListener: "ok",
       sorobanRpc: "ok",
     });
 
