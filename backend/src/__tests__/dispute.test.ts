@@ -208,6 +208,7 @@ describe("Dispute Management System", () => {
         attachments: [],
       };
       prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
+      prismaMock.disputeVote.findMany.mockResolvedValueOnce([]);
 
       const dispute = await DisputeService.getDisputeById(disputeId);
 
@@ -234,6 +235,7 @@ describe("Dispute Management System", () => {
         attachments: [],
       };
       prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
+      prismaMock.disputeVote.findMany.mockResolvedValueOnce([]);
       (ContractService.getOnChainAssignedArbitrators as jest.Mock).mockResolvedValueOnce(["GARBITRATOR123"]);
       prismaMock.user.findFirst.mockResolvedValueOnce({
         username: "arb_user",
@@ -259,6 +261,7 @@ describe("Dispute Management System", () => {
         attachments: [],
       };
       prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
+      prismaMock.disputeVote.findMany.mockResolvedValueOnce([]);
       (ContractService.getOnChainAssignedArbitrators as jest.Mock).mockResolvedValueOnce(["GARBITRATOR123"]);
       prismaMock.user.findFirst.mockResolvedValueOnce(null);
 
