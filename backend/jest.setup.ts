@@ -40,7 +40,9 @@ const mockRedisInstance = {
   // miss on every authenticated request.
   get: jest.fn((key: string) =>
     Promise.resolve(
-      typeof key === "string" && key.startsWith("auth:tokenVersion:") ? "0" : null,
+      typeof key === "string" && key.startsWith("auth:tokenVersion:")
+        ? "0"
+        : null,
     ),
   ),
   set: jest.fn().mockResolvedValue("OK"),
@@ -91,3 +93,15 @@ jest.mock("./src/lib/notification-queue", () => ({
     LOW: 4,
   },
 }));
+
+// ─── src/config/prisma ───────────────────────────────────────────────────────
+// Ensure Prisma does not keep open handles after tests finish.
+//
+// Without this, Jest may report:
+// "Force exiting Jest: Have you considered using --detectOpenHandles"
+//
+// This guarantees all DB connections are closed cleanly.
+afterAll(async () => {
+  const prisma = (await import("./src/config/prisma")).default;
+  await prisma.$disconnect();
+});
