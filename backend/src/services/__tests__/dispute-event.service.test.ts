@@ -1,5 +1,5 @@
-import { recordDisputeEvent } from "../services/dispute-event.service";
-import { disputeEmitter } from "../lib/dispute-emitter";
+import { recordDisputeEvent } from "../dispute-event.service";
+import { disputeEmitter } from "../../lib/dispute-emitter";
 
 jest.mock("@prisma/client", () => {
   const mockPrisma = {

@@ -1,4 +1,9 @@
-import { PrismaClient, DisputeEventType, type DisputeEvent } from "@prisma/client";
+import {
+  PrismaClient,
+  DisputeEventType,
+  type DisputeEvent,
+  type Prisma,
+} from "@prisma/client";
 import { disputeEmitter } from "../lib/dispute-emitter";
 
 const prisma = new PrismaClient();
@@ -12,7 +17,7 @@ export async function recordDisputeEvent(
     data: {
       disputeId,
       type,
-      payload: payload ?? {},
+      payload: (payload ?? {}) as Prisma.InputJsonValue,
     },
   });
 
