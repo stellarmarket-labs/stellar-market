@@ -17,6 +17,8 @@ const server = new rpc.Server(config.stellar.rpcUrl);
 const POLL_INTERVAL_MS = 5_000;
 const MAX_EVENTS_PER_POLL = 200;
 const SYNC_STATE_ID = "default";
+const CURSOR_ID = 1;
+const MAX_EVENT_RETRIES = 3;
 
 // ─── Circuit Breaker instance ─────────────────────────────────────────────────
 
@@ -82,6 +84,21 @@ async function setLastIndexedLedger(ledger: number): Promise<void> {
     where: { id: SYNC_STATE_ID },
     update: { lastIndexedLedger: ledger },
     create: { id: SYNC_STATE_ID, lastIndexedLedger: ledger },
+  });
+}
+
+// ─── cursor persistence (paging token) ───────────────────────────────────────
+
+async function getPersistedCursor(): Promise<string | null> {
+  const row = await prisma.horizonCursor.findUnique({ where: { id: CURSOR_ID } });
+  return row?.cursor ?? null;
+}
+
+async function saveCursor(cursor: string): Promise<void> {
+  await prisma.horizonCursor.upsert({
+    where: { id: CURSOR_ID },
+    update: { cursor },
+    create: { id: CURSOR_ID, cursor },
   });
 }
 
@@ -326,32 +343,60 @@ async function resolvePreRegisteredTx(txHash: string, ledger: number): Promise<v
   }
 }
 
-async function processEvent(event: SorobanEvent): Promise<void> {
+async function dispatchEvent(event: SorobanEvent): Promise<void> {
   const [contract, name] = topicToStrings(event);
 
+  if (contract === "escrow") {
+    if (name === "created") return await handleJobCreated(event);
+    if (name === "funded") return await handleJobFunded(event);
+    if (name === "pmt_released") return await handlePaymentReleased(event);
+  }
+
+  if (contract === "dispute") {
+    if (name === "raised") return await handleDisputeOpened(event);
+    if (name === "resolved") return await handleDisputeResolved(event);
+  }
+
+  if (contract === "reput") {
+    if (name === "badge") return await handleBadgeAwarded(event);
+  }
+}
+
+async function processEvent(event: SorobanEvent): Promise<void> {
   // Promote any PENDING pre-registration for this txHash to SUCCESS immediately.
   await resolvePreRegisteredTx(event.txHash, event.ledger);
 
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < MAX_EVENT_RETRIES; attempt++) {
+    try {
+      await dispatchEvent(event);
+      return;
+    } catch (err) {
+      lastErr = err;
+      logger.warn(
+        { err, ledger: event.ledger, attempt: attempt + 1 },
+        "[HorizonListener] Event processing failed, retrying",
+      );
+    }
+  }
+
+  // All retries exhausted — write to DLQ
+  const errorMessage = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  logger.error(
+    { ledger: event.ledger, cursor: event.pagingToken, error: errorMessage },
+    "[HorizonListener] Event moved to DLQ after max retries",
+  );
   try {
-    if (contract === "escrow") {
-      if (name === "created") return await handleJobCreated(event);
-      if (name === "funded") return await handleJobFunded(event);
-      if (name === "pmt_released") return await handlePaymentReleased(event);
-    }
-
-    if (contract === "dispute") {
-      if (name === "raised") return await handleDisputeOpened(event);
-      if (name === "resolved") return await handleDisputeResolved(event);
-    }
-
-    if (contract === "reput") {
-      if (name === "badge") return await handleBadgeAwarded(event);
-    }
-  } catch (err) {
-    logger.error(
-      { err, contract, name, ledger: event.ledger },
-      "[HorizonListener] Error processing event",
-    );
+    await prisma.horizonDlq.create({
+      data: {
+        cursor: event.pagingToken,
+        payload: Buffer.from(JSON.stringify(event)).toString("base64"),
+        error: errorMessage,
+        attempt: 1,
+      },
+    });
+  } catch (dlqErr) {
+    logger.error({ dlqErr }, "[HorizonListener] Failed to write event to DLQ");
   }
 }
 
@@ -382,45 +427,55 @@ async function poll(): Promise<void> {
   }
 
   const lastLedger = await getLastIndexedLedger();
-
-  let startLedger: number;
-  try {
-    const latest = await server.getLatestLedger();
-    if (lastLedger === 0) {
-      startLedger = latest.sequence;
-      await setLastIndexedLedger(startLedger);
-      logger.info({ startLedger }, "[HorizonListener] First run — starting from ledger");
-      horizonCB.onSuccess();
-      return;
-    }
-    startLedger = lastLedger + 1;
-
-    if (startLedger > latest.sequence) {
-      horizonCB.onSuccess(); // Horizon is reachable, nothing new
-      return;
-    }
-  } catch (err) {
-    logger.error({ err }, "[HorizonListener] Failed to fetch latest ledger");
-    horizonCB.onFailure();
-    return;
-  }
+  const persistedCursor = await getPersistedCursor();
 
   let events: SorobanEvent[] = [];
   let maxEventLedger = lastLedger;
 
   try {
-    const result = await server.getEvents({
-      startLedger,
-      filters: [{ type: "contract", contractIds }],
-      limit: MAX_EVENTS_PER_POLL,
-    });
-    events = result.events;
-    horizonCB.onSuccess(); // successful Horizon call
+    if (persistedCursor !== null) {
+      // Resume from persisted paging cursor
+      const result = await server.getEvents({
+        pagination: { cursor: persistedCursor, limit: MAX_EVENTS_PER_POLL },
+        filters: [{ type: "contract", contractIds }],
+      } as any);
+      events = result.events;
+      horizonCB.onSuccess();
+    } else {
+      // Bootstrap: use startLedger
+      let startLedger: number;
+      try {
+        const latest = await server.getLatestLedger();
+        if (lastLedger === 0) {
+          startLedger = latest.sequence;
+          await setLastIndexedLedger(startLedger);
+          logger.info({ startLedger }, "[HorizonListener] First run — starting from ledger");
+          horizonCB.onSuccess();
+          return;
+        }
+        startLedger = lastLedger + 1;
+        if (startLedger > latest.sequence) {
+          horizonCB.onSuccess();
+          return;
+        }
+      } catch (err) {
+        logger.error({ err }, "[HorizonListener] Failed to fetch latest ledger");
+        horizonCB.onFailure();
+        return;
+      }
+
+      const result = await server.getEvents({
+        startLedger,
+        filters: [{ type: "contract", contractIds }],
+        limit: MAX_EVENTS_PER_POLL,
+      });
+      events = result.events;
+      horizonCB.onSuccess();
+    }
   } catch (err: any) {
     const msg: string = err?.message ?? "";
-    if (msg.includes("startLedger") || msg.includes("ledger")) {
-      // Cursor out of retention window — reset, but don't count as a Horizon failure
-      logger.warn("[HorizonListener] startLedger out of retention window, resetting cursor");
+    if (msg.includes("startLedger") || msg.includes("ledger") || msg.includes("cursor")) {
+      logger.warn("[HorizonListener] Cursor/ledger out of retention window, resetting");
       try {
         const latest = await server.getLatestLedger();
         await setLastIndexedLedger(latest.sequence);
@@ -440,7 +495,16 @@ async function poll(): Promise<void> {
     if (event.ledger > maxEventLedger) maxEventLedger = event.ledger;
   }
 
-  if (maxEventLedger > lastLedger) {
+  // Persist paging cursor from last event for next poll
+  if (events.length > 0) {
+    const lastEvent = events[events.length - 1];
+    if (lastEvent.pagingToken) {
+      await saveCursor(lastEvent.pagingToken);
+    }
+    if (typeof lastEvent.ledger === "number") {
+      await setLastIndexedLedger(lastEvent.ledger);
+    }
+  } else if (maxEventLedger > lastLedger) {
     await setLastIndexedLedger(maxEventLedger);
   }
 }

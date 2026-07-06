@@ -53,6 +53,7 @@ jest.mock("@prisma/client", () => {
       count: jest.fn(),
     },
     $disconnect: jest.fn(),
+    $transaction: jest.fn(async (cb) => await cb(mockPrisma)),
   };
 
   return {
