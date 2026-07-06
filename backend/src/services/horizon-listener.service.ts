@@ -1,14 +1,5 @@
-import { rpc, scValToNative, Contract } from "@stellar/stellar-sdk";
-import { PrismaClient, BadgeTier, EscrowEventType } from "@prisma/client";
-import { rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
-import {
-  PrismaClient,
-  BadgeTier,
-  EscrowEventType,
-  Prisma,
-  Notification,
-  NotificationType,
-} from "@prisma/client";
+import { rpc, scValToNative, Contract, xdr } from "@stellar/stellar-sdk";
+import { PrismaClient, BadgeTier, EscrowEventType, Prisma, Notification, NotificationType } from "@prisma/client";
 import { config } from "../config";
 import { NotificationService } from "./notification.service";
 import { logger } from "../lib/logger";
@@ -733,16 +724,7 @@ export async function getHorizonStatus(): Promise<{
   };
 }
 
-if (maxEventLedger > Number(cursor)) {
-  await setCursor(String(maxEventLedger));
-  await setLastIndexedLedger(maxEventLedger); // Keep legacy sync for badges
-}
-await prisma.horizonCursor.upsert({
-  where: { id: CURSOR_ID },
-  update: { cursor },
-  create: { id: CURSOR_ID, cursor },
-});
-}
+
 
 export async function replayHorizonDlq(): Promise<{
   replayed: number;
@@ -851,6 +833,7 @@ export function stopHorizonListener(): void {
       logger.info("[HorizonListener] Stopped");
     }
   }
+}
 
   async function initializeAllowedTokens(): Promise<void> {
     const contractId = config.stellar.escrowContractId;
