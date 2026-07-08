@@ -31,7 +31,7 @@ const JobStatus = {
 
 // ─── Prisma mock ─────────────────────────────────────────────────────────────
 jest.mock("@prisma/client", () => {
-  const mockPrisma = {
+  const mockPrisma: any = {
     user: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
@@ -54,6 +54,7 @@ jest.mock("@prisma/client", () => {
       count: jest.fn(),
     },
     $disconnect: jest.fn(),
+    $transaction: jest.fn(async (cb: any): Promise<any> => await cb(mockPrisma)),
   };
 
   return {
