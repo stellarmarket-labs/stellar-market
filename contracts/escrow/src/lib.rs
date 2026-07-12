@@ -758,6 +758,10 @@ impl EscrowContract {
             env.storage()
                 .instance()
                 .set(&DataKey::AllowedTokens, &allowed);
+            env.events().publish(
+                (symbol_short!("escrow"), Symbol::new(&env, "token_allowed")),
+                (token.clone(), admin.clone()),
+            );
         }
         Ok(())
     }
@@ -784,6 +788,10 @@ impl EscrowContract {
             env.storage()
                 .instance()
                 .set(&DataKey::AllowedTokens, &allowed);
+            env.events().publish(
+                (symbol_short!("escrow"), Symbol::new(&env, "token_revoked")),
+                (token.clone(), admin.clone()),
+            );
         }
         Ok(())
     }
