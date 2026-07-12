@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { rpc } from "@stellar/stellar-sdk";
 import RedisClient from "./redis";
 import { config } from "../config";
+import { getHorizonListenerHealth } from "../services/horizon-listener.service";
 
 export type DependencyHealthStatus = "ok" | "error" | "degraded";
 export type HorizonListenerStatus = "connected" | "degraded" | "down";
@@ -10,10 +11,13 @@ export type HealthResponse = {
   status: "ok" | "degraded";
   service: "stellarmarket-api";
   uptime?: number;
+  version?: string;
+
   checks: {
     database: DependencyHealthStatus;
     redis: DependencyHealthStatus;
-    horizonListener: HorizonListenerStatus | DependencyHealthStatus;
+    sorobanRpc: DependencyHealthStatus;
+    horizonListener: HorizonListenerStatus;
   };
 };
 
@@ -57,6 +61,7 @@ export async function getHealthStatus(
 
   return {
     status: criticalHealthy ? "ok" : "degraded",
+    service: "stellarmarket-api",
     uptime: Math.floor(process.uptime()),
     version: config.version,
     checks,
