@@ -76,6 +76,8 @@ export default function ConversationPage() {
           currentUserId={currentUser?.id || ""}
           partnerId={partnerId}
           partnerUsername={partnerUsername || partnerId}
+          currentUsername={currentUser?.username || ""}
+          currentUserAvatarUrl={currentUser?.avatarUrl || null}
           initialMessages={messages}
         />
       </div>
