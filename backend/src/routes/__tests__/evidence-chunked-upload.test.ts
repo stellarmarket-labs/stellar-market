@@ -46,7 +46,6 @@ jest.mock("@prisma/client", () => {
         Promise.resolve({ id: "att-123", ...args.data }),
       ),
     },
-    disputeEvent: { create: jest.fn().mockResolvedValue({ id: "evt-1" }) },
     user: {
       findUnique: jest
         .fn()

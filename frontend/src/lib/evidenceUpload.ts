@@ -169,7 +169,7 @@ interface ApiClient {
 }
 
 function buildApiClient(baseUrl: string, token: string | null): ApiClient {
-  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   return {
     async get(url, headers) {
       const res = await fetch(`${baseUrl}${url}`, {

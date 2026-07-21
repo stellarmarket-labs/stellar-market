@@ -237,7 +237,7 @@ export default function EvidenceUpload({
             sha256,
             sessionId,
             totalChunks: state.totalChunks,
-            uploadedChunks: state.totalChunks,
+            uploadedChunks: state.uploadedChunks,
             anchorTxHash: state.anchorTxHash,
             blob: file,
           }).catch(() => undefined);

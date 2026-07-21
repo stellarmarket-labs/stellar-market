@@ -48,7 +48,7 @@ function makeBackend() {
       // INITIATE
       if (method === "POST" && url.endsWith("/evidence/sessions")) {
         const json = JSON.parse(init.body);
-        const sessionId = deriveSessionId("dispute-1", json.sha256);
+        const sessionId = deriveSessionId("dispute-1", "client-1", json.sha256);
         if (!sessions.has(sessionId)) {
           sessions.set(sessionId, {
             totalChunks: json.totalChunks,
