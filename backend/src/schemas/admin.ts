@@ -44,6 +44,15 @@ export const overrideDisputeSchema = z.object({
   ]),
 });
 
+export const getAuditLogsQuerySchema = paginationSchema.extend({
+  category: z.enum(["ADMIN_ACTION", "SECURITY_EVENT"]).optional(),
+  action: z.string().min(1).optional(),
+  actorId: z.string().min(1).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  format: z.enum(["json", "csv"]).optional(),
+});
+
 export const queryPendingDisputesSchema = paginationSchema;
 
 export const queryFlaggedUsersSchema = paginationSchema;
