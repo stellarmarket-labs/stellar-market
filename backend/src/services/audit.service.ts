@@ -20,14 +20,23 @@ const prisma = new PrismaClient();
  *     lands. A transient DB blip therefore cannot silently drop an audit record
  *     the way `logAdminAction`'s swallowed `catch` used to.
  *
- *  2. Tamper evidence. The outbox worker is the *only* writer, so it can assign
- *     a contiguous `sequence` and chain each row to its predecessor: every row
- *     stores `hash = sha256(canonicalContent + prevHash)`. Altering a row's
+ *  2. Tamper evidence. A cross-instance drain lock ensures the outbox worker is
+ *     the *only* writer at any moment — even under horizontal scaling — so it can
+ *     assign a contiguous `sequence` and chain each row to its predecessor: every
+ *     row stores `hash = sha256(canonicalContent + prevHash)`. Altering a row's
  *     content, re-linking it, or deleting a historical row all break the chain
  *     (or leave a sequence gap) and are detected by `verifyChain()`.
  */
 
 const OUTBOX_KEY = "audit:outbox";
+// A cross-instance lock so exactly one worker drains-and-persists at a time.
+// `persist()`'s findFirst-then-create sequence assignment is not atomic, and the
+// `draining` boolean below only guards re-entrancy *within* one process — under
+// horizontal scaling two instances' workers would otherwise race and collide on
+// the `sequence` unique constraint. Held only while a drain pass runs; a TTL
+// backstops the lock so a crashed worker cannot wedge auditing forever.
+const LOCK_KEY = "audit:outbox:lock";
+const LOCK_TTL_MS = 30_000;
 const GENESIS_HASH = "GENESIS";
 // Rows migrated from the pre-#875 schema carry the sentinel hash "legacy" and a
 // NULL prevHash (assigned by the migration). They are identified here by their
@@ -104,15 +113,18 @@ interface HashableRow {
   timestamp: Date;
 }
 
-/** The canonical preimage committed to by a row's `hash`. Kept as a flat,
- *  pipe-delimited string of scalars plus a stable-stringified metadata blob so
- *  it is unambiguous and cheap to recompute during verification. */
+/** The canonical preimage committed to by a row's `hash`. The fields are
+ *  JSON-encoded as an array so each is unambiguously escaped and delimited: a
+ *  literal separator inside a free-form field (e.g. `target`, `metadata`) can no
+ *  longer shift content across a field boundary and forge a colliding preimage.
+ *  Metadata is stable-stringified first so key order is deterministic across
+ *  Node and Postgres round-trips. Cheap to recompute during verification. */
 export function computeRowHash(row: HashableRow, prevHash: string): string {
   const metaForHash =
     row.metadata === null || row.metadata === undefined
       ? ""
       : stableStringify(row.metadata);
-  const preimage = [
+  const preimage = JSON.stringify([
     row.sequence,
     row.category,
     row.action,
@@ -122,7 +134,7 @@ export function computeRowHash(row: HashableRow, prevHash: string): string {
     row.ipAddress ?? "",
     row.timestamp.toISOString(),
     prevHash,
-  ].join("|");
+  ]);
   return createHash("sha256").update(preimage).digest("hex");
 }
 
@@ -185,6 +197,48 @@ async function requeueFront(item: OutboxItem): Promise<void> {
     }
   }
   memoryOutbox.unshift(item);
+}
+
+// ─── Cross-instance drain lock ────────────────────────────────────────────────
+//
+// When Redis is available the lock genuinely serialises draining across every
+// backend instance. When it is not (tests, or a Redis outage on a single box)
+// there is no second writer to coordinate with, so we proceed under the
+// in-process `draining` guard alone.
+
+/** Try to become the sole draining worker. Returns true if this call may drain. */
+async function acquireDrainLock(token: string): Promise<boolean> {
+  if (!redisReady()) return true;
+  try {
+    const res = await RedisClient.getInstance().set(
+      LOCK_KEY,
+      token,
+      "PX",
+      LOCK_TTL_MS,
+      "NX",
+    );
+    return res === "OK";
+  } catch (error) {
+    // Don't stall auditing on a lock hiccup; the in-process guard still applies.
+    logger.warn({ err: error }, "Audit outbox: drain lock acquire failed");
+    return true;
+  }
+}
+
+/** Release the lock, but only if we still own it (a token check via Lua so a
+ *  lock that already expired and was re-taken by another worker isn't dropped). */
+async function releaseDrainLock(token: string): Promise<void> {
+  if (!redisReady()) return;
+  try {
+    await RedisClient.getInstance().eval(
+      "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+      1,
+      LOCK_KEY,
+      token,
+    );
+  } catch {
+    // Nothing to do — the TTL will expire the lock on its own.
+  }
 }
 
 // ─── Persistence (single writer) ──────────────────────────────────────────────
@@ -260,12 +314,19 @@ export const AuditService = {
   /**
    * Drain the outbox once, persisting each entry in order. On a persist
    * failure the entry is returned to the front of the queue and draining stops,
-   * so the next pass retries it — nothing is dropped. Safe against re-entrancy.
+   * so the next pass retries it — nothing is dropped. Re-entrancy is guarded in
+   * process by `draining`; the cross-instance drain lock guarantees only one
+   * worker anywhere assigns sequences at a time, so concurrent instances cannot
+   * collide on the `sequence` unique constraint.
    */
   async processOutboxOnce(): Promise<void> {
     if (draining) return;
     draining = true;
+    const lockToken = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    let locked = false;
     try {
+      locked = await acquireDrainLock(lockToken);
+      if (!locked) return; // another instance is draining this pass.
       for (let i = 0; i < DRAIN_BATCH_LIMIT; i++) {
         const item = await dequeue();
         if (!item) break;
@@ -281,6 +342,7 @@ export const AuditService = {
         }
       }
     } finally {
+      if (locked) await releaseDrainLock(lockToken);
       draining = false;
     }
   },

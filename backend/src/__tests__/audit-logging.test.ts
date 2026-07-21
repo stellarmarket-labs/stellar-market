@@ -243,6 +243,23 @@ describe("AuditService.verifyChain — tamper detection", () => {
     expect(result.reason).toMatch(/deleted/i);
   });
 
+  it("does not let a separator inside a field forge a colliding hash", async () => {
+    // Two logically distinct rows that would share one preimage under naive
+    // separator-joining: ("a", "b|c") vs ("a|b", "c"). Proper encoding must keep
+    // their hashes distinct, or an attacker could swap one for the other unseen.
+    const base = {
+      sequence: 1,
+      category: "ADMIN_ACTION" as const,
+      actorId: null,
+      metadata: null,
+      ipAddress: null,
+      timestamp: new Date("2026-07-20T00:00:00.000Z"),
+    };
+    const rowA = computeRowHash({ ...base, action: "a", target: "b|c" }, __GENESIS_HASH);
+    const rowB = computeRowHash({ ...base, action: "a|b", target: "c" }, __GENESIS_HASH);
+    expect(rowA).not.toBe(rowB);
+  });
+
   it("treats leading legacy (pre-chain) rows as unverifiable but still chains new rows", async () => {
     // A legacy row (NULL prevHash, sentinel hash) followed by a real chained row
     // whose prevHash links to the legacy row's hash.
