@@ -60,6 +60,8 @@ export default function EvidenceUpload({
   disabled?: boolean;
 }) {
   const [files, setFiles] = useState<FileUploadState[]>([]);
+  const filesRef = useRef(files);
+  filesRef.current = files;
   const [selectedFiles, setSelectedFiles] = useState<Map<string, File>>(new Map());
   const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -172,14 +174,11 @@ export default function EvidenceUpload({
       }
 
       updateFile(state.id, { status: "hashing", progress: 0, error: undefined });
-      console.log("UP1 start", state.id);
-
       // Hash only if we don't already have a hash (e.g. resume after reload).
       let sha256 = state.sha256;
       if (!sha256) {
         try {
           sha256 = await hashFile(file);
-          console.log("UP1 hashed", state.id);
         } catch {
           updateFile(state.id, {
             status: "failed",
@@ -220,7 +219,6 @@ export default function EvidenceUpload({
             onProgress: (pct) => updateFile(state.id, { progress: pct }),
           },
         );
-        console.log("UP1 resumable done", state.id);
         // Persist off the critical upload path (deferred to a macrotask) so a
         // refresh can resume. The server is the source of truth for which chunks
         // were received, so the blob + metadata here are enough to continue from
@@ -249,7 +247,6 @@ export default function EvidenceUpload({
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Upload failed. Retry.";
-        console.log("UP1 FAILED", state.id, message);
         updateFile(state.id, { status: "failed", error: message });
       }
     },
@@ -257,23 +254,23 @@ export default function EvidenceUpload({
   );
 
   const handleUpload = useCallback(async () => {
-    if (files.length === 0 || disabled) return;
+    const snapshot = filesRef.current;
+    if (snapshot.length === 0 || disabled) return;
     setFileError(null);
 
-    let allDone = true;
-    for (const state of files) {
+    for (const state of snapshot) {
       if (state.status === "done") continue;
       // eslint-disable-next-line no-await-in-loop
       await uploadOne(state);
-      // Re-read latest status for completion accounting.
-      const current = files.find((f) => f.id === state.id);
-      if (!current || current.status !== "done") allDone = false;
     }
 
-    if (allDone && files.length > 0) {
+    // Use the live ref value rather than the closure-captured `files` so the
+    // completion check sees the status updates written by uploadOne.
+    const live = filesRef.current;
+    if (live.every((f) => f.status === "done") && live.length > 0) {
       onUploadComplete?.();
     }
-  }, [files, disabled, uploadOne, onUploadComplete]);
+  }, [disabled, uploadOne, onUploadComplete]);
 
   const isProcessing = files.some(
     (f) => f.status === "hashing" || f.status === "uploading",
