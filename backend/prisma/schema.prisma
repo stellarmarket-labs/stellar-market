@@ -172,7 +172,6 @@ model User {
   attachments        Attachment[]
   notifications        Notification[]
   pendingNotifications PendingNotification[]
-  auditLogs          AuditLog[]
   initiatedDisputes  Dispute[]      @relation("DisputeInitiated")
   clientDisputes     Dispute[]      @relation("DisputeClient")
   freelancerDisputes Dispute[]      @relation("DisputeFreelancer")
@@ -446,15 +445,44 @@ model PendingNotification {
   @@index([userId, deliveredAt, priority])
 }
 
-model AuditLog {
-  id        String   @id @default(cuid())
-  adminId   String
-  action    String
-  target    String
-  metadata  Json?
-  timestamp DateTime @default(now())
+/// Category of an audit entry. Both admin actions and security events now
+/// share the single, hash-chained AuditLog table (issue #875).
+enum AuditCategory {
+  ADMIN_ACTION
+  SECURITY_EVENT
+}
 
-  admin User @relation(fields: [adminId], references: [id])
+/// Unified, append-only, tamper-evident audit trail.
+///
+/// Every entry is linked to its predecessor via `prevHash`, and `hash` is the
+/// SHA-256 of the entry's canonical content combined with `prevHash`. Because
+/// each row commits to the one before it, altering or deleting any historical
+/// row breaks the chain and is detectable by recomputing it (see
+/// AuditService.verifyChain).
+///
+/// `sequence` is assigned contiguously by the single-writer outbox worker, so a
+/// gap in the sequence is itself evidence that a row was removed.
+///
+/// `actorId` is intentionally a free-form string (no FK): it may be an admin
+/// user id, an end-user id, or the sentinel "system" for background events such
+/// as virus-scan results, none of which map cleanly onto a single User FK.
+model AuditLog {
+  id        String        @id @default(cuid())
+  sequence  Int           @unique
+  category  AuditCategory
+  action    String
+  actorId   String?
+  target    String?
+  metadata  Json?
+  ipAddress String?
+  prevHash  String?
+  hash      String
+  timestamp DateTime      @default(now())
+
+  @@index([category])
+  @@index([action])
+  @@index([actorId])
+  @@index([timestamp])
 }
 
 model Dispute {

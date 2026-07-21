@@ -26,6 +26,7 @@ import { connectWithRetry } from "./lib/db-connect";
 import { getHealthStatus } from "./lib/health";
 import { metricsHandler, requestDurationMiddleware } from "./lib/metrics";
 import { RecommendationQueueService } from "./services/recommendation-queue.service";
+import { AuditService } from "./services/audit.service";
 import { initializeVirusScanner } from "./utils/virusScanner";
 import { ReputationCacheService } from "./services/reputation-cache.service";
 import { createBullBoard } from "@bull-board/api";
@@ -237,6 +238,7 @@ async function startServer(): Promise<void> {
     startEscrowTtlJob();
     startHorizonListener();
     RecommendationQueueService.startWorker();
+    AuditService.startWorker();
 
     // Initialize virus scanner (non-blocking)
     await initializeVirusScanner();
@@ -261,6 +263,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   RecommendationQueueService.stopWorker();
   ReputationCacheService.stopPeriodicRefresh();
   await stopNotificationWorker();
+  await AuditService.stopWorker();
 
   const { NotificationService } =
     await import("./services/notification.service");
