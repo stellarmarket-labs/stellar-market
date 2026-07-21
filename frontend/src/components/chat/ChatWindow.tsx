@@ -23,6 +23,10 @@ export interface ChatMessage {
   read: boolean;
   createdAt: string;
   sender: { id: string; username: string; avatarUrl: string | null };
+  /** Client-generated id echoed back by the server, used to reconcile an
+   * optimistic send with its confirmed delivery. Absent on messages that
+   * originated from the legacy (non-ack) send path. */
+  clientId?: string | null;
 }
 
 interface ChatWindowProps {
@@ -71,7 +75,7 @@ export default function ChatWindow({
     });
   }, []);
 
-  const { pendingByClientId, send, retry } = useChatOutbox({
+  const { pendingByClientId, send, retry, reconcileFromBroadcast } = useChatOutbox({
     socket,
     isConnected,
     currentUserId,
@@ -153,6 +157,12 @@ export default function ChatWindow({
         (msg.senderId === partnerId && msg.receiverId === currentUserId) ||
         (msg.senderId === currentUserId && msg.receiverId === partnerId)
       ) {
+        // Reconcile against a pending optimistic send even if its ack was
+        // lost — the message still arrived, so the outbox bubble should
+        // clear instead of eventually timing out to "failed".
+        if (msg.clientId) reconciledClientIdsRef.current.add(msg.clientId);
+        reconcileFromBroadcast(msg);
+
         setMessages((prev) => {
           // Deduplicate
           if (prev.some((m) => m.id === msg.id)) return prev;

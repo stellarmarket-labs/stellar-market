@@ -76,6 +76,20 @@ export function useChatOutbox({
 }: UseChatOutboxOptions) {
   const [pendingByClientId, setPendingByClientId] = useState<Record<string, OutgoingMessage>>({});
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // clientIds currently in flight over the socket, so a reconnect-flush that
+  // fires twice in quick succession can't emit the same send twice.
+  const inFlightRef = useRef<Set<string>>(new Set());
+
+  // Conversations are keyed by (currentUserId, partnerId). Reset in-memory
+  // pending state when either changes so stale "sending"/"failed" bubbles
+  // from a previous conversation can't leak into this one, and so retry()
+  // can never be called against a message that belongs elsewhere.
+  useEffect(() => {
+    Object.values(timersRef.current).forEach(clearTimeout);
+    timersRef.current = {};
+    inFlightRef.current.clear();
+    setPendingByClientId({});
+  }, [currentUserId, partnerId]);
 
   const clearTimer = useCallback((clientId: string) => {
     const timer = timersRef.current[clientId];
@@ -105,10 +119,13 @@ export function useChatOutbox({
   const sendOverSocket = useCallback(
     (clientId: string, receiverId: string, content: string) => {
       if (!socket) return;
+      if (inFlightRef.current.has(clientId)) return;
+      inFlightRef.current.add(clientId);
 
       clearTimer(clientId);
 
       const timer = setTimeout(() => {
+        inFlightRef.current.delete(clientId);
         setPendingByClientId((prev) => {
           if (!prev[clientId] || prev[clientId].status !== "sending") return prev;
           return { ...prev, [clientId]: { ...prev[clientId], status: "failed" } };
@@ -121,6 +138,7 @@ export function useChatOutbox({
         { receiverId, content, clientId },
         (ack?: SendMessageAck) => {
           clearTimer(clientId);
+          inFlightRef.current.delete(clientId);
 
           if (ack?.ok && ack.message) {
             dequeue(clientId);
@@ -173,32 +191,55 @@ export function useChatOutbox({
     [currentUserId, partnerId, currentUser, isConnected, socket, enqueue, sendOverSocket]
   );
 
+  // Reconcile a pending message against an incoming `new_message` broadcast.
+  // This covers the case where the send actually landed server-side but the
+  // ack packet itself was dropped: the pending bubble would otherwise sit at
+  // "sending" until the ack-timeout flips it to "failed" even though the
+  // message was delivered.
+  const reconcileFromBroadcast = useCallback(
+    (msg: ChatMessage & { clientId?: string | null }) => {
+      const clientId = msg.clientId;
+      if (!clientId) return false;
+
+      let matched = false;
+      setPendingByClientId((prev) => {
+        if (!prev[clientId]) return prev;
+        matched = true;
+        const next = { ...prev };
+        delete next[clientId];
+        return next;
+      });
+
+      if (matched) {
+        clearTimer(clientId);
+        inFlightRef.current.delete(clientId);
+        dequeue(clientId);
+      }
+      return matched;
+    },
+    [clearTimer, dequeue]
+  );
+
   const retry = useCallback(
     (clientId: string) => {
-      const pending = pendingByClientId[clientId];
-      if (!pending) return;
+      setPendingByClientId((prev) => {
+        const pending = prev[clientId];
+        if (!pending) return prev;
 
-      if (!isConnected || !socket) {
-        setPendingByClientId((prev) => ({
-          ...prev,
-          [clientId]: { ...prev[clientId], status: "queued" },
-        }));
-        enqueue({
-          clientId,
-          receiverId: partnerId,
-          content: pending.content,
-          createdAt: pending.createdAt,
-        });
-        return;
-      }
+        // Always resend to the recipient the message was originally
+        // addressed to, never whatever conversation happens to be open now.
+        const { receiverId, content } = pending;
 
-      setPendingByClientId((prev) => ({
-        ...prev,
-        [clientId]: { ...prev[clientId], status: "sending" },
-      }));
-      sendOverSocket(clientId, partnerId, pending.content);
+        if (!isConnected || !socket) {
+          enqueue({ clientId, receiverId, content, createdAt: pending.createdAt });
+          return { ...prev, [clientId]: { ...pending, status: "queued" } };
+        }
+
+        sendOverSocket(clientId, receiverId, content);
+        return { ...prev, [clientId]: { ...pending, status: "sending" } };
+      });
     },
-    [pendingByClientId, isConnected, socket, partnerId, enqueue, sendOverSocket]
+    [isConnected, socket, enqueue, sendOverSocket]
   );
 
   // Flush queued (offline-sent) messages once the socket reconnects.
@@ -209,6 +250,8 @@ export function useChatOutbox({
     if (queued.length === 0) return;
 
     for (const item of queued) {
+      if (inFlightRef.current.has(item.clientId)) continue;
+
       setPendingByClientId((prev) => {
         const existing = prev[item.clientId];
         if (existing && existing.status !== "queued") return prev;
@@ -243,5 +286,5 @@ export function useChatOutbox({
     };
   }, []);
 
-  return { pendingByClientId, send, retry };
+  return { pendingByClientId, send, retry, reconcileFromBroadcast };
 }
