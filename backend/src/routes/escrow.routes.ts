@@ -504,7 +504,9 @@ router.post("/confirm-tx", authenticate, idempotency(), asyncHandler(async (req:
   }
 
   // ── 2. Contract address must be the configured escrow contract ────────────
-  if (effects.contractId && effects.contractId !== config.stellar.escrowContractId) {
+  // Fail closed: missing contractId (decode failure) is treated the same as
+  // a wrong contract — both are rejected rather than silently skipped.
+  if (!effects.contractId || effects.contractId !== config.stellar.escrowContractId) {
     return res.status(403).json({ error: "Transaction invoked an unexpected contract" });
   }
 
@@ -517,16 +519,16 @@ router.post("/confirm-tx", authenticate, idempotency(), asyncHandler(async (req:
   }
 
   // ── 4. Source account must match the authenticated user's wallet ──────────
-  if (effects.sourceAccount) {
-    const caller = await prisma.user.findUnique({
-      where: { id: req.userId! },
-      select: { walletAddress: true },
+  // Fail closed: reject if the source account could not be decoded, if the
+  // user has no registered wallet, or if the two don't match.
+  const caller = await prisma.user.findUnique({
+    where: { id: req.userId! },
+    select: { walletAddress: true },
+  });
+  if (!effects.sourceAccount || !caller?.walletAddress || effects.sourceAccount !== caller.walletAddress) {
+    return res.status(403).json({
+      error: "Transaction source account does not match your registered wallet",
     });
-    if (caller?.walletAddress && effects.sourceAccount !== caller.walletAddress) {
-      return res.status(403).json({
-        error: "Transaction source account does not match your registered wallet",
-      });
-    }
   }
 
   // ── 5. Load job (and milestone) for authorization + arg checks ────────────

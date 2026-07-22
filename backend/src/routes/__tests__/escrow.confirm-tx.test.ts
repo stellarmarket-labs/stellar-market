@@ -192,6 +192,22 @@ describe("spoofed hash from a non-escrow contract", () => {
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/unexpected contract/i);
   });
+
+  it("rejects with 403 when contractId could not be decoded (undefined) — fail closed", async () => {
+    // contractId extraction has its own try/catch; undefined must not be treated as 'skip check'
+    mockVerifyTransactionEffects.mockResolvedValue(
+      validEffects({ contractId: undefined }),
+    );
+    mockPrisma.job.findUnique.mockResolvedValue(makeJob());
+
+    const res = await request(app)
+      .post("/api/escrow/confirm-tx")
+      .send({ hash: "aaa2", type: "FUND_JOB", jobId: JOB_A_ID });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/unexpected contract/i);
+    expect(mockPrisma.job.update).not.toHaveBeenCalled();
+  });
 });
 
 // ── 2. Valid hash for job A submitted against job B ───────────────────────────
@@ -290,6 +306,23 @@ describe("source account does not match caller's registered wallet", () => {
     const res = await request(app)
       .post("/api/escrow/confirm-tx")
       .send({ hash: "fff", type: "FUND_JOB", jobId: JOB_A_ID });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/source account does not match/i);
+    expect(mockPrisma.job.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects when sourceAccount could not be decoded (undefined) — fail closed", async () => {
+    // sourceAccount extraction has its own try/catch; undefined must not skip the wallet check
+    mockVerifyTransactionEffects.mockResolvedValue(
+      validEffects({ sourceAccount: undefined }),
+    );
+    mockPrisma.job.findUnique.mockResolvedValue(makeJob());
+    mockPrisma.user.findUnique.mockResolvedValue({ walletAddress: CLIENT_WALLET });
+
+    const res = await request(app)
+      .post("/api/escrow/confirm-tx")
+      .send({ hash: "fff2", type: "FUND_JOB", jobId: JOB_A_ID });
 
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/source account does not match/i);
