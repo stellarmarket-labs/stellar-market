@@ -26,6 +26,7 @@ const mockFindUnique = jest.fn().mockResolvedValue(mockDelivery);
 const mockUpdate = jest.fn().mockResolvedValue({});
 const mockFindMany = jest.fn().mockResolvedValue([mockWebhook]);
 const mockDeleteMany = jest.fn().mockResolvedValue({ count: 1 });
+const mockDeliveryFindMany = jest.fn().mockResolvedValue([]);
 
 jest.mock("@prisma/client", () => ({
   PrismaClient: jest.fn().mockImplementation(() => ({
@@ -39,11 +40,13 @@ jest.mock("@prisma/client", () => ({
       }),
       findMany: mockFindMany,
       deleteMany: mockDeleteMany,
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     webhookDelivery: {
       create: mockCreate,
       findUnique: mockFindUnique,
       update: mockUpdate,
+      findMany: mockDeliveryFindMany,
     },
   })),
   Prisma: { InputJsonValue: {} },
@@ -58,8 +61,14 @@ jest.mock("../../lib/logger", () => ({
   logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn() },
 }));
 
+// ─── Mock IP validation ───────────────────────────────────────────────────────
+jest.mock("../../lib/ip-validation", () => ({
+  validateWebhookUrl: jest.fn(),
+}));
+
 // ─── Import after mocks ───────────────────────────────────────────────────────
 import { WebhookService } from "../webhook.service";
+import { validateWebhookUrl } from "../../lib/ip-validation";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function computeExpectedSignature(secret: string, body: string): string {
@@ -74,6 +83,7 @@ describe("WebhookService — HMAC-SHA256 signature (#463)", () => {
     mockFetch.mockResolvedValue({ ok: true, status: 200 });
     mockFindUnique.mockResolvedValue({ ...mockDelivery });
     mockUpdate.mockResolvedValue({});
+    (validateWebhookUrl as jest.MockedFunction<typeof validateWebhookUrl>).mockResolvedValue({ valid: true });
   });
 
   it("includes X-StellarMarket-Signature header on every delivery", async () => {
@@ -176,5 +186,119 @@ describe("WebhookService — supported events", () => {
 
   it("rejects unknown event types", () => {
     expect(WebhookService.isSupportedEvent("unknown.event")).toBe(false);
+  });
+});
+
+describe("WebhookService — URL validation (#872)", () => {
+  const validateWebhookUrlMock = validateWebhookUrl as jest.MockedFunction<typeof validateWebhookUrl>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("rejects webhook registration with localhost address", async () => {
+    validateWebhookUrlMock.mockResolvedValue({
+      valid: false,
+      reason: "Webhook URL resolves to private IPv4 address: 127.0.0.1",
+    });
+
+    await expect(WebhookService.register("user-1", "http://localhost:8000/hook", "job.status_changed")).rejects.toThrow(
+      /Webhook URL validation failed/,
+    );
+  });
+
+  it("rejects webhook registration with RFC1918 private address", async () => {
+    validateWebhookUrlMock.mockResolvedValue({
+      valid: false,
+      reason: "Webhook URL resolves to private IPv4 address: 192.168.1.1",
+    });
+
+    await expect(WebhookService.register("user-1", "http://192.168.1.1/hook", "job.status_changed")).rejects.toThrow(
+      /Webhook URL validation failed/,
+    );
+  });
+
+  it("rejects webhook registration with AWS metadata endpoint", async () => {
+    validateWebhookUrlMock.mockResolvedValue({
+      valid: false,
+      reason: "Webhook URL resolves to AWS metadata endpoint (169.254.169.254)",
+    });
+
+    await expect(WebhookService.register("user-1", "http://169.254.169.254/hook", "job.status_changed")).rejects.toThrow(
+      /Webhook URL validation failed/,
+    );
+  });
+
+  it("accepts webhook registration with valid public URL", async () => {
+    validateWebhookUrlMock.mockResolvedValue({ valid: true });
+
+    const result = await WebhookService.register("user-1", "https://example.com/hook", "job.status_changed");
+    expect(result.url).toBe("https://example.com/hook");
+  });
+
+  it("re-validates webhook URL at delivery time", async () => {
+    mockFindUnique.mockResolvedValue({ ...mockDelivery });
+    validateWebhookUrlMock.mockResolvedValue({
+      valid: false,
+      reason: "Webhook URL resolves to private IPv4 address: 10.0.0.1",
+    });
+
+    await WebhookService.deliver("del-1");
+
+    expect(validateWebhookUrlMock).toHaveBeenCalledWith(mockDelivery.webhook.url);
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "failed", attempts: 3 }),
+      }),
+    );
+  });
+
+  it("does not follow redirects to different hosts", async () => {
+    mockFindUnique.mockResolvedValue({ ...mockDelivery });
+    validateWebhookUrlMock.mockResolvedValue({ valid: true });
+    mockFetch.mockResolvedValue({ ok: true, status: 200 });
+
+    await WebhookService.deliver("del-1");
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(init.redirect).toBe("error");
+  });
+});
+
+describe("WebhookService — durable retry sweep (#872)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (validateWebhookUrl as jest.MockedFunction<typeof validateWebhookUrl>).mockResolvedValue({ valid: true });
+  });
+
+  it("re-enqueues pending deliveries after a process restart", async () => {
+    const now = new Date();
+    const pastDelivery = {
+      id: "del-2",
+      webhookId: "wh-1",
+      event: "job.status_changed",
+      payload: { jobId: "job-42", status: "IN_PROGRESS" },
+      status: "pending",
+      attempts: 1,
+      nextRetry: new Date(now.getTime() - 60_000),
+      lastAttempt: new Date(),
+      responseCode: null,
+      createdAt: new Date(),
+      webhook: mockWebhook,
+    };
+
+    mockDeliveryFindMany.mockResolvedValue([pastDelivery]);
+    mockFindUnique.mockResolvedValue(pastDelivery);
+
+    await WebhookService.sweepPendingRetries();
+
+    expect(mockDeliveryFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "pending",
+          nextRetry: { lte: expect.any(Date) },
+        }),
+      }),
+    );
   });
 });
