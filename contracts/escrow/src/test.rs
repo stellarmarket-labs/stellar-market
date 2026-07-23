@@ -868,6 +868,201 @@ fn test_propose_revision_fails_for_disputed_job() {
 
 #[test]
 #[should_panic(expected = "Error(Contract, #3)")]
+fn test_propose_revision_fails_for_completed_job() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, client, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+
+    env.as_contract(&contract.address, || {
+        let key = crate::DataKey::Job(job_id);
+        let mut job: crate::Job = env.storage().persistent().get(&key).unwrap();
+        job.status = JobStatus::Completed;
+        env.storage().persistent().set(&key, &job);
+    });
+
+    let new_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Revised"),
+            amount: 1200,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+        },
+    ];
+
+    contract.propose_revision(&client, &job_id, &new_milestones);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_propose_revision_fails_for_cancelled_job() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, client, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+
+    env.as_contract(&contract.address, || {
+        let key = crate::DataKey::Job(job_id);
+        let mut job: crate::Job = env.storage().persistent().get(&key).unwrap();
+        job.status = JobStatus::Cancelled;
+        env.storage().persistent().set(&key, &job);
+    });
+
+    let new_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Revised"),
+            amount: 1200,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+        },
+    ];
+
+    contract.propose_revision(&client, &job_id, &new_milestones);
+}
+
+#[test]
+fn test_accept_revision_preserves_partially_paid_milestone() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, client_addr, freelancer, token_addr, _) = setup_test(&env);
+    let token = TokenClient::new(&env, &token_addr);
+
+    let initial_amount: i128 = 1000;
+    let disbursed: i128 = 700;
+    let new_amount: i128 = 1200;
+
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), initial_amount, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+    contract.fund_job(&job_id, &client_addr, &0, &0);
+    contract.submit_milestone(&job_id, &0, &freelancer);
+
+    // Pay out 700 of the 1000 nominal amount before any revision happens.
+    contract.release_partial_payment(&job_id, &0, &disbursed, &client_addr, &0);
+
+    let client_balance_before_revision = token.balance(&client_addr);
+    let contract_balance_before_revision = token.balance(&contract.address);
+    assert_eq!(contract_balance_before_revision, initial_amount - disbursed); // 300 left in escrow
+
+    // Freelancer proposes raising milestone 0's total nominal value from 1000 to 1200.
+    let new_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Revised"),
+            amount: new_amount,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+        },
+    ];
+    contract.propose_revision(&freelancer, &job_id, &new_milestones);
+    contract.accept_revision(&client_addr, &job_id);
+
+    let job = contract.get_job(&job_id);
+    assert_eq!(job.total_amount, new_amount);
+
+    // The already-disbursed 700 must be preserved: the stored milestone should reflect
+    // only the remaining, unpaid balance (1200 - 700 = 500), not the raw proposed amount.
+    let ms = job.milestones.get(0).unwrap();
+    assert_eq!(ms.status, MilestoneStatus::PartiallyPaid);
+    assert_eq!(ms.amount, new_amount - disbursed);
+
+    // Freelancer's already-received funds are untouched.
+    assert_eq!(token.balance(&freelancer), disbursed);
+
+    // Top-up transfer must be based on the real remaining escrow balance, not the stale
+    // nominal old_total: client only owes enough to bring escrow up to (new_total - paid).
+    let expected_topup = new_amount - initial_amount; // 200
+    assert_eq!(token.balance(&client_addr), client_balance_before_revision - expected_topup);
+    assert_eq!(token.balance(&contract.address), new_amount - disbursed); // 500
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #50)")]
+fn test_accept_revision_fails_when_new_total_below_disbursed_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, client_addr, freelancer, token_addr, _) = setup_test(&env);
+
+    let initial_amount: i128 = 1000;
+    let disbursed: i128 = 700;
+
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), initial_amount, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client_addr, &freelancer, &token_addr, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+    contract.fund_job(&job_id, &client_addr, &0, &0);
+    contract.submit_milestone(&job_id, &0, &freelancer);
+
+    // Pay out 700 of the 1000 nominal amount.
+    contract.release_partial_payment(&job_id, &0, &disbursed, &client_addr, &0);
+
+    // Propose shrinking milestone 0's total nominal value to 500 — below the 700 already paid.
+    let new_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Shrunk"),
+            amount: 500,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+        },
+    ];
+    contract.propose_revision(&freelancer, &job_id, &new_milestones);
+
+    // Must be rejected — not silently accepted with an incorrect refund.
+    contract.accept_revision(&client_addr, &job_id);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #50)")]
+fn test_accept_revision_fails_when_dropping_a_paid_milestone() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, client_addr, freelancer, token_addr, _) = setup_test(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "First"), 1000_i128, JOB_DEADLINE),
+        (String::from_str(&env, "Second"), 500_i128, JOB_DEADLINE + 1),
+    ];
+    let job_id = contract.create_job(&client_addr, &freelancer, &token_addr, &milestones, &(JOB_DEADLINE + 1), &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+    contract.fund_job(&job_id, &client_addr, &0, &0);
+    contract.submit_milestone(&job_id, &0, &freelancer);
+
+    // Fully pay off milestone 0 via partial payment.
+    contract.release_partial_payment(&job_id, &0, &1000, &client_addr, &0);
+
+    // Proposal only carries milestone id 1 forward, silently dropping the already-paid
+    // milestone id 0 entirely.
+    let new_milestones = vec![
+        &env,
+        Milestone {
+            id: 1,
+            description: String::from_str(&env, "Second revised"),
+            amount: 600,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE + 1,
+        },
+    ];
+    contract.propose_revision(&freelancer, &job_id, &new_milestones);
+
+    contract.accept_revision(&client_addr, &job_id);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_approve_milestone_fails_for_disputed_job() {
     let env = Env::default();
     env.mock_all_auths();
