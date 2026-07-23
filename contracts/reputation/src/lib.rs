@@ -1059,6 +1059,45 @@ impl ReputationContract {
         })
     }
 
+    /// Governance weight snapshot helper (issue #899).
+    ///
+    /// Returns `(score, last_change_ts)` where:
+    /// - `score` is the user's current decayed, stake-weighted reputation total
+    ///   (`total_score` from [`get_decayed_totals`]) — used as raw voting weight
+    ///   by the reputation-weighted governance path in the escrow contract.
+    /// - `last_change_ts` is the ledger timestamp of the user's most recent
+    ///   *score-changing* event (review, slash, dispute outcome, referral bonus,
+    ///   appeal resolution). It is read from the stored [`UserReputation`], whose
+    ///   `last_updated_ledger` is bumped by every such mutation and is **not**
+    ///   moved by pure reads.
+    ///
+    /// # Snapshot safety
+    ///
+    /// Governance compares `last_change_ts` against a proposal's snapshot
+    /// timestamp and only accepts a vote when `last_change_ts <= snapshot_ts`.
+    /// This makes reputation acquired *after* a proposal opens ineligible to vote
+    /// on it, defeating the classic "pump reputation to swing an in-flight vote"
+    /// attack. Because the returned score is the decayed value read at call time
+    /// and decay is monotonically non-increasing, the weight can only be *lower*
+    /// than it was at snapshot time — never inflated — so the check is safe.
+    ///
+    /// Unknown users return `(0, 0)`: zero weight, and a `last_change_ts` of `0`
+    /// that is `<=` any snapshot (they simply have no weight to cast).
+    pub fn get_gov_weight(env: Env, user: Address) -> (u64, u64) {
+        bump_instance_ttl(&env);
+        let stored: Option<UserReputation> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Reputation(user.clone()));
+        let last_change_ts = match stored {
+            Some(rep) => rep.last_updated_ledger as u64,
+            // No reputation record: no weight, and a snapshot-safe timestamp of 0.
+            None => return (0, 0),
+        };
+        let (total_score, _total_weight, _review_count) = Self::get_decayed_totals(&env, user);
+        (total_score, last_change_ts)
+    }
+
     /// Get reputation together with the registered referrer (if any).
     pub fn get_reputation_with_referrer(
         env: Env,
