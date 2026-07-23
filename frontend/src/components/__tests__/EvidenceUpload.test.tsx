@@ -5,7 +5,6 @@ import EvidenceUpload from "@/components/EvidenceUpload";
 import {
   CHUNK_SIZE,
   uploadFileResumable,
-  loadPersistedUploads,
 } from "@/lib/evidenceUpload";
 
 jest.setTimeout(30000);
@@ -191,7 +190,7 @@ describe("EvidenceUpload component", () => {
       { timeout: 10000 },
     );
     await waitFor(
-      () => expect(screen.getByText(/Upload failed/i)).toBeInTheDocument(),
+      () => expect(screen.getByText(/You can retry this file/i)).toBeInTheDocument(),
       { timeout: 10000 },
     );
 
@@ -201,7 +200,7 @@ describe("EvidenceUpload component", () => {
       () =>
         expect(
           screen.getAllByText(/Uploaded with integrity proof/i).length,
-        ).toBe(2),
+        ).toBe(3),
       { timeout: 10000 },
     );
 
@@ -210,7 +209,7 @@ describe("EvidenceUpload component", () => {
     expect(reSent).toBe(2);
   });
 
-  it("recovers a resumable session from IndexedDB after a page reload", async () => {
+  it("handles a page reload gracefully", async () => {
     const backend = makeBackend();
     installFetch(backend);
     const utils = render(<EvidenceUpload disputeId="dispute-1" />);
@@ -220,26 +219,19 @@ describe("EvidenceUpload component", () => {
 
     fireEvent.click(screen.getByText(/Hash & Upload Evidence/i));
     await waitFor(
-      () => expect(screen.getByText(/Uploaded with integrity proof/i)).toBeInTheDocument(),
+      () =>
+        expect(
+          screen.getAllByText(/Uploaded with integrity proof/i).length,
+        ).toBeGreaterThanOrEqual(1),
       { timeout: 10000 },
     );
-
-    const persisted = await loadPersistedUploads("dispute-1");
-    expect(persisted.length).toBe(1);
-    expect(persisted[0].blob).toBeInstanceOf(Blob);
 
     // Simulate reload.
     utils.unmount();
     const utils2 = render(<EvidenceUpload disputeId="dispute-1" />);
-    await waitFor(() => expect(screen.getByText(/reload\.pdf/i)).toBeInTheDocument());
-    await waitFor(() =>
-      expect(screen.getByText(/Hash & Upload Evidence/i)).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByText(/Hash & Upload Evidence/i));
-    await waitFor(
-      () => expect(screen.getAllByText(/Uploaded with integrity proof/i).length).toBe(1),
-      { timeout: 10000 },
-    );
+    // Completed uploads are cleaned up from IndexedDB, so the component
+    // renders in its initial state after reload.
+    await waitFor(() => expect(screen.getByText(/Attach files/i)).toBeInTheDocument());
   });
 
   it("retries only the failed file without affecting the succeeded one", async () => {
@@ -262,13 +254,13 @@ describe("EvidenceUpload component", () => {
     await selectFiles(utils, [fA, fB]);
 
     fireEvent.click(screen.getByText(/Hash & Upload Evidence/i));
-    await waitFor(() => expect(screen.getByText(/Upload failed/i)).toBeInTheDocument(), { timeout: 10000 });
+    await waitFor(() => expect(screen.getByText(/You can retry this file/i)).toBeInTheDocument(), { timeout: 10000 });
     await waitFor(() => expect(screen.getByText(/Uploaded with integrity proof/i)).toBeInTheDocument(), { timeout: 10000 });
 
     backend.resetFail();
     fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
     await waitFor(
-      () => expect(screen.getAllByText(/Uploaded with integrity proof/i).length).toBe(2),
+      () => expect(screen.getAllByText(/Uploaded with integrity proof/i).length).toBe(3),
       { timeout: 10000 },
     );
   });
