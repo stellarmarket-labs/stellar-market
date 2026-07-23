@@ -24,6 +24,7 @@ import reportRoutes from "./report.routes";
 import categoriesRoutes from "./categories.routes";
 import skillRoutes from "./skill.routes";
 import emailPreviewRoutes from "./admin/emailPreview";
+import fraudRoutes from "./admin/fraud.routes";
 import unsubscribeRoutes from "./unsubscribe.routes";
 
 const router = Router();
@@ -45,6 +46,7 @@ router.use("/escrow", escrowRoutes);
 router.use("/transactions", transactionRoutes);
 router.use("/uploads", uploadRoutes);
 router.use("/admin/email-preview", emailPreviewRoutes);
+router.use("/admin/fraud", fraudRoutes);
 router.use("/admin", adminRoutes);
 router.use("/disputes", disputeRoutes);
 router.use("/freelancers", freelancerRoutes);

@@ -756,3 +756,88 @@ model Skill {
 
   @@index([name])
 }
+
+// ─── Fraud / anomaly detection (issue #900) ──────────────────────────────────
+
+/// The kind of entity a risk assessment is computed for.
+enum RiskSubjectType {
+  USER
+  JOB
+  TRANSACTION
+}
+
+/// Coarse risk band derived from the numeric score. Thresholds are tunable and
+/// live in fraud-detection.service.ts, not the database.
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+/// What caused a scoring run to happen. ESCROW_RELEASE and JOB_CREATED are the
+/// near-real-time hooks; BATCH is a periodic sweep; MANUAL is an admin re-score.
+enum RiskTrigger {
+  JOB_CREATED
+  ESCROW_RELEASE
+  MANUAL
+  BATCH
+}
+
+/// Lifecycle of an entry in the admin review queue. FALSE_POSITIVE is the
+/// feedback signal used to tune thresholds; CONFIRMED escalates.
+enum RiskFlagStatus {
+  OPEN
+  UNDER_REVIEW
+  CONFIRMED
+  FALSE_POSITIVE
+  DISMISSED
+}
+
+/// Append-only record of every risk scoring run. Persisting each run (rather
+/// than only a live computation) gives an auditable history of how a subject's
+/// score changed over time and exactly which signals produced it. Never mutated
+/// or deleted; the current score for a subject is simply its newest row.
+model RiskAssessment {
+  id          String          @id @default(cuid())
+  subjectType RiskSubjectType
+  subjectId   String
+  score       Float
+  level       RiskLevel
+  /// Array of contributing signals: [{ code, value, weight, contribution, detail }].
+  signals     Json
+  trigger     RiskTrigger
+  createdAt   DateTime        @default(now())
+
+  flag RiskFlag? @relation(fields: [flagId], references: [id], onDelete: SetNull)
+  flagId String?
+
+  @@index([subjectType, subjectId, createdAt])
+  @@index([level])
+  @@index([createdAt])
+}
+
+/// One row per subject that has crossed the review threshold — the admin review
+/// queue. Deliberately does NOT block or suspend anyone: it only surfaces
+/// activity for a human. `status` carries the review outcome, and a
+/// FALSE_POSITIVE outcome (with reviewer note) feeds back into threshold tuning.
+model RiskFlag {
+  id           String          @id @default(cuid())
+  subjectType  RiskSubjectType
+  subjectId    String
+  currentScore Float
+  currentLevel RiskLevel
+  status       RiskFlagStatus  @default(OPEN)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  assessments RiskAssessment[]
+
+  @@unique([subjectType, subjectId])
+  @@index([status])
+  @@index([currentLevel])
+  @@index([updatedAt])
+}

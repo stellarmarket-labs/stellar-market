@@ -1,5 +1,6 @@
 import { PrismaClient, EscrowEvent, EscrowEventType, JobStatus, EscrowStatus } from "@prisma/client";
 import { NotificationService } from "./notification.service";
+import { FraudDetectionService } from "./fraud-detection.service";
 import { logger } from "../lib/logger";
 
 const prisma = new PrismaClient();
@@ -163,6 +164,13 @@ export async function handleEscrowEvent(eventData: HandleEscrowEventInput): Prom
               skipBatching: true,
             })
           )
+        );
+
+        // Near-real-time fraud/anomaly scoring (issue #900). Fire-and-forget:
+        // scoring an escrow release must never block or fail projection.
+        FraudDetectionService.onEscrowReleased(
+          jobId,
+          [job.clientId, job.freelancerId].filter(Boolean) as string[],
         );
       }
     }
