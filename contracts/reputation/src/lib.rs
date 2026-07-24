@@ -124,7 +124,10 @@ pub struct UserReputation {
     pub total_score: u64,
     pub total_weight: u64,
     pub review_count: u32,
-    pub last_updated_ledger: u32,
+    /// Unix **timestamp** (seconds) of the last score-changing event, from
+    /// `env.ledger().timestamp()` — NOT a ledger sequence number. Renamed from
+    /// `last_updated_ledger` to match what it actually holds (issue #899 review).
+    pub last_updated_ts: u32,
 }
 
 #[contracttype]
@@ -399,11 +402,11 @@ pub fn apply_lazy_decay(env: &Env, rep: &mut UserReputation) {
 
     let current_ts = env.ledger().timestamp() as u32;
     if decay_rate == 0 || decay_rate >= 100 {
-        rep.last_updated_ledger = current_ts;
+        rep.last_updated_ts = current_ts;
         return;
     }
 
-    let last_ts = rep.last_updated_ledger as u64;
+    let last_ts = rep.last_updated_ts as u64;
     let now_ts = current_ts as u64;
     if now_ts <= last_ts {
         return;
@@ -418,7 +421,7 @@ pub fn apply_lazy_decay(env: &Env, rep: &mut UserReputation) {
 
     rep.total_score  = (rep.total_score  * retained_pct) / 100;
     rep.total_weight = (rep.total_weight * retained_pct) / 100;
-    rep.last_updated_ledger = current_ts;
+    rep.last_updated_ts = current_ts;
 }
 
 fn get_decay_factor(decay_rate: u32, current_time: u64, recorded_at: u64) -> u64 {
@@ -597,7 +600,7 @@ impl ReputationContract {
                     total_score: 0,
                     total_weight: 0,
                     review_count: 0,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 });
 
         apply_lazy_decay(&env, &mut reputation);
@@ -605,7 +608,7 @@ impl ReputationContract {
         reputation.total_score += (rating as u64) * weight;
         reputation.total_weight += weight;
         reputation.review_count += 1;
-        reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+        reputation.last_updated_ts = env.ledger().timestamp() as u32;
 
         env.storage().persistent().set(&rep_key, &reputation);
         bump_reputation_ttl(&env, &reviewee);
@@ -842,14 +845,14 @@ impl ReputationContract {
                     total_score: 0,
                     total_weight: 0,
                     review_count: 0,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 });
 
             apply_lazy_decay(env, &mut reputation);
 
             reputation.total_score += earned_score;
             reputation.total_weight += weight;
-            reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+            reputation.last_updated_ts = env.ledger().timestamp() as u32;
 
             env.storage().persistent().set(&rep_key, &reputation);
             bump_reputation_ttl(env, &referrer);
@@ -956,12 +959,12 @@ impl ReputationContract {
                 total_score: 0,
                 total_weight: 0,
                 review_count: 0,
-                last_updated_ledger: env.ledger().timestamp() as u32,
+                last_updated_ts: env.ledger().timestamp() as u32,
             });
         apply_lazy_decay(&env, &mut reputation);
         reputation.total_score = reputation.total_score.saturating_add(amount);
         reputation.total_weight = reputation.total_weight.saturating_add(weight);
-        reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+        reputation.last_updated_ts = env.ledger().timestamp() as u32;
         env.storage().persistent().set(&rep_key, &reputation);
         bump_reputation_ttl(&env, &user);
 
@@ -1055,8 +1058,47 @@ impl ReputationContract {
             total_score,
             total_weight,
             review_count,
-            last_updated_ledger: env.ledger().timestamp() as u32,
+            last_updated_ts: env.ledger().timestamp() as u32,
         })
+    }
+
+    /// Governance weight snapshot helper (issue #899).
+    ///
+    /// Returns `(score, last_change_ts)` where:
+    /// - `score` is the user's current decayed, stake-weighted reputation total
+    ///   (`total_score` from [`get_decayed_totals`]) — used as raw voting weight
+    ///   by the reputation-weighted governance path in the escrow contract.
+    /// - `last_change_ts` is the ledger timestamp of the user's most recent
+    ///   *score-changing* event (review, slash, dispute outcome, referral bonus,
+    ///   appeal resolution). It is read from the stored [`UserReputation`], whose
+    ///   `last_updated_ts` is bumped by every such mutation and is **not**
+    ///   moved by pure reads.
+    ///
+    /// # Snapshot safety
+    ///
+    /// Governance compares `last_change_ts` against a proposal's snapshot
+    /// timestamp and only accepts a vote when `last_change_ts <= snapshot_ts`.
+    /// This makes reputation acquired *after* a proposal opens ineligible to vote
+    /// on it, defeating the classic "pump reputation to swing an in-flight vote"
+    /// attack. Because the returned score is the decayed value read at call time
+    /// and decay is monotonically non-increasing, the weight can only be *lower*
+    /// than it was at snapshot time — never inflated — so the check is safe.
+    ///
+    /// Unknown users return `(0, 0)`: zero weight, and a `last_change_ts` of `0`
+    /// that is `<=` any snapshot (they simply have no weight to cast).
+    pub fn get_gov_weight(env: Env, user: Address) -> (u64, u64) {
+        bump_instance_ttl(&env);
+        let stored: Option<UserReputation> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Reputation(user.clone()));
+        let last_change_ts = match stored {
+            Some(rep) => rep.last_updated_ts as u64,
+            // No reputation record: no weight, and a snapshot-safe timestamp of 0.
+            None => return (0, 0),
+        };
+        let (total_score, _total_weight, _review_count) = Self::get_decayed_totals(&env, user);
+        (total_score, last_change_ts)
     }
 
     /// Get reputation together with the registered referrer (if any).
@@ -1176,13 +1218,13 @@ impl ReputationContract {
                     total_score: 0,
                     total_weight: 0,
                     review_count: 0,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 });
 
         apply_lazy_decay(&env, &mut reputation);
 
         reputation.total_score = reputation.total_score.saturating_sub(amount);
-        reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+        reputation.last_updated_ts = env.ledger().timestamp() as u32;
         env.storage().persistent().set(&rep_key, &reputation);
         bump_reputation_ttl(&env, &user);
 
@@ -1232,7 +1274,7 @@ impl ReputationContract {
                 total_score: 0,
                 total_weight: 0,
                 review_count: 0,
-                last_updated_ledger: 0,
+                last_updated_ts: 0,
             });
 
         if score_change > 0 {
@@ -1525,13 +1567,13 @@ impl ReputationContract {
                         total_score: 0,
                         total_weight: 0,
                         review_count: 0,
-                        last_updated_ledger: env.ledger().timestamp() as u32,
+                        last_updated_ts: env.ledger().timestamp() as u32,
                     });
 
                 apply_lazy_decay(&env, &mut reputation);
 
                 reputation.total_score = reputation.total_score.saturating_sub(amount);
-                reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+                reputation.last_updated_ts = env.ledger().timestamp() as u32;
                 env.storage().persistent().set(&rep_key, &reputation);
                 bump_reputation_ttl(env, &loser);
 
@@ -2086,7 +2128,7 @@ impl ReputationContract {
                     total_score: 0,
                     total_weight: 0,
                     review_count: 0,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 });
 
             apply_lazy_decay(&env, &mut reputation);
@@ -2094,7 +2136,7 @@ impl ReputationContract {
             reputation.total_score = reputation.total_score.saturating_sub(removed_score);
             reputation.total_weight = reputation.total_weight.saturating_sub(removed_weight);
             reputation.review_count = reputation.review_count.saturating_sub(1);
-            reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+            reputation.last_updated_ts = env.ledger().timestamp() as u32;
             env.storage().persistent().set(&rep_key, &reputation);
             bump_reputation_ttl(&env, &reviewee);
 
@@ -2229,7 +2271,7 @@ mod tests {
                     total_score: (rating as u64) * (MIN_REVIEW_STAKE_DEFAULT as u64),
                     total_weight: MIN_REVIEW_STAKE_DEFAULT as u64,
                     review_count: 1,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 },
             );
         });
@@ -2314,7 +2356,7 @@ mod tests {
                     total_score: 100,
                     total_weight: 10,
                     review_count: 1,
-                    last_updated_ledger: 0,
+                    last_updated_ts: 0,
                 },
             );
         });
@@ -2329,7 +2371,7 @@ mod tests {
                     total_score: 500,
                     total_weight: 50,
                     review_count: 5,
-                    last_updated_ledger: 0,
+                    last_updated_ts: 0,
                 },
             );
         });
@@ -2344,7 +2386,7 @@ mod tests {
                     total_score: 2000,
                     total_weight: 200,
                     review_count: 20,
-                    last_updated_ledger: 0,
+                    last_updated_ts: 0,
                 },
             );
         });
@@ -2359,7 +2401,7 @@ mod tests {
                     total_score: 99,
                     total_weight: 10,
                     review_count: 1,
-                    last_updated_ledger: 0,
+                    last_updated_ts: 0,
                 },
             );
         });
@@ -2391,7 +2433,7 @@ mod tests {
                     total_score: 500,
                     total_weight: 50,
                     review_count: 5,
-                    last_updated_ledger: 0,
+                    last_updated_ts: 0,
                 },
             );
         });
@@ -2435,7 +2477,7 @@ mod tests {
                     total_score: 100,
                     total_weight: 10,
                     review_count: 1,
-                    last_updated_ledger: 0,
+                    last_updated_ts: 0,
                 },
             );
         });
@@ -2565,7 +2607,7 @@ mod tests {
                     total_score,
                     total_weight,
                     review_count: 3,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 },
             );
         });
