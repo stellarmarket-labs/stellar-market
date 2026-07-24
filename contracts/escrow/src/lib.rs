@@ -94,6 +94,17 @@ pub enum EscrowError {
     /// A revision proposal would drop a milestone that already has disbursed funds,
     /// or would value it below what has already been paid out to the freelancer.
     RevisionBelowDisbursedAmount = 50,
+
+    // ===== Reputation-weighted governance (issue #899) =====
+    // The governance proposal lifecycle has its own dedicated `GovError` enum in
+    // `governance.rs` (the SDK caps a single error enum at 50 cases). Only this
+    // one variant lives here, because it is returned from the multisig code path
+    // (`propose_admin_action` / `execute_proposal_internal`) to enforce the
+    // governance/multisig separation of powers. Code 51 (not 50) — code 50 is
+    // taken by RevisionBelowDisbursedAmount, which landed on main after this
+    // branch opened.
+    /// A governed parameter must be changed via governance, not the multisig.
+    GovernanceRequired = 51,
 }
 
 /// Privileged actions that can be proposed and approved through the multi-sig flow.

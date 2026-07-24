@@ -417,6 +417,38 @@ fn delegate_must_vote_before_pulling_delegated_weight() {
 }
 
 #[test]
+fn delegation_is_single_hop() {
+    // A -> B -> C. C votes with its own weight and pulls in B's weight (so B's
+    // receipt is via_delegate). B, as A's delegate, must NOT be able to forward
+    // A's weight on again — delegation is capped at one hop.
+    let ctx = setup();
+    let c = voter_with(&ctx, 30, 500_000);
+    let b = voter_with(&ctx, 30, 500_000);
+    let a = voter_with(&ctx, 100, 500_000);
+    let id = ctx.escrow.propose_governance(&c, &AdminAction::SetFeeBps(250));
+
+    ctx.escrow.delegate(&a, &b);
+    ctx.escrow.delegate(&b, &c);
+
+    // C votes directly, then exercises B's delegated weight onto C's side.
+    ctx.escrow.cast_vote(&c, &id, &VoteSupport::For);
+    ctx.escrow.cast_delegated_vote(&c, &id, &b);
+    let b_receipt = ctx.escrow.get_vote_receipt(&id, &b).unwrap();
+    assert!(b_receipt.via_delegate);
+
+    // B now holds a receipt, but it came via delegation — B cannot pass A's
+    // weight further down the chain.
+    assert_eq!(
+        ctx.escrow.try_cast_delegated_vote(&b, &id, &a),
+        Err(Ok(GovError::DelegateNotDirect))
+    );
+
+    // A's 100 never entered the tally; only C's 30 + B's 30 did.
+    let p = ctx.escrow.get_governance_proposal(&id).unwrap();
+    assert_eq!(p.for_weight, 60);
+}
+
+#[test]
 fn non_delegate_cannot_cast_delegated_vote() {
     let ctx = setup();
     let delegate = voter_with(&ctx, 40, 500_000);

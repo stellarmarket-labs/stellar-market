@@ -1938,7 +1938,7 @@ fn test_lazy_decay_zero_rate_no_decay() {
 }
 
 #[test]
-fn test_last_updated_ledger_advances_on_write() {
+fn test_last_updated_ts_advances_on_write() {
     let env = Env::default();
     env.mock_all_auths();
     let escrow_id     = env.register_contract(None, EscrowContract);
@@ -1951,14 +1951,14 @@ fn test_last_updated_ledger_advances_on_write() {
     let reviewee = Address::generate(&env);
     setup_review_for(&env, &escrow_id, &client, 1, &reviewer, &reviewee, 5);
 
-    let ledger_before = client.get_reputation(&reviewee).last_updated_ledger;
+    let ledger_before = client.get_reputation(&reviewee).last_updated_ts;
     advance_n_periods(&env, 2);
 
     // Trigger write by adding a second review
     let reviewer2 = Address::generate(&env);
     setup_review_for(&env, &escrow_id, &client, 2, &reviewer2, &reviewee, 4);
 
-    let ledger_after = client.get_reputation(&reviewee).last_updated_ledger;
+    let ledger_after = client.get_reputation(&reviewee).last_updated_ts;
     assert!(ledger_after > ledger_before);
 }
 
@@ -2180,7 +2180,7 @@ fn test_decay_fuzz_never_exceeds_original() {
                 total_score: 1_000_000,
                 total_weight: 100_000,
                 review_count: 10,
-                last_updated_ledger: 0,
+                last_updated_ts: 0,
             },
         );
     });

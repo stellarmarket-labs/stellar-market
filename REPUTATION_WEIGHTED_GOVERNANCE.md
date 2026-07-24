@@ -40,7 +40,9 @@ Each proposal records `snapshot_ts` at open time. Voting weight is read from the
 reputation contract via `get_gov_weight(user) -> (score, last_change_ts)` and a
 vote is accepted **only if `last_change_ts <= snapshot_ts`**.
 
-`last_change_ts` is the stored `UserReputation.last_updated_ledger`, which is
+`last_change_ts` is the stored `UserReputation.last_updated_ts` (a Unix
+timestamp in seconds, from `env.ledger().timestamp()` — renamed from the
+misleading `last_updated_ledger` per review), which is
 bumped by every score-changing event (review, slash, dispute outcome, referral
 bonus, appeal) and never by a pure read. Any account that acquires or changes
 reputation after a proposal opens therefore has `last_change_ts > snapshot_ts`
@@ -64,6 +66,11 @@ Single-hop and exercised explicitly:
 Every account's weight is recorded in a per-proposal `VoteReceipt` and can be
 cast **at most once**. Re-delegating mid-vote therefore never retroactively moves
 weight that has already been counted — the receipt locks it.
+
+Single-hop is enforced: `cast_delegated_vote` rejects
+(`GovError::DelegateNotDirect`) when the delegate's own receipt has
+`via_delegate == true`, so weight received through delegation cannot be forwarded
+on again (A→B→C never lets B pass A's weight to C).
 
 ### 4. Quorum & threshold
 

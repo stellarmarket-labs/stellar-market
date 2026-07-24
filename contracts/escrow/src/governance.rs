@@ -116,6 +116,9 @@ pub enum GovError {
     NotAdmin = 218,
     /// The proposed fee exceeds the maximum permitted.
     InvalidFee = 219,
+    /// The delegate voted with weight it received via delegation, so it cannot
+    /// pass that weight on again (delegation is single-hop).
+    DelegateNotDirect = 220,
 }
 
 // ============================================================
@@ -590,6 +593,16 @@ impl EscrowContract {
             .persistent()
             .get(&GovKey::Receipt(proposal_id, delegate.clone()))
             .ok_or(GovError::DelegateHasNotVoted)?;
+
+        // Single-hop enforcement: the delegate must have voted with its OWN
+        // snapshot weight, not weight it itself received through delegation.
+        // Without this, A→B and B→C would let B forward A's weight on to C,
+        // chaining delegation past the one hop the design guarantees. (Weight is
+        // still never double-counted — each address gets one receipt — but the
+        // chain length must be capped for the documented model to hold.)
+        if delegate_receipt.via_delegate {
+            return Err(GovError::DelegateNotDirect);
+        }
         let support = delegate_receipt.support;
 
         // Each account's weight can be counted at most once.
