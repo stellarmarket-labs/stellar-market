@@ -10,7 +10,9 @@ import {
   CheckCircle,
   RotateCw,
   AlertTriangle,
+  Video,
 } from "lucide-react";
+import EvidenceRecorder from "@/components/EvidenceRecorder";
 import {
   uploadFileResumable,
   hashFile,
@@ -66,6 +68,7 @@ export default function EvidenceUpload({
   const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [restored, setRestored] = useState(false);
+  const [showRecorder, setShowRecorder] = useState(false);
 
   const updateFile = useCallback(
     (id: string, patch: Partial<FileUploadState>) => {
@@ -146,6 +149,26 @@ export default function EvidenceUpload({
     setFiles(nextStates);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  // A finished (or recovered) in-browser recording arrives here as a plain File
+  // and joins the exact same selected-files flow as a hand-picked file, so it is
+  // hashed and uploaded through the existing resumable pipeline — no separate
+  // path. The recording's byte size is only known now, on stop, which is fine:
+  // the pipeline derives chunk count from `file.size` at upload time.
+  const addRecordedFile = useCallback((file: File) => {
+    setFileError(null);
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setFileError(`Recording exceeds the ${MAX_FILE_SIZE_MB} MB limit.`);
+      return;
+    }
+    if (filesRef.current.length >= MAX_FILES) {
+      setFileError(`You may attach up to ${MAX_FILES} files.`);
+      return;
+    }
+    const id = newFileId();
+    setSelectedFiles((prev) => new Map(prev).set(id, file));
+    setFiles((prev) => [...prev, initState(id, file)]);
+  }, []);
 
   const removeFile = useCallback(
     (id: string) => {
@@ -306,6 +329,27 @@ export default function EvidenceUpload({
         onChange={handleFileChange}
         disabled={disabled || isProcessing}
       />
+
+      <button
+        type="button"
+        onClick={() => setShowRecorder((v) => !v)}
+        disabled={disabled || isProcessing || files.length >= MAX_FILES}
+        aria-expanded={showRecorder}
+        className="flex items-center gap-2 text-sm px-3 py-2 border border-dashed border-theme-border rounded-lg text-theme-text hover:border-stellar-blue hover:text-stellar-blue transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full justify-center"
+      >
+        <Video size={14} />
+        {showRecorder ? "Hide recorder" : "Record screen or camera video"}
+      </button>
+
+      {showRecorder && (
+        <div className="rounded-lg border border-theme-border p-3">
+          <EvidenceRecorder
+            disputeId={disputeId}
+            onRecordingReady={addRecordedFile}
+            disabled={disabled || isProcessing || files.length >= MAX_FILES}
+          />
+        </div>
+      )}
 
       {fileError && <p className="text-xs text-theme-error">{fileError}</p>}
 

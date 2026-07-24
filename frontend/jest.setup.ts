@@ -32,9 +32,15 @@ if (!subtleDescriptor || typeof subtleDescriptor.value === "undefined") {
 }
 
 // jsdom lacks structuredClone, which fake-indexeddb (and modern runtime code)
-// relies on to clone stored values. Polyfill from Node.
-if (typeof (globalThis as any).structuredClone === "undefined") {
-  (globalThis as any).structuredClone = (globalThis as any).structuredClone || (require("crypto").structuredClone);
+// relies on to clone stored values. Polyfill it with Node's structured-clone
+// implementation (via the `v8` module) so IndexedDB writes actually round-trip
+// in tests. (The previous `require("crypto").structuredClone` was undefined — a
+// no-op that left the polyfill non-functional.)
+if (typeof (globalThis as any).structuredClone !== "function") {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const v8 = require("node:v8");
+  (globalThis as any).structuredClone = (value: unknown) =>
+    v8.deserialize(v8.serialize(value));
 }
 
 class MockIntersectionObserver {
