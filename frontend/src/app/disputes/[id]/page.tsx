@@ -76,6 +76,11 @@ export default function DisputeDetailPage() {
       // 2. Sign & Broadcast
       const txResult = await signAndBroadcastTransaction(res.data.xdr);
 
+      if (txResult.status === "STALE_SESSION") {
+        throw new Error(
+          "Wallet changed while the vote transaction was processing. The vote was not confirmed."
+        );
+      }
       if (!txResult.success) {
         throw new Error(txResult.error || "Transaction failed");
       }
@@ -126,6 +131,11 @@ export default function DisputeDetailPage() {
       // 2. Sign & Broadcast
       const txResult = await signAndBroadcastTransaction(res.data.xdr);
 
+      if (txResult.status === "STALE_SESSION") {
+        throw new Error(
+          "Wallet changed while the resolution transaction was processing. The dispute was not confirmed."
+        );
+      }
       if (!txResult.success) {
         throw new Error(txResult.error || "Transaction failed");
       }

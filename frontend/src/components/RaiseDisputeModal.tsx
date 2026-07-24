@@ -170,6 +170,11 @@ export default function RaiseDisputeModal({
         });
       }
 
+      if (txResult.status === "STALE_SESSION") {
+        throw new Error(
+          "Wallet changed while the dispute transaction was processing. The dispute was not created.",
+        );
+      }
       if (!txResult.success) {
         throw new Error(txResult.error || "Transaction failed");
       }
