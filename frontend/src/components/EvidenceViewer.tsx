@@ -11,9 +11,12 @@ import {
   Loader2,
   RefreshCw,
 } from "lucide-react";
+import { Video } from "lucide-react";
 import axios from "axios";
 import type { DisputeEvidence, EvidenceVerification } from "@/types";
 import LocalTimestamp from "@/components/LocalTimestamp";
+import EvidenceVideoPlayer from "@/components/EvidenceVideoPlayer";
+import { isVideoEvidence } from "@/lib/mediaRecording";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
 
@@ -41,7 +44,20 @@ export default function EvidenceViewer({
   >({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [videoUrls, setVideoUrls] = useState<Record<string, string>>({});
+  const [loadingVideoId, setLoadingVideoId] = useState<string | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const videoUrlsRef = useRef(videoUrls);
+  videoUrlsRef.current = videoUrls;
+
+  // Revoke any created object URLs when the viewer unmounts.
+  useEffect(() => {
+    return () => {
+      Object.values(videoUrlsRef.current).forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
+    };
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLUListElement>) => {
     const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>('button[role="option"]');
@@ -135,6 +151,37 @@ export default function EvidenceViewer({
     }
   }, [disputeId]);
 
+  // Fetch a video evidence blob (authorized) and expose it as an object URL so
+  // the dedicated player can stream it without leaking the auth token into a
+  // <video src>. Prefer a server-provided `url` when present.
+  const loadVideo = useCallback(
+    async (item: DisputeEvidence) => {
+      if (videoUrls[item.id]) return;
+      if (item.url) {
+        setVideoUrls((prev) => ({ ...prev, [item.id]: item.url as string }));
+        return;
+      }
+      setLoadingVideoId(item.id);
+      try {
+        const token = localStorage.getItem("token");
+        const response = await axios.get(
+          `${API_URL}/disputes/${disputeId}/evidence/${item.id}/download`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            responseType: "blob",
+          },
+        );
+        const url = URL.createObjectURL(response.data);
+        setVideoUrls((prev) => ({ ...prev, [item.id]: url }));
+      } catch {
+        // Leave it unloaded; the user can still download.
+      } finally {
+        setLoadingVideoId(null);
+      }
+    },
+    [disputeId, videoUrls],
+  );
+
   if (loading) {
     return (
       <div className="card">
@@ -223,7 +270,33 @@ export default function EvidenceViewer({
                   </button>
                 </div>
               </div>
- 
+
+              {(isVideoEvidence(item.fileType) ||
+                isVideoEvidence(item.fileName)) && (
+                <div>
+                  {videoUrls[item.id] ? (
+                    <EvidenceVideoPlayer
+                      src={videoUrls[item.id]}
+                      fileName={item.fileName}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => loadVideo(item)}
+                      disabled={loadingVideoId === item.id}
+                      className="flex items-center gap-1.5 text-xs text-stellar-blue hover:underline disabled:opacity-50"
+                    >
+                      {loadingVideoId === item.id ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <Video size={12} />
+                      )}
+                      Review video
+                    </button>
+                  )}
+                </div>
+              )}
+
               {item.sha256 && (
                 <div className="bg-theme-bg border border-theme-border rounded-md p-2 space-y-1.5">
                   <div className="flex items-center gap-2">
