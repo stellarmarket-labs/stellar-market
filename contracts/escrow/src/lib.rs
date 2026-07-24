@@ -94,6 +94,17 @@ pub enum EscrowError {
     /// A revision proposal would drop a milestone that already has disbursed funds,
     /// or would value it below what has already been paid out to the freelancer.
     RevisionBelowDisbursedAmount = 50,
+
+    // ===== Reputation-weighted governance (issue #899) =====
+    // The governance proposal lifecycle has its own dedicated `GovError` enum in
+    // `governance.rs` (the SDK caps a single error enum at 50 cases). Only this
+    // one variant lives here, because it is returned from the multisig code path
+    // (`propose_admin_action` / `execute_proposal_internal`) to enforce the
+    // governance/multisig separation of powers. Code 51 (not 50) — code 50 is
+    // taken by RevisionBelowDisbursedAmount, which landed on main after this
+    // branch opened.
+    /// A governed parameter must be changed via governance, not the multisig.
+    GovernanceRequired = 51,
 }
 
 /// Privileged actions that can be proposed and approved through the multi-sig flow.
@@ -275,7 +286,7 @@ pub struct Job {
     pub expiry_ledger: u32,
 }
 
-const MAX_FEE_BPS: u32 = 500; // 5%
+pub(crate) const MAX_FEE_BPS: u32 = 500; // 5%
 const MAX_MILESTONES: u32 = 50;
 
 /// A formal proposal to revise the milestones and total budget of an active job.
@@ -887,6 +898,13 @@ impl EscrowContract {
             return Err(EscrowError::SignerNotFound);
         }
 
+        // Reject governed parameter changes up front once governance is enabled,
+        // so the multisig cannot even queue a proposal that governance owns.
+        // Execution is guarded independently in `execute_proposal_internal`.
+        if governance::governance_enabled(&env) && governance::is_governable_action(&action) {
+            return Err(EscrowError::GovernanceRequired);
+        }
+
         let mut count: u64 = env
             .storage()
             .instance()
@@ -1043,6 +1061,18 @@ impl EscrowContract {
             .unwrap_or(proposal.created_at);
         if env.ledger().timestamp() < not_before {
             return Err(EscrowError::ProposalTimeLockActive);
+        }
+
+        // Governance/multisig separation of powers (issue #899): once governance
+        // is configured, protocol-parameter changes (fee, treasury) are the
+        // exclusive domain of the reputation-weighted governance path. The
+        // multisig retains only operational/emergency powers and its own signer
+        // set. This guard makes the boundary explicit and un-bypassable — a
+        // signer majority cannot quietly override a governance decision on a
+        // governed parameter.
+        if governance::governance_enabled(env) && governance::is_governable_action(&proposal.action)
+        {
+            return Err(EscrowError::GovernanceRequired);
         }
 
         match proposal.action.clone() {
@@ -3520,8 +3550,14 @@ impl EscrowContract {
     }
 }
 
+/// Reputation-weighted on-chain governance for protocol parameters (issue #899).
+mod governance;
+
 #[cfg(test)]
 mod test;
 
 #[cfg(test)]
 mod fuzz;
+
+#[cfg(test)]
+mod governance_test;

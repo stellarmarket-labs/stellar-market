@@ -1938,7 +1938,7 @@ fn test_lazy_decay_zero_rate_no_decay() {
 }
 
 #[test]
-fn test_last_updated_ledger_advances_on_write() {
+fn test_last_updated_ts_advances_on_write() {
     let env = Env::default();
     env.mock_all_auths();
     let escrow_id     = env.register_contract(None, EscrowContract);
@@ -1951,14 +1951,14 @@ fn test_last_updated_ledger_advances_on_write() {
     let reviewee = Address::generate(&env);
     setup_review_for(&env, &escrow_id, &client, 1, &reviewer, &reviewee, 5);
 
-    let ledger_before = client.get_reputation(&reviewee).last_updated_ledger;
+    let ledger_before = client.get_reputation(&reviewee).last_updated_ts;
     advance_n_periods(&env, 2);
 
     // Trigger write by adding a second review
     let reviewer2 = Address::generate(&env);
     setup_review_for(&env, &escrow_id, &client, 2, &reviewer2, &reviewee, 4);
 
-    let ledger_after = client.get_reputation(&reviewee).last_updated_ledger;
+    let ledger_after = client.get_reputation(&reviewee).last_updated_ts;
     assert!(ledger_after > ledger_before);
 }
 
@@ -2180,7 +2180,7 @@ fn test_decay_fuzz_never_exceeds_original() {
                 total_score: 1_000_000,
                 total_weight: 100_000,
                 review_count: 10,
-                last_updated_ledger: 0,
+                last_updated_ts: 0,
             },
         );
     });
@@ -2611,4 +2611,77 @@ fn test_submit_review_with_stake_weight_at_minimum_accepted() {
 
     let rep = client.get_reputation(&reviewee);
     assert!(rep.total_weight > 0, "review should be recorded");
+}
+
+// ============================================================
+// get_gov_weight — governance snapshot helper (issue #899)
+// ============================================================
+
+#[test]
+fn test_get_gov_weight_reports_score_and_last_change() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // A non-zero ledger time so `last_change_ts` is meaningfully populated.
+    env.ledger().with_mut(|l| l.timestamp = 1_000_000);
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+    client.initialize(&vec![&env, admin.clone()], &1u32, &0u32); // no decay
+
+    let reviewer = Address::generate(&env);
+    let reviewee = Address::generate(&env);
+    setup_review_for(&env, &escrow_id, &client, 1, &reviewer, &reviewee, 5);
+
+    let rep = client.get_reputation(&reviewee);
+    let (score, last_change_ts) = client.get_gov_weight(&reviewee);
+
+    // Score mirrors the decayed total_score used for voting weight.
+    assert_eq!(score, rep.total_score);
+    assert!(score > 0);
+    // last_change_ts is the ledger time at which the review was recorded.
+    assert_eq!(last_change_ts, 1_000_000);
+}
+
+#[test]
+fn test_get_gov_weight_unknown_user_is_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+    client.initialize(&vec![&env, admin.clone()], &1u32, &0u32);
+
+    let nobody = Address::generate(&env);
+    // Unknown users have no weight and a snapshot-safe timestamp of 0.
+    assert_eq!(client.get_gov_weight(&nobody), (0, 0));
+}
+
+#[test]
+fn test_get_gov_weight_last_change_moves_on_new_review() {
+    // The core property governance relies on: earning reputation bumps
+    // `last_change_ts`, which is exactly what disqualifies post-snapshot gaming.
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 500_000);
+
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+    client.initialize(&vec![&env, admin.clone()], &1u32, &0u32);
+
+    let reviewer = Address::generate(&env);
+    let reviewee = Address::generate(&env);
+    setup_review_for(&env, &escrow_id, &client, 1, &reviewer, &reviewee, 5);
+    let (_, first_ts) = client.get_gov_weight(&reviewee);
+    assert_eq!(first_ts, 500_000);
+
+    // A later review bumps last_change_ts forward.
+    env.ledger().with_mut(|l| l.timestamp = 800_000);
+    let reviewer2 = Address::generate(&env);
+    setup_review_for(&env, &escrow_id, &client, 2, &reviewer2, &reviewee, 5);
+    let (_, second_ts) = client.get_gov_weight(&reviewee);
+    assert_eq!(second_ts, 800_000);
 }
