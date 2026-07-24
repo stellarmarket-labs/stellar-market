@@ -400,6 +400,11 @@ export default function JobDetailClient() {
         txResult = await signAndBroadcastTransaction(xdrToSend, meta);
       }
 
+      if (txResult.status === "STALE_SESSION") {
+        throw new Error(
+          "Wallet changed while the transaction was processing. No job update was confirmed.",
+        );
+      }
       if (!txResult.success) {
         throw new Error(txResult.error || "Transaction failed");
       }
@@ -680,6 +685,11 @@ export default function JobDetailClient() {
         txResult = await signAndBroadcastTransaction(xdrToSend, meta);
       }
 
+      if (txResult.status === "STALE_SESSION") {
+        throw new Error(
+          "Wallet changed while the milestone transaction was processing. The milestone was not confirmed.",
+        );
+      }
       if (!txResult.success) {
         throw new Error(txResult.error || "Transaction failed");
       }

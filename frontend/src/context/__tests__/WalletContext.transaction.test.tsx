@@ -46,13 +46,16 @@ jest.mock("@stellar/stellar-sdk", () => ({
 }));
 
 function TestConsumer() {
-  const { connect, signAndBroadcastTransaction } = useWallet();
+  const { connect, disconnect, signAndBroadcastTransaction } = useWallet();
   const [result, setResult] = React.useState<string>("");
 
   return (
     <div>
       <button data-testid="connect-btn" onClick={() => connect("freighter")}>
         Connect
+      </button>
+      <button data-testid="disconnect-btn" onClick={disconnect}>
+        Disconnect
       </button>
       <button
         data-testid="sign-btn"
@@ -96,6 +99,39 @@ async function renderAndConnect() {
 
 function getResult() {
   return JSON.parse(screen.getByTestId("result").textContent || "{}");
+}
+
+async function startTransactionPendingSubmission() {
+  let resolveSubmission!: (value: { status: string; hash: string }) => void;
+  mockSignTransaction.mockResolvedValue({ signedTxXdr: "SIGNED_XDR" });
+  mockSendTransaction.mockReturnValue(
+    new Promise((resolve) => {
+      resolveSubmission = resolve;
+    }),
+  );
+
+  act(() => {
+    fireEvent.click(screen.getByTestId("sign-btn"));
+  });
+  await waitFor(() => expect(mockSendTransaction).toHaveBeenCalled());
+
+  return async () => {
+    await act(async () => {
+      resolveSubmission({ status: "PENDING", hash: "stale-hash" });
+    });
+  };
+}
+
+async function expectStaleSessionResult() {
+  await waitFor(() => {
+    expect(getResult()).toMatchObject({
+      success: false,
+      hash: "stale-hash",
+      status: "STALE_SESSION",
+      canRetry: false,
+    });
+  });
+  expect(global.fetch).not.toHaveBeenCalled();
 }
 
 describe("WalletContext.signAndBroadcastTransaction — tracked path (meta supplied)", () => {
@@ -172,6 +208,56 @@ describe("WalletContext.signAndBroadcastTransaction — tracked path (meta suppl
       expect(parsed.status).toBe("EXPIRED");
       expect(parsed.canRetry).toBe(true);
     });
+  });
+
+  it("returns STALE_SESSION when the account changes during submission", async () => {
+    await renderAndConnect();
+    const resolveSubmission = await startTransactionPendingSubmission();
+
+    mockGetAddress.mockResolvedValue({ address: "GOTHER" });
+    await act(async () => {
+      window.dispatchEvent(new Event("freighter#accountChanged"));
+    });
+    await resolveSubmission();
+
+    await expectStaleSessionResult();
+  });
+
+  it("returns STALE_SESSION when Freighter disconnects during submission", async () => {
+    await renderAndConnect();
+    const resolveSubmission = await startTransactionPendingSubmission();
+
+    mockIsConnected.mockResolvedValue({ isConnected: false });
+    await act(async () => {
+      window.dispatchEvent(new Event("freighter#disconnected"));
+    });
+    await resolveSubmission();
+
+    await expectStaleSessionResult();
+  });
+
+  it("returns STALE_SESSION after an explicit disconnect during submission", async () => {
+    await renderAndConnect();
+    const resolveSubmission = await startTransactionPendingSubmission();
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("disconnect-btn"));
+    });
+    await resolveSubmission();
+
+    await expectStaleSessionResult();
+  });
+
+  it("returns STALE_SESSION when the wallet network changes during submission", async () => {
+    await renderAndConnect();
+    const resolveSubmission = await startTransactionPendingSubmission();
+
+    act(() => {
+      window.dispatchEvent(new Event("freighter#networkChanged"));
+    });
+    await resolveSubmission();
+
+    await expectStaleSessionResult();
   });
 });
 

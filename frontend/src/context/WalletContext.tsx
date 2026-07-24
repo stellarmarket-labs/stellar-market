@@ -61,7 +61,12 @@ interface WalletSession {
 
 type WalletProviderType = "freighter" | "walletconnect" | "lobstr";
 
-export type TxResolutionStatus = "PENDING" | "SUCCESS" | "FAILED" | "EXPIRED";
+export type TxResolutionStatus =
+  | "PENDING"
+  | "SUCCESS"
+  | "FAILED"
+  | "EXPIRED"
+  | "STALE_SESSION";
 
 export interface TxTrackingMeta {
   type: "DEPOSIT" | "RELEASE" | "REFUND" | "DISPUTE_PAYOUT";
@@ -95,6 +100,10 @@ interface WalletState {
    * has permanently expired (safe to rebuild with a fresh sequence number and
    * resubmit) from one that is merely slow. Callers that omit `meta` keep the
    * legacy RPC-only polling behavior (no `status`/`canRetry`).
+   *
+   * If the wallet account, connection, or network changes while a transaction
+   * is in flight, the result is `STALE_SESSION`. Callers must not confirm the
+   * transaction or perform any follow-up mutation from that stale result.
    */
   signAndBroadcastTransaction: (
     xdr: string,
@@ -161,6 +170,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const pendingConnectResolve = useRef<((address: string | null) => void) | null>(null);
   const pendingDisconnectResolve = useRef<((value: string | null) => void) | null>(null);
   const switchingToProvider = useRef<WalletProviderType | null>(null);
+  const walletSessionEpoch = useRef(0);
+
+  const invalidateWalletSession = useCallback(() => {
+    walletSessionEpoch.current += 1;
+  }, []);
 
   const sessionTimeoutId = useRef<NodeJS.Timeout | null>(null);
   const sessionWarningId = useRef<NodeJS.Timeout | null>(null);
@@ -449,6 +463,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   // Listen for Freighter account changes
   useEffect(() => {
     const handleAccountChanged = async () => {
+      invalidateWalletSession();
       try {
         const result = await getAddress();
         if (result.error) {
@@ -471,7 +486,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     return () => {
       window.removeEventListener("freighter#accountChanged", handleAccountChanged);
     };
-  }, [clearSession, updateSessionActivity]);
+  }, [clearSession, invalidateWalletSession, updateSessionActivity]);
 
   // Listen for wallet disconnect events
   useEffect(() => {
@@ -480,6 +495,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       try {
         const result = await freighterIsConnected();
         if (result.error || !result.isConnected) {
+          invalidateWalletSession();
           setAddress(null);
           setError(null);
           setBalance(null);
@@ -489,6 +505,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           window.dispatchEvent(new CustomEvent("stellarmarket:walletDisconnected"));
         }
       } catch {
+        invalidateWalletSession();
         setAddress(null);
         setError(null);
         setBalance(null);
@@ -513,7 +530,21 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("freighter#disconnected", handleDisconnect);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [address, walletType, clearSession]);
+  }, [address, walletType, clearSession, invalidateWalletSession]);
+
+  // A network switch invalidates transaction results even when the account
+  // remains the same. Freighter dispatches this event before React state can
+  // update, so the ref protects in-flight polling synchronously.
+  useEffect(() => {
+    const handleNetworkChanged = () => {
+      invalidateWalletSession();
+    };
+
+    window.addEventListener("freighter#networkChanged", handleNetworkChanged);
+    return () => {
+      window.removeEventListener("freighter#networkChanged", handleNetworkChanged);
+    };
+  }, [invalidateWalletSession]);
 
   const connectFreighter = useCallback(async () => {
     setError(null);
@@ -699,6 +730,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, [connectFreighter, connectWalletConnect, connectLOBSTR, handleProviderSwitch, address]);
 
   const disconnect = useCallback(() => {
+    invalidateWalletSession();
     setAddress(null);
     setError(null);
     setBalance(null);
@@ -709,7 +741,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem(FREIGHTER_WALLET_KEY);
     clearSession();
     window.dispatchEvent(new CustomEvent("stellarmarket:walletDisconnected"));
-  }, [clearSession]);
+  }, [clearSession, invalidateWalletSession]);
 
   useEffect(() => {
     const handleAuthLogout = () => {
@@ -817,11 +849,24 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, [address, signMessage]);
 
   const signAndBroadcastTransaction = useCallback(async (xdr: string, meta?: TxTrackingMeta) => {
+    const transactionEpoch = walletSessionEpoch.current;
+    let transactionHash = "";
+    const sessionChanged = () => walletSessionEpoch.current !== transactionEpoch;
+    const staleSessionResult = () => ({
+      success: false as const,
+      hash: transactionHash,
+      status: "STALE_SESSION" as const,
+      canRetry: false,
+      error:
+        "Wallet account, connection, or network changed while the transaction was processing. Review the active wallet before trying again.",
+    });
+
     try {
       let signedResult: any;
 
       if (walletType === "walletconnect" || walletType === "lobstr") {
         const kit = await getWalletKit();
+        if (sessionChanged()) return staleSessionResult();
         signedResult = await kit.signTransaction(xdr, {
           networkPassphrase: TESTNET_PASSPHRASE,
           address,
@@ -832,6 +877,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         });
       }
 
+      if (sessionChanged()) return staleSessionResult();
       updateSessionActivity();
 
       if (signedResult.error) {
@@ -846,6 +892,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       const server = new rpc.Server("https://soroban-testnet.stellar.org");
       const tx = new Transaction(signedTxXdr, TESTNET_PASSPHRASE);
       const sendResponse = await server.sendTransaction(tx);
+      transactionHash = sendResponse.hash;
+      if (sessionChanged()) return staleSessionResult();
 
       if (sendResponse.status !== "PENDING") {
         return { success: false, hash: sendResponse.hash, error: "Transaction submission failed" };
@@ -856,7 +904,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         // don't yet track transactions with the backend.
         let attempts = 0;
         while (attempts <= 10) {
+          if (sessionChanged()) return staleSessionResult();
           const statusResponse = await server.getTransaction(sendResponse.hash);
+          if (sessionChanged()) return staleSessionResult();
           if (statusResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
             const successResponse = statusResponse as rpc.Api.GetSuccessfulTransactionResponse;
             return { success: true, hash: sendResponse.hash, resultXdr: successResponse.returnValue?.toXDR("base64") };
@@ -898,16 +948,21 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         // the endpoint will 404 until the record exists, which is treated the
         // same as a still-pending transaction.
       }
+      if (sessionChanged()) return staleSessionResult();
 
       let attempts = 0;
       while (attempts < STATUS_POLL_MAX_ATTEMPTS) {
+        if (sessionChanged()) return staleSessionResult();
         try {
           const statusRes = await fetch(`${API_URL}/transactions/${sendResponse.hash}/status`);
+          if (sessionChanged()) return staleSessionResult();
           if (statusRes.ok) {
             const data: { status: TxResolutionStatus; canRetry?: boolean } = await statusRes.json();
+            if (sessionChanged()) return staleSessionResult();
 
             if (data.status === "SUCCESS") {
               const successResponse = await server.getTransaction(sendResponse.hash);
+              if (sessionChanged()) return staleSessionResult();
               const resultXdr =
                 successResponse.status === rpc.Api.GetTransactionStatus.SUCCESS
                   ? (successResponse as rpc.Api.GetSuccessfulTransactionResponse).returnValue?.toXDR("base64")
@@ -950,6 +1005,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         error: "Still processing on-chain — this is taking longer than usual. Check back in a moment.",
       };
     } catch (err: unknown) {
+      if (sessionChanged()) return staleSessionResult();
       return {
         success: false,
         hash: "",
