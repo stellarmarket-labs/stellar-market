@@ -44,7 +44,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@storybook/nextjs-vite": "^10.4.5",
+    "@storybook/nextjs-vite": "^10.5.5",
     "@swc/cli": "^0.8.0",
     "@swc/core": "^1.15.21",
     "@testing-library/jest-dom": "^6.9.1",
