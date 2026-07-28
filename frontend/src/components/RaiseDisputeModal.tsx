@@ -32,7 +32,7 @@ export default function RaiseDisputeModal({
   useFocusTrap(modalRef, { open: isOpen, onClose });
 
   const [reason, setReason] = useState("");
-  const [minVotes, setMinVotes] = useState<number>(3);
+  const [minVotes, setMinVotes] = useState<number | "">(3);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reasonTouched, setReasonTouched] = useState(false);
@@ -133,6 +133,11 @@ export default function RaiseDisputeModal({
       setError(
         "Reason must not exceed 2000 characters. Please shorten your description.",
       );
+      return;
+    }
+
+    if (minVotes === "" || Number.isNaN(minVotes as number) || minVotes < 3 || minVotes > 21) {
+      setError("Minimum votes must be a number between 3 and 21.");
       return;
     }
 
@@ -379,7 +384,10 @@ export default function RaiseDisputeModal({
               max={21}
               className="input-field"
               value={minVotes}
-              onChange={(e) => setMinVotes(parseInt(e.target.value))}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                setMinVotes(Number.isNaN(val) ? "" : val);
+              }}
               disabled={processing}
               required
             />
