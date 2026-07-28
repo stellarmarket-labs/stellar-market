@@ -249,10 +249,11 @@ describe("Dispute Management System", () => {
       prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
       prismaMock.disputeVote.findMany.mockResolvedValueOnce([]);
       (ContractService.getOnChainAssignedArbitrators as jest.Mock).mockResolvedValueOnce(["GARBITRATOR123"]);
-      prismaMock.user.findFirst.mockResolvedValueOnce({
+      prismaMock.user.findMany.mockResolvedValueOnce([{
         username: "arb_user",
         avatarUrl: "http://example.com/avatar.png",
-      });
+        walletAddress: "GARBITRATOR123",
+      }]);
 
       const dispute = await DisputeService.getDisputeById(disputeId);
 
@@ -275,7 +276,7 @@ describe("Dispute Management System", () => {
       prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
       prismaMock.disputeVote.findMany.mockResolvedValueOnce([]);
       (ContractService.getOnChainAssignedArbitrators as jest.Mock).mockResolvedValueOnce(["GARBITRATOR123"]);
-      prismaMock.user.findFirst.mockResolvedValueOnce(null);
+      prismaMock.user.findMany.mockResolvedValueOnce([]);
 
       const dispute = await DisputeService.getDisputeById(disputeId);
 
@@ -286,6 +287,36 @@ describe("Dispute Management System", () => {
           avatarUrl: null,
         },
       ]);
+    });
+
+    it("should retrieve on-chain arbitrators using a single batched query", async () => {
+      const fullDispute = {
+        ...mockDispute,
+        onChainDisputeId: "12345",
+        votes: [],
+        attachments: [],
+      };
+      prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
+      prismaMock.disputeVote.findMany.mockResolvedValueOnce([]);
+      (ContractService.getOnChainAssignedArbitrators as jest.Mock).mockResolvedValueOnce(["GARB1", "GARB2", "GARB3"]);
+      prismaMock.user.findMany.mockResolvedValueOnce([
+        { username: "arb_1", avatarUrl: null, walletAddress: "GARB1" },
+        { username: "arb_3", avatarUrl: null, walletAddress: "GARB3" }
+      ]);
+      prismaMock.user.findMany.mockClear();
+
+      const dispute = await DisputeService.getDisputeById(disputeId);
+
+      expect(prismaMock.user.findMany).toHaveBeenCalledTimes(1);
+      expect(prismaMock.user.findMany).toHaveBeenCalledWith({
+        where: { walletAddress: { in: ["GARB1", "GARB2", "GARB3"] } },
+        select: { username: true, avatarUrl: true, walletAddress: true },
+      });
+
+      expect(dispute.arbitrators).toHaveLength(3);
+      expect(dispute.arbitrators[0].displayName).toBe("arb_1");
+      expect(dispute.arbitrators[1].displayName).toBe("GARB...ARB2"); // Truncated GARB2
+      expect(dispute.arbitrators[2].displayName).toBe("arb_3");
     });
   });
 
