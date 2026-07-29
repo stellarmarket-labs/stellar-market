@@ -30,6 +30,9 @@ jobs:
       - name: Generate Prisma client
         run: npm run prisma:generate
 
+      - name: Security audit
+        run: npm audit --audit-level=high
+
       - name: Build TypeScript
         run: npm run build
 
@@ -82,6 +85,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+
+      - name: Security audit
+        run: npm audit --audit-level=high
 
       - name: Build Next.js
         run: npm run build

@@ -22,11 +22,18 @@ beforeEach(() => {
 });
 
 describe("GET /api/skills", () => {
-  it("returns an empty list when q is omitted", async () => {
+  it("returns up to 100 skills when q is omitted", async () => {
+    const mockSkills = [{ id: "1", name: "React", category: "Frontend" }];
+    prismaMock.skill.findMany.mockResolvedValue(mockSkills);
+
     const res = await request(app).get("/api/skills");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ skills: [] });
-    expect(prismaMock.skill.findMany).not.toHaveBeenCalled();
+    expect(res.body).toEqual({ skills: mockSkills });
+    expect(prismaMock.skill.findMany).toHaveBeenCalledWith({
+      orderBy: { name: "asc" },
+      take: 100,
+      select: { id: true, name: true, category: true },
+    });
   });
 
   it("returns matching skills up to the 10-result limit", async () => {

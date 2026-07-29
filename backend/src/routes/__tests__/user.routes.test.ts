@@ -17,16 +17,20 @@ jest.mock("../../services/reputation.service", () => ({
   },
 }));
 
-const mockUser = {
-  findMany: jest.fn(),
-  count: jest.fn(),
-};
+jest.mock("@prisma/client", () => {
+  const mUser = {
+    findMany: jest.fn(),
+    count: jest.fn(),
+  };
+  return {
+    PrismaClient: jest.fn(() => ({
+      user: mUser,
+    })),
+    __mockUser: mUser,
+  };
+});
 
-jest.mock("@prisma/client", () => ({
-  PrismaClient: jest.fn(() => ({
-    user: mockUser,
-  })),
-}));
+const { __mockUser: mockUser } = require("@prisma/client");
 
 jest.mock("../../middleware/auth", () => ({
   authenticate: jest.fn((req, res, next) => next()),
@@ -76,9 +80,11 @@ describe("GET /users", () => {
     mockUser.count.mockResolvedValue(2);
 
     (ReputationCacheService.getCachedReputation as jest.Mock).mockResolvedValue({
-      total_score: 100,
-      total_weight: 50,
-      review_count: 10,
+      tier: "SILVER",
+      score: 100,
+      disputeLossRate: 0,
+      endorsementWeight: 50,
+      lastUpdated: 123456789,
     });
 
     const res = await request(app).get("/users?page=1&limit=10");

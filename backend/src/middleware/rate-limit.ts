@@ -104,7 +104,7 @@ export const writeRateLimiter = rateLimit({
     return ip;
   },
   validate: { ip: false }, // IP is normalized in keyGenerator above
-  skip: (req: Request) => req.method !== "POST",
+  skip: (req: Request) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
   handler: sendTooManyWrites,
 });
 

@@ -4,6 +4,7 @@ import { config } from "../config";
 import { PrismaClient, UserRole } from "@prisma/client";
 import { logger } from "../lib/logger";
 import { getCurrentTokenVersion } from "../lib/token-version";
+import { getCachedUserAuthData } from "../lib/user-cache";
 
 const prisma = new PrismaClient();
 
@@ -62,10 +63,8 @@ export const authenticate = async (
       req.userWalletAddress = decoded.walletAddress;
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { role: true, emailVerified: true, deletedAt: true },
-    });
+    const user = await getCachedUserAuthData(decoded.userId);
+    (req as any)._cachedUser = user;
 
     if (!user) {
       res.status(401).json({ error: "User not found." });
@@ -144,10 +143,8 @@ export const requireAdmin = async (
     }
 
     // Query database for user role
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { role: true, deletedAt: true },
-    });
+    const user = await getCachedUserAuthData(decoded.userId);
+    (req as any)._cachedUser = user;
 
     if (!user) {
       res.status(401).json({ error: "User not found." });
@@ -221,10 +218,8 @@ export const optionalAuthenticate = async (
       return next();
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { role: true, emailVerified: true, deletedAt: true },
-    });
+    const user = await getCachedUserAuthData(decoded.userId);
+    (req as any)._cachedUser = user;
 
     if (!user || user.deletedAt) {
       return next();
@@ -253,10 +248,11 @@ export const checkSuspension = async (
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.userId },
-      select: { isSuspended: true, suspendReason: true },
-    });
+    let user = (req as any)._cachedUser;
+    if (!user) {
+      user = await getCachedUserAuthData(req.userId);
+      (req as any)._cachedUser = user;
+    }
 
     if (user && user.isSuspended) {
       res.status(403).json({

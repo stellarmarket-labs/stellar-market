@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env,
-    IntoVal, String, Symbol, Vec,
+    IntoVal, Map, String, Symbol, Vec,
 };
 
 #[contracterror]
@@ -2561,9 +2561,11 @@ impl EscrowContract {
             .get(&symbol_short!("TRE"))
             .unwrap_or(env.current_contract_address());
 
-        // Pay out each milestone in its own token.
-        let mut total_freelancer: i128 = 0;
-        let mut total_fee: i128 = 0;
+        // Pay out each milestone in its own token and emit per-token events.
+        // Use Map to aggregate amounts by token address.
+        let mut fee_by_token: Map<Address, i128> = Map::new(&env);
+        let mut freelancer_by_token: Map<Address, i128> = Map::new(&env);
+
         for ms in job.milestones.iter() {
             if ms.amount <= 0 {
                 continue;
@@ -2571,6 +2573,7 @@ impl EscrowContract {
             let ms_token = resolve_milestone_token(&ms, &job);
             let fee_amount = (ms.amount * fee_bps as i128) / 10_000;
             let freelancer_amount = ms.amount - fee_amount;
+
             let tc = token::Client::new(&env, &ms_token);
             if fee_amount > 0 {
                 tc.transfer(&env.current_contract_address(), &fee_recipient, &fee_amount);
@@ -2578,26 +2581,60 @@ impl EscrowContract {
             if freelancer_amount > 0 {
                 tc.transfer(&env.current_contract_address(), &job.freelancer, &freelancer_amount);
             }
-            // Accumulate for single-token event emission (best-effort).
-            if ms.token.is_none() {
-                total_fee = total_fee.saturating_add(fee_amount);
-                total_freelancer = total_freelancer.saturating_add(freelancer_amount);
-            }
+
+            // Accumulate amounts per token for event emission.
+            let current_fee = fee_by_token.get(ms_token.clone()).unwrap_or(0);
+            fee_by_token.set(ms_token.clone(), current_fee.saturating_add(fee_amount));
+
+            let current_freelancer = freelancer_by_token.get(ms_token.clone()).unwrap_or(0);
+            freelancer_by_token.set(ms_token.clone(), current_freelancer.saturating_add(freelancer_amount));
         }
 
         job.status = JobStatus::Completed;
         env.storage().persistent().set(&get_job_key(job_id), &job);
         bump_job_ttl(&env, job_id);
 
-        env.events().publish(
-            (symbol_short!("escrow"), Symbol::new(&env, "fee_taken")),
-            (job_id, total_fee, fee_recipient),
-        );
+        // Emit events: maintain backward compatibility for single-token jobs,
+        // use per-token format for multi-token jobs.
+        let num_tokens = fee_by_token.len();
 
-        env.events().publish(
-            (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
-            (job_id, job.freelancer, total_freelancer),
-        );
+        if num_tokens == 1 {
+            // Single-token job: use legacy event format (job_id, amount, recipient)
+            let token_addr = fee_by_token.keys().get(0).unwrap();
+            let total_fee = fee_by_token.get(token_addr.clone()).unwrap_or(0);
+            let total_freelancer = freelancer_by_token.get(token_addr.clone()).unwrap_or(0);
+
+            env.events().publish(
+                (symbol_short!("escrow"), Symbol::new(&env, "fee_taken")),
+                (job_id, total_fee, fee_recipient.clone()),
+            );
+
+            env.events().publish(
+                (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
+                (job_id, job.freelancer.clone(), total_freelancer),
+            );
+        } else {
+            // Multi-token job: emit per-token events (job_id, token, amount, recipient)
+            for token_addr in fee_by_token.keys() {
+                let fee_amount = fee_by_token.get(token_addr.clone()).unwrap_or(0);
+                if fee_amount > 0 {
+                    env.events().publish(
+                        (symbol_short!("escrow"), Symbol::new(&env, "fee_taken")),
+                        (job_id, token_addr.clone(), fee_amount, fee_recipient.clone()),
+                    );
+                }
+            }
+
+            for token_addr in freelancer_by_token.keys() {
+                let freelancer_amount = freelancer_by_token.get(token_addr.clone()).unwrap_or(0);
+                if freelancer_amount > 0 {
+                    env.events().publish(
+                        (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
+                        (job_id, token_addr.clone(), job.freelancer.clone(), freelancer_amount),
+                    );
+                }
+            }
+        }
 
         Ok(())
     }

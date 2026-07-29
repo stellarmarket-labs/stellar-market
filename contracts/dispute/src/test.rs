@@ -2873,13 +2873,6 @@ fn test_cast_vote_valid_choices_accepted() {
 }
 
 #[test]
-fn test_invalid_vote_choice_error_code_is_24() {
-    // Verify that InvalidVoteChoice maps to discriminant 24.
-    // This ensures the on-chain ABI is stable and clients can reliably detect the error.
-    assert_eq!(DisputeError::InvalidVoteChoice as u32, 24);
-}
-
-#[test]
 fn test_cast_vote_split_award_bps_validation() {
     let env = Env::default();
     env.mock_all_auths();

@@ -134,6 +134,7 @@ const corsOptions: cors.CorsOptions = {
 
 // Security middleware
 app.use(helmet());
+app.use(compression());
 
 // Swagger UI setup (disabled in production)
 if (process.env.NODE_ENV !== "production") {
@@ -157,19 +158,9 @@ app.get("/health", async (_req, res) => {
   res.status(health.status === "ok" ? 200 : 503).json(health);
 });
 
-app.get("/metrics", metricsHandler);
+app.get("/metrics", requireAdmin, metricsHandler);
 
 app.use(requestDurationMiddleware);
-// Metrics endpoint — exposes pool stats and process counters
-app.get("/metrics", (_req, res) => {
-  res.json({
-    db_pool_size: poolMetrics.active,
-    db_pool_waiting: poolMetrics.waiting,
-    db_pool_exhausted_total: poolMetrics.exhaustedCount,
-    process_uptime_seconds: Math.floor(process.uptime()),
-    process_memory_rss_bytes: process.memoryUsage().rss,
-  });
-});
 
 // Database-only health probe (used by some platforms/LB checks)
 app.get("/health/db", async (_req, res) => {

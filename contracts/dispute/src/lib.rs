@@ -46,8 +46,10 @@ pub enum DisputeError {
     AppealNotFound = 21,
     NonceReplay = 22,
     DuplicateArbitrator = 23,
-    /// Returned when a vote_choice value does not map to a defined VoteChoice variant.
-    InvalidVoteChoice = 24,
+    // Note: Error code 24 (InvalidVoteChoice) was removed as unreachable.
+    // VoteChoice is a #[contracttype] enum; the SDK's deserialization layer
+    // traps on invalid discriminants before the function body executes, so
+    // no code path could ever construct or return this error variant.
 }
 
 #[contracttype]

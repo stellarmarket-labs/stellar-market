@@ -218,7 +218,8 @@ export class DeadlineExtensionService {
 
     // If both parties have approved, execute the on-chain transaction
     if (newStatus === DeadlineExtensionStatus.APPROVED_BY_BOTH) {
-      await this.executeExtensionOnChain(updated);
+      const { xdr, message } = await this.executeExtensionOnChain(updated);
+      return { ...updated, xdr, message };
     }
 
     return updated;

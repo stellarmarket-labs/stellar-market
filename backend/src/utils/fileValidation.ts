@@ -37,6 +37,16 @@ export async function validateFileMimeType(
     // MP4: offset 4 ftyp (66 74 79 70)
     else if (bytesRead >= 8 && buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70) {
       detectedType = "video/mp4";
+    }
+    // ZIP: PK\\x03\\x04 (50 4B 03 04), PK\\x05\\x06 (50 4B 05 06), or PK\\x07\\x08 (50 4B 07 08)
+    else if (
+      buffer[0] === 0x50 &&
+      buffer[1] === 0x4B &&
+      ((buffer[2] === 0x03 && buffer[3] === 0x04) ||
+        (buffer[2] === 0x05 && buffer[3] === 0x06) ||
+        (buffer[2] === 0x07 && buffer[3] === 0x08))
+    ) {
+      detectedType = "application/zip";
     } else {
       return { valid: false, error: "Unsupported file type signature" };
     }
