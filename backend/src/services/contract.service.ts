@@ -9,7 +9,7 @@ import {
   nativeToScVal,
   BASE_FEE,
 } from "@stellar/stellar-sdk";
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { MilestoneStatus } from "@prisma/client";
 import { config } from "../config";
 import { getRequestId } from "../lib/request-context";
@@ -146,7 +146,7 @@ export class ContractService {
     const scMilestones = milestones.map(m => {
       return nativeToScVal([
         m.description,
-        BigInt(Math.floor(m.amount * 10_000_000)), // Assuming 7 decimals for XLM/Token
+        BigInt(Math.floor(Number(m.amount) * 10_000_000)), // Assuming 7 decimals for XLM/Token
         BigInt(m.deadline)
       ]);
     });
@@ -767,7 +767,7 @@ export class ContractService {
       this.milestoneToProposeScVal(
         i,
         m.description,
-        BigInt(Math.floor(m.amount * Number(STROOPS_PER_XLM))),
+        BigInt(new Prisma.Decimal(m.amount).mul(STROOPS_PER_XLM.toString()).round().toString()),
         BigInt(m.deadlineUnix)
       )
     );
@@ -937,7 +937,7 @@ export class ContractService {
       typeof job.total_amount === "bigint"
         ? job.total_amount
         : BigInt(Math.floor(Number(job.total_amount)));
-    const budgetXlm = Number(totalStroops) / Number(STROOPS_PER_XLM);
+    const budgetXlm = new Prisma.Decimal(totalStroops.toString()).div(STROOPS_PER_XLM.toString());
 
     await prisma.$transaction(async (tx: any) => {
       await tx.milestone.deleteMany({ where: { jobId } });
@@ -953,7 +953,7 @@ export class ContractService {
             jobId,
             title: String(m.description).slice(0, 200) || `Milestone ${i + 1}`,
             description: String(m.description ?? ""),
-            amount: Number(amountStroops) / Number(STROOPS_PER_XLM),
+            amount: new Prisma.Decimal(amountStroops.toString()).div(STROOPS_PER_XLM.toString()),
             status: this.mapChainMilestoneStatus(m.status),
             order: i,
             onChainIndex: Number(m.id ?? i),

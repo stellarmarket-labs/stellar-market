@@ -61,7 +61,7 @@ router.post("/init-create", authenticate, walletSourceGuard, asyncHandler(async 
     config.stellar.nativeTokenId,
     job.milestones.map(m => ({
       description: m.title,
-      amount: m.amount,
+      amount: m.amount?.toNumber?.() ?? m.amount,
       deadline: Math.floor((m.contractDeadline?.getTime() || (Date.now() + 86400000 * 7)) / 1000)
     })),
     Math.floor(job.deadline.getTime() / 1000)
@@ -120,7 +120,7 @@ router.post("/init-fund", authenticate, walletSourceGuard, asyncHandler(async (r
   // an explicit opt-out, passes 0 to bypass the oracle check.
   const agreedValueStroops = bypassOracle
     ? 0n
-    : BigInt(Math.round(job.budget * STROOPS_PER_XLM));
+    : BigInt(Math.round(Number(job.budget) * STROOPS_PER_XLM));
   const slippageBps =
     typeof maxSlippageBps === "number" && maxSlippageBps >= 0 && maxSlippageBps <= 10_000
       ? Math.floor(maxSlippageBps)
