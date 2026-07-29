@@ -657,11 +657,11 @@ router.get(
 
         response.analytics = {
           summary: {
-            totalIncoming: totalIncoming._sum.amount || 0,
-            totalOutgoing: totalOutgoing._sum.amount || 0,
+            totalIncoming: (totalIncoming._sum.amount ? Number(totalIncoming._sum.amount) : 0),
+            totalOutgoing: (totalOutgoing._sum.amount ? Number(totalOutgoing._sum.amount) : 0),
             netBalance:
-              (totalIncoming._sum.amount || 0) -
-              (totalOutgoing._sum.amount || 0),
+              ((totalIncoming._sum.amount ? Number(totalIncoming._sum.amount) : 0)) -
+              ((totalOutgoing._sum.amount ? Number(totalOutgoing._sum.amount) : 0)),
             totalTransactions: totalIncoming._count + totalOutgoing._count,
             incomingTransactions: totalIncoming._count,
             outgoingTransactions: totalOutgoing._count,
@@ -671,7 +671,7 @@ router.get(
           byType: transactionsByType.map((item) => ({
             type: item.type,
             count: item._count.type,
-            totalAmount: item._sum.amount || 0,
+            totalAmount: (item._sum.amount ? Number(item._sum.amount) : 0),
           })),
           byMonth: transactionsByMonth,
         };
@@ -922,13 +922,13 @@ router.get(
           ]);
 
           const countField = (tokenGroup._count as any).tokenAddress as number;
-          const incomingSum = incoming._sum?.amount ?? 0;
-          const outgoingSum = outgoing._sum?.amount ?? 0;
+          const incomingSum = incoming._sum?.amount ? Number(incoming._sum.amount) : 0;
+          const outgoingSum = outgoing._sum?.amount ? Number(outgoing._sum.amount) : 0;
 
           return {
             tokenAddress: tokenGroup.tokenAddress,
             totalTransactions: countField,
-            totalVolume: tokenGroup._sum?.amount ?? 0,
+            totalVolume: tokenGroup._sum?.amount ? Number(tokenGroup._sum.amount) : 0,
             incoming: {
               amount: incomingSum,
               count: incoming._count,
@@ -1126,9 +1126,9 @@ router.get(
       });
 
       res.json({
-        totalEarned: earned._sum?.amount ?? 0,
-        totalSpent: spent._sum?.amount ?? 0,
-        netBalance: (earned._sum?.amount ?? 0) - (spent._sum?.amount ?? 0),
+        totalEarned: earned._sum?.amount ? Number(earned._sum.amount) : 0,
+        totalSpent: spent._sum?.amount ? Number(spent._sum.amount) : 0,
+        netBalance: (earned._sum?.amount ? Number(earned._sum.amount) : 0) - (spent._sum?.amount ? Number(spent._sum.amount) : 0),
         transactionsByType: transactionsByType.reduce(
           (
             acc: Record<string, number>,

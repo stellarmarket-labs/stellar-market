@@ -328,7 +328,7 @@ export function computeJobSignals(ctx: JobRiskContext): SignalResult[] {
     const speedFactor = clamp01(
       1 - ctx.fundedToReleasedMs / p.instantReleaseMs,
     );
-    const valueFactor = clamp01(ctx.budget / (p.highValueThreshold * 4));
+    const valueFactor = clamp01(Number(ctx.budget) / (p.highValueThreshold * 4));
     instantSeverity = speedFactor * (0.6 + 0.4 * valueFactor);
   }
   signals.push(
@@ -368,11 +368,11 @@ export function computeJobSignals(ctx: JobRiskContext): SignalResult[] {
 
   // New account handling high value.
   const youngFactor = clamp01(1 - ctx.youngestParticipantAgeMs / p.youngAccountMs);
-  const valueFactor = clamp01(ctx.budget / (p.highValueThreshold * 2));
+  const valueFactor = clamp01(Number(ctx.budget) / (p.highValueThreshold * 2));
   signals.push(
     signal(
       "new_account_high_value",
-      ctx.budget,
+      Number(ctx.budget),
       youngFactor * valueFactor,
       `Youngest participant ${(ctx.youngestParticipantAgeMs / HOUR).toFixed(1)}h old on a ${ctx.budget}-value job`,
     ),
@@ -521,13 +521,13 @@ export async function loadUserContext(
     if (!j.freelancerId) continue;
     const cur = outgoing.get(j.freelancerId) ?? { jobCount: 0, totalValue: 0 };
     cur.jobCount += 1;
-    cur.totalValue += j.budget ?? 0;
+    cur.totalValue += j.budget?.toNumber?.() ?? 0;
     outgoing.set(j.freelancerId, cur);
   }
   for (const j of completedAsFreelancer) {
     const cur = incoming.get(j.clientId) ?? { jobCount: 0, totalValue: 0 };
     cur.jobCount += 1;
-    cur.totalValue += j.budget ?? 0;
+    cur.totalValue += j.budget?.toNumber?.() ?? 0;
     incoming.set(j.clientId, cur);
   }
   const counterpartyIds = new Set([...outgoing.keys(), ...incoming.keys()]);
@@ -548,7 +548,7 @@ export async function loadUserContext(
   const releasedAt = new Map<string, number>();
   const jobBudget = new Map<string, number>();
   for (const e of releaseEvents) {
-    jobBudget.set(e.jobId, e.job?.budget ?? 0);
+    jobBudget.set(e.jobId, e.job?.budget ? Number(e.job.budget) : 0);
     const ts = e.processedAt.getTime();
     if (e.eventType === "JOB_FUNDED") {
       fundedAt.set(e.jobId, Math.max(fundedAt.get(e.jobId) ?? 0, ts));
@@ -572,7 +572,7 @@ export async function loadUserContext(
   }
 
   const sharedIpAccounts = await countSharedIpAccounts(userId);
-  const maxJobValue = userJobs.reduce((m, j) => Math.max(m, j.budget ?? 0), 0);
+  const maxJobValue = userJobs.reduce((m, j) => Math.max(m, j.budget?.toNumber?.() ?? 0), 0);
 
   return {
     userId,
@@ -695,7 +695,7 @@ export async function loadJobContext(
 
   return {
     jobId,
-    budget: job.budget ?? 0,
+    budget: Number(job.budget ?? 0),
     fundedToReleasedMs,
     priorPairJobCount: priorForward,
     pairBidirectional: priorReverse > 0,

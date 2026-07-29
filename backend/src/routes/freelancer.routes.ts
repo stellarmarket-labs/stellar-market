@@ -69,7 +69,7 @@ router.get(
         },
         _sum: { amount: true },
       });
-      totalEarnedXlm = earnedAgg._sum?.amount ?? 0;
+      totalEarnedXlm = earnedAgg._sum?.amount ? Number(earnedAgg._sum.amount) : 0;
     }
 
     const completedJobs = await prisma.job.count({
@@ -326,8 +326,8 @@ router.get(
       summary: {
         totalEarned: totalEarnedAgg._sum?.amount ?? 0,
         earnedThisMonth: earnedThisMonthAgg._sum?.amount ?? 0,
-        pendingRelease: pendingJobs._sum?.budget ?? 0,
-        activeEscrow: escrowJobs._sum?.budget ?? 0,
+        pendingRelease: pendingJobs._sum?.budget?.toNumber?.() ?? 0,
+        activeEscrow: escrowJobs._sum?.budget?.toNumber?.() ?? 0,
       },
       monthlyEarnings: monthlyRaw,
       weeklyEarnings: weeklyRaw,
@@ -409,7 +409,7 @@ async function loadDbEarnings(
     jobTitle: tx.job?.title ?? null,
     clientName: tx.job?.client?.username ?? null,
     category: tx.job?.category ?? null,
-    amount: tx.amount ?? 0,
+    amount: tx.amount ? Number(tx.amount) : 0,
     createdAt: tx.createdAt,
   }));
 }

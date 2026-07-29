@@ -1,3 +1,8 @@
+import { Prisma } from "@prisma/client";
+// Decimal values are converted to numbers at API response boundaries
+// (see individual route files). This import is kept for Decimal utilities.
+void Prisma; // used in type assertions below
+
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
