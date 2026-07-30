@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { logger } from "../lib/logger";
+import { validateWebhookUrl } from "../lib/ip-validation";
 
 const prisma = new PrismaClient();
 
@@ -24,6 +25,11 @@ export class WebhookService {
   }
 
   static async register(userId: string, url: string, event: string) {
+    const validation = await validateWebhookUrl(url);
+    if (!validation.valid) {
+      throw new Error(`Webhook URL validation failed: ${validation.reason}`);
+    }
+
     const secret = crypto.randomBytes(32).toString("hex");
     return prisma.webhook.create({
       data: { userId, url, event, secret },
@@ -41,6 +47,35 @@ export class WebhookService {
 
   static async deleteForUser(id: string, userId: string) {
     return prisma.webhook.deleteMany({ where: { id, userId } });
+  }
+
+  static async getForUser(id: string, userId: string) {
+    return prisma.webhook.findFirst({
+      where: { id, userId },
+      select: { id: true, url: true, event: true, active: true, createdAt: true },
+    });
+  }
+
+  static async listDeliveries(
+    webhookId: string,
+    options: { limit: number; offset: number } = { limit: 50, offset: 0 },
+  ) {
+    return prisma.webhookDelivery.findMany({
+      where: { webhookId },
+      select: {
+        id: true,
+        event: true,
+        status: true,
+        attempts: true,
+        lastAttempt: true,
+        nextRetry: true,
+        responseCode: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: options.limit,
+      skip: options.offset,
+    });
   }
 
   /**
@@ -74,6 +109,16 @@ export class WebhookService {
     if (!delivery || !delivery.webhook.active) return;
     if (delivery.attempts >= MAX_ATTEMPTS) return;
 
+    const validation = await validateWebhookUrl(delivery.webhook.url);
+    if (!validation.valid) {
+      logger.warn({ deliveryId, reason: validation.reason }, "Webhook URL failed re-validation at delivery time");
+      await prisma.webhookDelivery.update({
+        where: { id: deliveryId },
+        data: { status: "failed", attempts: MAX_ATTEMPTS },
+      });
+      return;
+    }
+
     const body = JSON.stringify({ event: delivery.event, data: delivery.payload });
     const signature = signPayload(delivery.webhook.secret, body);
 
@@ -90,6 +135,7 @@ export class WebhookService {
         },
         body,
         signal: AbortSignal.timeout(10_000),
+        redirect: "error",
       });
       responseCode = response.status;
       success = response.ok;
@@ -118,6 +164,29 @@ export class WebhookService {
     if (!success && nextRetry) {
       const delay = nextRetry.getTime() - Date.now();
       setTimeout(() => void WebhookService.deliver(deliveryId), delay);
+    }
+  }
+
+  /**
+   * Durable retry sweep: re-enqueues pending deliveries whose nextRetry time has passed.
+   * Designed to run on process startup and periodically (e.g., every minute).
+   */
+  static async sweepPendingRetries(): Promise<void> {
+    try {
+      const now = new Date();
+      const pending = await prisma.webhookDelivery.findMany({
+        where: {
+          status: "pending",
+          nextRetry: { lte: now },
+        },
+      });
+
+      for (const delivery of pending) {
+        logger.info({ deliveryId: delivery.id }, "Re-enqueuing pending webhook delivery after sweep");
+        void this.deliver(delivery.id);
+      }
+    } catch (err) {
+      logger.error({ err }, "Error during webhook retry sweep");
     }
   }
 }

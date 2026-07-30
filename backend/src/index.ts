@@ -35,6 +35,7 @@ import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
 import { notificationQueue, stopNotificationWorker } from "./lib/notification-queue";
 import { requireAdmin } from "./middleware/auth";
+import { WebhookService } from "./services/webhook.service";
 
 const app = express();
 import { swaggerUi, swaggerSpec } from "./config/swagger";
@@ -221,6 +222,8 @@ app.use((req, res) => {
 // Error handler
 app.use(errorHandler);
 
+let webhookRetryInterval: NodeJS.Timeout;
+
 async function startServer(): Promise<void> {
   await connectWithRetry(prisma);
   httpServer.listen(config.port, async () => {
@@ -232,6 +235,17 @@ async function startServer(): Promise<void> {
     startHorizonListener();
     RecommendationQueueService.startWorker();
     AuditService.startWorker();
+
+    // Webhook retry sweep on startup (reconcile any pending retries missed during downtime)
+    logger.info("Running webhook retry sweep on startup");
+    await WebhookService.sweepPendingRetries();
+
+    // Periodic webhook retry sweep (every 60 seconds)
+    webhookRetryInterval = setInterval(async () => {
+      await WebhookService.sweepPendingRetries().catch((err) => {
+        logger.error({ err }, "Webhook retry sweep failed");
+      });
+    }, 60_000);
 
     // Initialize virus scanner (non-blocking)
     await initializeVirusScanner();
@@ -252,6 +266,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     process.exit(1);
   }, 30_000);
 
+  clearInterval(webhookRetryInterval);
   stopHorizonListener();
   RecommendationQueueService.stopWorker();
   ReputationCacheService.stopPeriodicRefresh();

@@ -50,4 +50,25 @@ router.delete(
   }),
 );
 
+router.get(
+  "/:id/deliveries",
+  authenticate,
+  validate({ params: webhookIdSchema }),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const { id } = req.params as { id: string };
+
+    const webhook = await WebhookService.getForUser(id, req.userId!);
+    if (!webhook) {
+      return res.status(404).json({ error: "Webhook not found." });
+    }
+
+    const deliveries = await WebhookService.listDeliveries(id, {
+      limit: 50,
+      offset: 0,
+    });
+
+    res.json(deliveries);
+  }),
+);
+
 export default router;
