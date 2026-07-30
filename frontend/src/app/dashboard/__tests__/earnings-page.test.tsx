@@ -128,12 +128,28 @@ describe("Earnings page preset shortcuts", () => {
     await renderPage();
     await waitFor(() => expect(mockedAxios.get).toHaveBeenCalled());
 
+    // `last_30_days` is already the default preset on a fresh mount (no stored
+    // localStorage override — see "highlights the active preset button"
+    // above), so clicking it directly here would set state to the same value
+    // it already holds. React bails out of that update (Object.is-equal), so
+    // no re-render, no `range` recompute, and no second fetch ever fires.
+    // Move to a different preset first so the later click to `last_30_days`
+    // is a genuine state transition, exactly like a real user switching back.
+    fireEvent.click(screen.getByTestId("preset-all_time"));
+    await waitFor(() => {
+      const latest = mockedAxios.get.mock.calls.map((c) => c[0] as string).at(-1);
+      expect(latest).toBeDefined();
+      expect(latest).not.toMatch(/from=/);
+    });
+
     mockedAxios.get.mockClear();
     fireEvent.click(screen.getByTestId("preset-last_30_days"));
 
     await waitFor(() => expect(mockedAxios.get).toHaveBeenCalled());
 
-    const url: string = mockedAxios.get.mock.calls[0][0] as string;
+    const url: string = mockedAxios.get.mock.calls
+      .map((c) => c[0] as string)
+      .find((u) => u.includes("/earnings?"))!;
     expect(url).toMatch(/from=/);
 
     const fromMatch = url.match(/from=([^&]+)/);

@@ -7,14 +7,16 @@ import { validate } from "../middleware/validation";
 import { freelancerSearchQuerySchema, getUserByIdParamSchema } from "../schemas";
 import { searchFreelancers } from "../services/freelancer-search.service";
 import { ReputationService } from "../services/reputation.service";
-import { fetchOnChainPayments } from "../services/earnings-reconciliation.service";
+import {
+  fetchOnChainPayments,
+  loadDbEarnings,
+  reconcileAndRemediate,
+} from "../services/earnings-reconciliation.service";
 import { logger } from "../lib/logger";
-import { config, MAX_PAGE_SIZE } from "../config";
+import { MAX_PAGE_SIZE } from "../config";
 
 const router = Router();
 const prisma = new PrismaClient();
-
-const EARNING_TX_TYPES = [TransactionType.RELEASE, TransactionType.DISPUTE_PAYOUT] as const;
 
 /**
  * Default reconciliation/export window: last 90 days.
@@ -368,52 +370,6 @@ async function requireFreelancerWallet(
   return { userId: user.id, wallet: user.walletAddress };
 }
 
-interface EarningsRecord {
-  txHash: string;
-  jobId: string | null;
-  jobTitle: string | null;
-  clientName: string | null;
-  category: string | null;
-  amount: number;
-  createdAt: Date;
-}
-
-/** Load DB earnings (RELEASE / DISPUTE_PAYOUT) for a wallet within a date range. */
-async function loadDbEarnings(
-  wallet: string,
-  from: Date,
-  to: Date,
-): Promise<EarningsRecord[]> {
-  const txs = await prisma.transaction.findMany({
-    where: {
-      toAddress: wallet,
-      type: { in: [...EARNING_TX_TYPES] },
-      createdAt: { gte: from, lte: to },
-    },
-    orderBy: { createdAt: "desc" },
-    include: {
-      job: {
-        select: {
-          id: true,
-          title: true,
-          category: true,
-          client: { select: { username: true } },
-        },
-      },
-    },
-  });
-
-  return txs.map((tx) => ({
-    txHash: tx.txHash,
-    jobId: tx.jobId,
-    jobTitle: tx.job?.title ?? null,
-    clientName: tx.job?.client?.username ?? null,
-    category: tx.job?.category ?? null,
-    amount: tx.amount ?? 0,
-    createdAt: tx.createdAt,
-  }));
-}
-
 /**
  * GET /api/freelancers/earnings/reconcile?from=<ISO>&to=<ISO>
  * Cross-check DB earnings records against on-chain escrow releases from Horizon.
@@ -422,6 +378,13 @@ async function loadDbEarnings(
  *  - matched: present in both Horizon and the DB (joined by jobId memo / txHash)
  *  - onChainOnly: settled on-chain but missing from the DB (indicates a sync failure)
  *  - dbOnly: recorded in the DB but not found on-chain in the window
+ *
+ * Unlike before #874, this is no longer read-only: `onChainOnly` discrepancies
+ * are automatically backfilled (idempotently) and `dbOnly` discrepancies are
+ * flagged in the audit trail for manual review, via the same
+ * `reconcileAndRemediate` the proactive background job uses — so loading this
+ * page fixes discrepancies immediately rather than only reporting them, and a
+ * freelancer who never loads it still gets fixed by the scheduled sweep.
  */
 router.get(
   "/earnings/reconcile",
@@ -436,99 +399,15 @@ router.get(
     const from = q.from ?? fallback.from;
     const to = q.to ?? fallback.to;
 
-    const dbRecords = await loadDbEarnings(auth.wallet, from, to);
-
-    let onChainPayments: Awaited<ReturnType<typeof fetchOnChainPayments>>;
+    let result: Awaited<ReturnType<typeof reconcileAndRemediate>>;
     try {
-      onChainPayments = await fetchOnChainPayments(auth.wallet, from, to);
+      result = await reconcileAndRemediate(auth.wallet, from, to);
     } catch (err) {
       logger.error({ err, wallet: auth.wallet }, "[Reconciliation] Horizon fetch failed");
       return res.status(502).json({ error: "Unable to reach the Stellar network for reconciliation." });
     }
 
-    // Index DB records by txHash and by jobId for matching.
-    const dbByTxHash = new Map(dbRecords.map((r) => [r.txHash, r]));
-    const dbByJobId = new Map(
-      dbRecords.filter((r) => r.jobId).map((r) => [r.jobId as string, r]),
-    );
-
-    const matchedTxHashes = new Set<string>();
-    const matched: Array<{
-      txHash: string;
-      jobId: string | null;
-      jobTitle: string | null;
-      amount: number;
-      onChainAmount: number;
-      createdAt: string;
-    }> = [];
-    const onChainOnly: Array<{
-      txHash: string;
-      memoJobId: string | null;
-      amount: number;
-      assetCode: string;
-      createdAt: string;
-      horizonUrl: string;
-    }> = [];
-
-    for (const payment of onChainPayments) {
-      const dbRecord =
-        dbByTxHash.get(payment.txHash) ??
-        (payment.memoJobId ? dbByJobId.get(payment.memoJobId) : undefined);
-
-      if (dbRecord) {
-        matchedTxHashes.add(dbRecord.txHash);
-        matched.push({
-          txHash: payment.txHash,
-          jobId: dbRecord.jobId,
-          jobTitle: dbRecord.jobTitle,
-          amount: dbRecord.amount,
-          onChainAmount: payment.amount,
-          createdAt: payment.createdAt,
-        });
-      } else {
-        onChainOnly.push({
-          txHash: payment.txHash,
-          memoJobId: payment.memoJobId,
-          amount: payment.amount,
-          assetCode: payment.assetCode,
-          createdAt: payment.createdAt,
-          horizonUrl: `${config.stellar.horizonUrl.replace(/\/+$/, "")}/transactions/${payment.txHash}`,
-        });
-      }
-    }
-
-    const dbOnly = dbRecords
-      .filter((r) => !matchedTxHashes.has(r.txHash))
-      .map((r) => ({
-        txHash: r.txHash,
-        jobId: r.jobId,
-        jobTitle: r.jobTitle,
-        amount: r.amount,
-        createdAt: r.createdAt.toISOString(),
-      }));
-
-    // on_chain_only entries indicate the DB failed to record a settled payment.
-    if (onChainOnly.length > 0) {
-      logger.warn(
-        { userId: auth.userId, wallet: auth.wallet, count: onChainOnly.length },
-        "[Reconciliation] On-chain payments missing from DB — possible sync failure",
-      );
-    }
-
-    res.json({
-      range: { from: from.toISOString(), to: to.toISOString() },
-      summary: {
-        onChainCount: onChainPayments.length,
-        dbCount: dbRecords.length,
-        matchedCount: matched.length,
-        onChainOnlyCount: onChainOnly.length,
-        dbOnlyCount: dbOnly.length,
-        allMatched: onChainOnly.length === 0 && dbOnly.length === 0,
-      },
-      matched,
-      onChainOnly,
-      dbOnly,
-    });
+    res.json(result);
   }),
 );
 

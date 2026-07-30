@@ -152,3 +152,17 @@ export function generateJobCacheKey(jobId: string): string {
 export function generateJobOnChainStatusCacheKey(jobId: string): string {
   return `job:onchain-status:${jobId}`;
 }
+
+/**
+ * Generate cache key for a freelancer's Horizon on-chain payment window
+ * (issue #874). Shared across every backend instance via Redis so a payment
+ * fetched by one instance is visible to all others, rather than each process
+ * building its own independent, inconsistent view.
+ */
+export function generateOnChainPaymentsCacheKey(
+  walletAddress: string,
+  from: Date,
+  to: Date,
+): string {
+  return `earnings:onchain:${walletAddress}:${from.toISOString()}:${to.toISOString()}`;
+}
