@@ -28,12 +28,12 @@ jest.mock("@prisma/client", () => {
     },
   };
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
     UserRole: {
       CLIENT: "CLIENT",
       FREELANCER: "FREELANCER",
       ADMIN: "ADMIN",
-    } as any,
+    },
     NotificationType: {
       NEW_MESSAGE: "NEW_MESSAGE",
       JOB_APPLIED: "JOB_APPLIED",
@@ -42,13 +42,9 @@ jest.mock("@prisma/client", () => {
       MILESTONE_APPROVED: "MILESTONE_APPROVED",
       DISPUTE_RAISED: "DISPUTE_RAISED",
       DISPUTE_RESOLVED: "DISPUTE_RESOLVED",
-    } as any,
+    },
   };
 });
-
-// Suppress TS errors for the mock to avoid compilation issues in tests
-// @ts-ignore
-import { UserRole, NotificationType } from "@prisma/client";
 
 jest.mock("../../services/notification.service", () => ({
   NotificationService: {
@@ -57,7 +53,21 @@ jest.mock("../../services/notification.service", () => ({
 }));
 
 import { PrismaClient } from "@prisma/client";
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as {
+  message: {
+    create: jest.Mock;
+    findMany: jest.Mock;
+    updateMany: jest.Mock;
+    count: jest.Mock;
+  };
+  user: { findUnique: jest.Mock };
+  notification: {
+    create: jest.Mock;
+    findMany: jest.Mock;
+    count: jest.Mock;
+    updateMany: jest.Mock;
+  };
+};
 const messageMock = prismaMock.message;
 const userMock = prismaMock.user;
 

@@ -12,8 +12,21 @@
  */
 
 // ─── Prisma mock ─────────────────────────────────────────────────────────────
+type MockPrismaClient = {
+  auditLog: {
+    findFirst: jest.Mock;
+    findMany: jest.Mock;
+    create: jest.Mock;
+    count: jest.Mock;
+  };
+  user: {
+    findUnique: jest.Mock;
+  };
+  $disconnect: jest.Mock;
+};
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma = {
+  const mockPrisma: MockPrismaClient = {
     auditLog: {
       findFirst: jest.fn(),
       findMany: jest.fn(),
@@ -26,10 +39,10 @@ jest.mock("@prisma/client", () => {
     $disconnect: jest.fn(),
   };
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
-    Prisma: { JsonNull: "JsonNull" } as any,
-    UserRole: { CLIENT: "CLIENT", FREELANCER: "FREELANCER", ADMIN: "ADMIN" } as any,
-    DisputeStatus: { OPEN: "OPEN", IN_PROGRESS: "IN_PROGRESS", RESOLVED: "RESOLVED" } as any,
+    PrismaClient: jest.fn(() => mockPrisma),
+    Prisma: { JsonNull: "JsonNull" },
+    UserRole: { CLIENT: "CLIENT", FREELANCER: "FREELANCER", ADMIN: "ADMIN" },
+    DisputeStatus: { OPEN: "OPEN", IN_PROGRESS: "IN_PROGRESS", RESOLVED: "RESOLVED" },
   };
 });
 
@@ -58,6 +71,7 @@ jest.mock("../services/notification.service", () => ({
 }));
 
 import { PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import express from "express";
 import request from "supertest";
 import {
@@ -69,7 +83,7 @@ import {
 import { auditLogger } from "../utils/auditLogger";
 import adminRouter from "../routes/admin";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -85,7 +99,7 @@ function buildChain(
     action: string;
     actorId?: string | null;
     target?: string | null;
-    metadata?: any;
+    metadata?: Prisma.JsonValue | null;
     ipAddress?: string | null;
   }>,
 ) {

@@ -44,6 +44,7 @@ const mockRedisInstance = {
     ),
   ),
   set: jest.fn().mockResolvedValue("OK"),
+  setex: jest.fn().mockResolvedValue("OK"),
   del: jest.fn().mockResolvedValue(1),
   hget: jest.fn().mockResolvedValue(null),
   hset: jest.fn().mockResolvedValue(1),

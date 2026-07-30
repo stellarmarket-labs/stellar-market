@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env,
-    IntoVal, String, Symbol, Vec,
+    IntoVal, Map, String, Symbol, Vec,
 };
 
 #[contracterror]
@@ -105,6 +105,7 @@ pub enum EscrowError {
     // branch opened.
     /// A governed parameter must be changed via governance, not the multisig.
     GovernanceRequired = 51,
+
 }
 
 /// Privileged actions that can be proposed and approved through the multi-sig flow.
@@ -354,6 +355,32 @@ pub struct MilestoneRevision {
     pub revised_by: Address,
 }
 
+/// Status of a freelancer-to-sub-freelancer milestone sub-assignment.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SubAssignmentStatus {
+    /// Sub-assignment is live; payout will be split at milestone approval.
+    Active,
+    /// Sub-freelancer has been paid when the milestone was approved.
+    Paid,
+    /// Assignment was cancelled before the milestone was approved.
+    Cancelled,
+}
+
+/// Records a freelancer's promise to pay a sub-freelancer a fixed amount
+/// from the milestone payout when the client approves that milestone.
+/// No funds are pre-escrowed; the split is enforced at payout time.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SubAssignment {
+    pub job_id: u64,
+    pub milestone_id: u32,
+    pub sub_freelancer: Address,
+    /// Token amount reserved for the sub-freelancer (in the milestone's token).
+    pub amount: i128,
+    pub status: SubAssignmentStatus,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum DataKey {
@@ -385,6 +412,9 @@ enum DataKey {
     /// Used by `accept_revision` to ensure a revision never shrinks a milestone's
     /// value below funds that have already left escrow for it.
     MilestoneDisbursed(u64, u32),
+    /// Sub-assignment created by the main freelancer for a specific milestone.
+    /// Keyed by (job_id, milestone_id). At most one sub-assignment per milestone.
+    SubAssignment(u64, u32),
 }
 
 /// Fixed-point scale for oracle prices: prices are quoted in XLM stroops per token
@@ -2144,15 +2174,27 @@ impl EscrowContract {
         // STATE VALIDATION: Cannot approve milestones while disputed
         require_state_not_disputed(&job)?;
 
-        // Validate all milestone indices before making any state changes
+        // Validate all milestone indices before making any state changes.
+        // Duplicate indices are rejected here so a repeated index can't be
+        // counted (and its amount summed into total_released) more than once
+        // while only transitioning to Approved a single time.
         let mut milestones = job.milestones.clone();
         let mut total_released: i128 = 0;
+        let mut seen = [false; MAX_MILESTONES as usize];
 
         for i in milestone_indices.iter() {
             let index = i;
             let milestone = milestones
                 .get(index)
                 .ok_or(EscrowError::MilestoneNotFound)?;
+
+            // Safe: milestones.len() <= MAX_MILESTONES, and the get() above
+            // already confirmed index < milestones.len().
+            let idx = index as usize;
+            if seen[idx] {
+                return Err(EscrowError::InvalidMilestoneIndex);
+            }
+            seen[idx] = true;
 
             if milestone.status != MilestoneStatus::Submitted {
                 return Err(EscrowError::InvalidStatus);
@@ -2354,11 +2396,37 @@ impl EscrowContract {
             );
         }
 
-        token_client.transfer(
-            &env.current_contract_address(),
-            &job.freelancer,
-            &freelancer_amount,
-        );
+        // Split payout between main freelancer and sub-freelancer when an active
+        // sub-assignment exists for this milestone.
+        let sub_key = DataKey::SubAssignment(job_id, milestone_id);
+        let sub_opt: Option<SubAssignment> = env.storage().persistent().get(&sub_key);
+        if let Some(mut sub) = sub_opt {
+            if sub.status == SubAssignmentStatus::Active {
+                let sub_amount = if sub.amount <= freelancer_amount {
+                    sub.amount
+                } else {
+                    freelancer_amount
+                };
+                let main_amount = freelancer_amount - sub_amount;
+                if sub_amount > 0 {
+                    token_client.transfer(&env.current_contract_address(), &sub.sub_freelancer, &sub_amount);
+                }
+                if main_amount > 0 {
+                    token_client.transfer(&env.current_contract_address(), &job.freelancer, &main_amount);
+                }
+                let sub_fl = sub.sub_freelancer.clone();
+                sub.status = SubAssignmentStatus::Paid;
+                env.storage().persistent().set(&sub_key, &sub);
+                env.events().publish(
+                    (symbol_short!("escrow"), symbol_short!("sub_paid")),
+                    (job_id, milestone_id, sub_fl, sub_amount),
+                );
+            } else if freelancer_amount > 0 {
+                token_client.transfer(&env.current_contract_address(), &job.freelancer, &freelancer_amount);
+            }
+        } else if freelancer_amount > 0 {
+            token_client.transfer(&env.current_contract_address(), &job.freelancer, &freelancer_amount);
+        }
 
         let updated = Milestone {
             id: milestone.id,
@@ -2444,6 +2512,17 @@ impl EscrowContract {
         // Validate the requested amount.
         if amount <= 0 || amount > milestone.amount {
             return Err(EscrowError::InvalidPartialAmount);
+        }
+
+        let sub_check_key = DataKey::SubAssignment(job_id, milestone_index);
+        if let Some(sub) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, SubAssignment>(&sub_check_key)
+        {
+            if sub.status == SubAssignmentStatus::Active {
+                return Err(EscrowError::InvalidStatus);
+            }
         }
 
         // Release partial payment to freelancer using the milestone's own token.
@@ -2549,9 +2628,13 @@ impl EscrowContract {
             .get(&symbol_short!("TRE"))
             .unwrap_or(env.current_contract_address());
 
-        // Pay out each milestone in its own token.
-        let mut total_freelancer: i128 = 0;
-        let mut total_fee: i128 = 0;
+        // Pay out each milestone in its own token and emit per-token events,
+        // respecting any active sub-assignment.
+        // Use Map to aggregate amounts by token address for event emission.
+        let mut fee_by_token: Map<Address, i128> = Map::new(&env);
+        let mut freelancer_by_token: Map<Address, i128> = Map::new(&env);
+
+
         for ms in job.milestones.iter() {
             if ms.amount <= 0 {
                 continue;
@@ -2559,33 +2642,97 @@ impl EscrowContract {
             let ms_token = resolve_milestone_token(&ms, &job);
             let fee_amount = (ms.amount * fee_bps as i128) / 10_000;
             let freelancer_amount = ms.amount - fee_amount;
+
             let tc = token::Client::new(&env, &ms_token);
             if fee_amount > 0 {
                 tc.transfer(&env.current_contract_address(), &fee_recipient, &fee_amount);
             }
-            if freelancer_amount > 0 {
+
+            // Split payout between main freelancer and sub-freelancer when an active
+            // sub-assignment exists for this milestone.
+            let sub_key = DataKey::SubAssignment(job_id, ms.id);
+            let sub_opt: Option<SubAssignment> = env.storage().persistent().get(&sub_key);
+            if let Some(mut sub) = sub_opt {
+                if sub.status == SubAssignmentStatus::Active {
+                    let sub_amount = if sub.amount <= freelancer_amount {
+                        sub.amount
+                    } else {
+                        freelancer_amount
+                    };
+                    let main_amount = freelancer_amount - sub_amount;
+                    if sub_amount > 0 {
+                        tc.transfer(&env.current_contract_address(), &sub.sub_freelancer, &sub_amount);
+                    }
+                    if main_amount > 0 {
+                        tc.transfer(&env.current_contract_address(), &job.freelancer, &main_amount);
+                    }
+                    let sub_fl = sub.sub_freelancer.clone();
+                    sub.status = SubAssignmentStatus::Paid;
+                    env.storage().persistent().set(&sub_key, &sub);
+                    env.events().publish(
+                        (symbol_short!("escrow"), symbol_short!("sub_paid")),
+                        (job_id, ms.id, sub_fl, sub_amount),
+                    );
+                } else if freelancer_amount > 0 {
+                    tc.transfer(&env.current_contract_address(), &job.freelancer, &freelancer_amount);
+                }
+            } else if freelancer_amount > 0 {
                 tc.transfer(&env.current_contract_address(), &job.freelancer, &freelancer_amount);
             }
-            // Accumulate for single-token event emission (best-effort).
-            if ms.token.is_none() {
-                total_fee = total_fee.saturating_add(fee_amount);
-                total_freelancer = total_freelancer.saturating_add(freelancer_amount);
-            }
+
+            // Accumulate amounts per token for event emission.
+            let current_fee = fee_by_token.get(ms_token.clone()).unwrap_or(0);
+            fee_by_token.set(ms_token.clone(), current_fee.saturating_add(fee_amount));
+
+            let current_freelancer = freelancer_by_token.get(ms_token.clone()).unwrap_or(0);
+            freelancer_by_token.set(ms_token.clone(), current_freelancer.saturating_add(freelancer_amount));
         }
 
         job.status = JobStatus::Completed;
         env.storage().persistent().set(&get_job_key(job_id), &job);
         bump_job_ttl(&env, job_id);
 
-        env.events().publish(
-            (symbol_short!("escrow"), Symbol::new(&env, "fee_taken")),
-            (job_id, total_fee, fee_recipient),
-        );
+        // Emit events: maintain backward compatibility for single-token jobs,
+        // use per-token format for multi-token jobs.
+        let num_tokens = fee_by_token.len();
 
-        env.events().publish(
-            (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
-            (job_id, job.freelancer, total_freelancer),
-        );
+        if num_tokens == 1 {
+            // Single-token job: use legacy event format (job_id, amount, recipient)
+            let token_addr = fee_by_token.keys().get(0).unwrap();
+            let total_fee = fee_by_token.get(token_addr.clone()).unwrap_or(0);
+            let total_freelancer = freelancer_by_token.get(token_addr.clone()).unwrap_or(0);
+
+            env.events().publish(
+                (symbol_short!("escrow"), Symbol::new(&env, "fee_taken")),
+                (job_id, total_fee, fee_recipient.clone()),
+            );
+
+            env.events().publish(
+                (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
+                (job_id, job.freelancer.clone(), total_freelancer),
+            );
+        } else {
+            // Multi-token job: emit per-token events (job_id, token, amount, recipient)
+            for token_addr in fee_by_token.keys() {
+                let fee_amount = fee_by_token.get(token_addr.clone()).unwrap_or(0);
+                if fee_amount > 0 {
+                    env.events().publish(
+                        (symbol_short!("escrow"), Symbol::new(&env, "fee_taken")),
+                        (job_id, token_addr.clone(), fee_amount, fee_recipient.clone()),
+                    );
+                }
+            }
+
+            for token_addr in freelancer_by_token.keys() {
+                let freelancer_amount = freelancer_by_token.get(token_addr.clone()).unwrap_or(0);
+                if freelancer_amount > 0 {
+                    env.events().publish(
+                        (symbol_short!("escrow"), Symbol::new(&env, "pmt_released")),
+                        (job_id, token_addr.clone(), job.freelancer.clone(), freelancer_amount),
+                    );
+                }
+            }
+        }
 
         Ok(())
     }
@@ -2693,11 +2840,37 @@ impl EscrowContract {
             );
         }
 
-        token_client.transfer(
-            &env.current_contract_address(),
-            &job.freelancer,
-            &freelancer_amount,
-        );
+        // Split payout between main freelancer and sub-freelancer when an active
+        // sub-assignment exists for this milestone.
+        let sub_key = DataKey::SubAssignment(job_id, milestone_index);
+        let sub_opt: Option<SubAssignment> = env.storage().persistent().get(&sub_key);
+        if let Some(mut sub) = sub_opt {
+            if sub.status == SubAssignmentStatus::Active {
+                let sub_amount = if sub.amount <= freelancer_amount {
+                    sub.amount
+                } else {
+                    freelancer_amount
+                };
+                let main_amount = freelancer_amount - sub_amount;
+                if sub_amount > 0 {
+                    token_client.transfer(&env.current_contract_address(), &sub.sub_freelancer, &sub_amount);
+                }
+                if main_amount > 0 {
+                    token_client.transfer(&env.current_contract_address(), &job.freelancer, &main_amount);
+                }
+                let sub_fl = sub.sub_freelancer.clone();
+                sub.status = SubAssignmentStatus::Paid;
+                env.storage().persistent().set(&sub_key, &sub);
+                env.events().publish(
+                    (symbol_short!("escrow"), symbol_short!("sub_paid")),
+                    (job_id, milestone_index, sub_fl, sub_amount),
+                );
+            } else if freelancer_amount > 0 {
+                token_client.transfer(&env.current_contract_address(), &job.freelancer, &freelancer_amount);
+            }
+        } else if freelancer_amount > 0 {
+            token_client.transfer(&env.current_contract_address(), &job.freelancer, &freelancer_amount);
+        }
 
         // Track cumulative disbursement (full nominal milestone amount — fee included —
         // since that value has left escrow for good) so a later revision can't undercut it.
@@ -2840,6 +3013,29 @@ impl EscrowContract {
             }
         }
         let refund = default_refund; // used in event below
+
+        // Cancel any active sub-assignments for milestones that were not approved.
+        // Unapproved milestones are refunded to the client, so sub-freelancers
+        // receive no payout; marking Cancelled keeps storage state consistent.
+        let ms_len = job.milestones.len();
+        for idx in 0..ms_len {
+            let ms = job.milestones.get(idx).unwrap();
+            if ms.status != MilestoneStatus::Approved {
+                let sub_key = DataKey::SubAssignment(job_id, ms.id);
+                let sub_opt: Option<SubAssignment> = env.storage().persistent().get(&sub_key);
+                if let Some(mut sub) = sub_opt {
+                    if sub.status == SubAssignmentStatus::Active {
+                        let sub_fl = sub.sub_freelancer.clone();
+                        sub.status = SubAssignmentStatus::Cancelled;
+                        env.storage().persistent().set(&sub_key, &sub);
+                        env.events().publish(
+                            (symbol_short!("escrow"), symbol_short!("sub_cncl")),
+                            (job_id, ms.id, sub_fl),
+                        );
+                    }
+                }
+            }
+        }
 
         job.status = JobStatus::Cancelled;
         env.storage().persistent().set(&get_job_key(job_id), &job);
@@ -3159,6 +3355,24 @@ impl EscrowContract {
         }
         if new_milestones.len() > MAX_MILESTONES {
             return Err(EscrowError::TooManyMilestones);
+        }
+
+        let current_timestamp = env.ledger().timestamp();
+        let mut prev_deadline: u64 = 0;
+        for (i, milestone) in new_milestones.iter().enumerate() {
+            if milestone.amount <= 0 {
+                return Err(EscrowError::InvalidMilestone);
+            }
+            if milestone.deadline <= current_timestamp {
+                return Err(EscrowError::MilestoneDeadlineInPast);
+            }
+            if milestone.deadline > job.job_deadline {
+                return Err(EscrowError::InvalidDeadline);
+            }
+            if i > 0 && milestone.deadline <= prev_deadline {
+                return Err(EscrowError::MilestoneDeadlinesNotOrdered);
+            }
+            prev_deadline = milestone.deadline;
         }
 
         // 5. Compute new_total as the sum of all milestone amounts
@@ -3525,6 +3739,7 @@ impl EscrowContract {
         job_id: u64,
     ) -> Result<(), EscrowError> {
         bump_escrow_ttl(&env, job_id);
+        require_not_paused(&env)?;
         caller.require_auth();
 
         // 1. Load job
@@ -3583,6 +3798,7 @@ impl EscrowContract {
         job_id: u64,
     ) -> Result<(), EscrowError> {
         bump_escrow_ttl(&env, job_id);
+        require_not_paused(&env)?;
         caller.require_auth();
 
         // Validate job exists.
@@ -3760,6 +3976,198 @@ impl EscrowContract {
         );
 
         Ok(())
+    }
+
+    // ============================================================
+    // SUB-CONTRACTING (issue #898)
+    // ============================================================
+    // The main freelancer can promise a portion of a milestone's payout
+    // to a sub-freelancer. The promise is enforced at payout time: when
+    // the client approves the milestone (and payment is released), the
+    // contract automatically routes `amount` to the sub-freelancer and
+    // the remainder to the main freelancer.
+    //
+    // Design notes:
+    //   - No pre-funding: the sub-assignment is a promise, not a separate
+    //     escrow. Funds only move at the moment the parent milestone pays.
+    //   - At most one active sub-assignment per milestone.
+    //   - If the job is cancelled/expired without the milestone being
+    //     approved, the sub-assignment is marked Cancelled with no payout.
+    //   - Disputes settle via the normal dispute contract; the main
+    //     freelancer receives the full dispute payout (sub-assignment is
+    //     not involved), isolating sub-level relationships from the parent
+    //     dispute.
+    // ============================================================
+
+    /// Create a sub-assignment for a milestone, promising `amount` of the
+    /// payout to `sub_freelancer` when the client approves the milestone.
+    ///
+    /// # Authorization
+    /// Only the job's main freelancer may call this.
+    ///
+    /// # Errors
+    /// * `JobNotFound`       — job does not exist.
+    /// * `Unauthorized`      — caller is not the job's freelancer.
+    /// * `InvalidStatus`     — job is not Funded/InProgress; milestone is already
+    ///                         Submitted/Approved/PartiallyPaid; or an active
+    ///                         sub-assignment already exists for this milestone.
+    /// * `MilestoneNotFound` — milestone index is out of range.
+    /// * `InvalidAmount`     — `amount` is <= 0 or exceeds the milestone's amount.
+    /// * `ContractPaused`    — the contract is paused.
+    pub fn sub_assign_milestone(
+        env: Env,
+        job_id: u64,
+        milestone_id: u32,
+        freelancer: Address,
+        sub_freelancer: Address,
+        amount: i128,
+    ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
+        freelancer.require_auth();
+        require_not_paused(&env)?;
+
+        let job: Job = env
+            .storage()
+            .persistent()
+            .get(&get_job_key(job_id))
+            .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
+
+        if job.freelancer != freelancer {
+            return Err(EscrowError::Unauthorized);
+        }
+
+        if sub_freelancer == freelancer {
+            return Err(EscrowError::Unauthorized);
+        }
+
+        require_state_funded_or_in_progress(&job)?;
+
+        let milestone = job
+            .milestones
+            .get(milestone_id)
+            .ok_or(EscrowError::MilestoneNotFound)?;
+
+        // Sub-assignment is only meaningful while the milestone has not yet been
+        // submitted for review; once submitted, the client is about to approve it.
+        if milestone.status != MilestoneStatus::Pending
+            && milestone.status != MilestoneStatus::InProgress
+        {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        if amount <= 0 || amount > milestone.amount {
+            return Err(EscrowError::InvalidAmount);
+        }
+
+        let sub_key = DataKey::SubAssignment(job_id, milestone_id);
+        if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, SubAssignment>(&sub_key)
+        {
+            if existing.status == SubAssignmentStatus::Active {
+                // Reuses InvalidStatus: the milestone already has an active assignment.
+                return Err(EscrowError::InvalidStatus);
+            }
+        }
+
+        let sub = SubAssignment {
+            job_id,
+            milestone_id,
+            sub_freelancer: sub_freelancer.clone(),
+            amount,
+            status: SubAssignmentStatus::Active,
+        };
+        env.storage().persistent().set(&sub_key, &sub);
+        env.storage().persistent().extend_ttl(
+            &sub_key,
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
+
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("sub_asgn")),
+            (job_id, milestone_id, freelancer, sub_freelancer, amount),
+        );
+
+        Ok(())
+    }
+
+    /// Cancel an active sub-assignment before the milestone has been submitted.
+    ///
+    /// Only the main freelancer may cancel. Cancellation is blocked once the
+    /// milestone is in Submitted state (the client is about to release payment).
+    ///
+    /// # Errors
+    /// * `JobNotFound`       — job does not exist.
+    /// * `Unauthorized`      — caller is not the job's freelancer.
+    /// * `InvalidStatus`     — no active sub-assignment exists for this milestone,
+    ///                         or the milestone is already Submitted/Approved.
+    /// * `ContractPaused`    — the contract is paused.
+    pub fn cancel_sub_assignment(
+        env: Env,
+        job_id: u64,
+        milestone_id: u32,
+        freelancer: Address,
+    ) -> Result<(), EscrowError> {
+        bump_escrow_ttl(&env, job_id);
+        freelancer.require_auth();
+        require_not_paused(&env)?;
+
+        let job: Job = env
+            .storage()
+            .persistent()
+            .get(&get_job_key(job_id))
+            .ok_or(EscrowError::JobNotFound)?;
+        bump_job_ttl(&env, job_id);
+
+        if job.freelancer != freelancer {
+            return Err(EscrowError::Unauthorized);
+        }
+
+        let milestone = job
+            .milestones
+            .get(milestone_id)
+            .ok_or(EscrowError::MilestoneNotFound)?;
+
+        if milestone.status == MilestoneStatus::Submitted
+            || milestone.status == MilestoneStatus::PartiallyPaid
+            || milestone.status == MilestoneStatus::Approved
+        {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        let sub_key = DataKey::SubAssignment(job_id, milestone_id);
+        let mut sub: SubAssignment = env
+            .storage()
+            .persistent()
+            .get(&sub_key)
+            // Reuses InvalidStatus: no active sub-assignment to cancel.
+            .ok_or(EscrowError::InvalidStatus)?;
+
+        if sub.status != SubAssignmentStatus::Active {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        let sub_fl = sub.sub_freelancer.clone();
+        sub.status = SubAssignmentStatus::Cancelled;
+        env.storage().persistent().set(&sub_key, &sub);
+
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("sub_cncl")),
+            (job_id, milestone_id, sub_fl),
+        );
+
+        Ok(())
+    }
+
+    /// Returns the sub-assignment for a given (job_id, milestone_id), if one exists.
+    pub fn get_sub_assignment(env: Env, job_id: u64, milestone_id: u32) -> Option<SubAssignment> {
+        bump_escrow_ttl(&env, job_id);
+        env.storage()
+            .persistent()
+            .get(&DataKey::SubAssignment(job_id, milestone_id))
     }
 
     /// Get job details by ID.

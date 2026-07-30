@@ -1,10 +1,9 @@
-import { createServer, IncomingMessage } from "http";
+import { createServer } from "http";
 import jwt from "jsonwebtoken";
 import WebSocket, { WebSocketServer } from "ws";
 import { config } from "../../config";
 import {
   initYjsServer,
-  jobAuthCache,
   YJS_CLOSE_CODES,
   invalidateJobAuthCache,
 } from "../yjsServer";
@@ -18,7 +17,7 @@ jest.mock("@prisma/client", () => ({
     // evaluation at call-time, not at import-time) — avoids TDZ error because
     // the outer `const mockJobFindUnique` declaration is hoisted above jest.mock
     // but only initialized after the import phase completes.
-    job: { findUnique: (...args: any[]) => mockJobFindUnique(...args) },
+    job: { findUnique: (...args: unknown[]) => mockJobFindUnique(...args) },
   })),
 }));
 

@@ -17,8 +17,8 @@ jest.mock("@prisma/client", () => {
   };
 
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
-    NotificationType: { JOB_INVITATION: "JOB_INVITATION" } as any,
+    PrismaClient: jest.fn(() => mockPrisma),
+    NotificationType: { JOB_INVITATION: "JOB_INVITATION" },
   };
 });
 
@@ -30,7 +30,11 @@ jest.mock("../../services/notification.service", () => ({
 
 import { PrismaClient } from "@prisma/client";
 import { NotificationService } from "../../services/notification.service";
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as {
+  job: { findUnique: jest.Mock };
+  invitation: { findUnique: jest.Mock; findMany: jest.Mock; create: jest.Mock };
+  user: { findUnique: jest.Mock };
+};
 const jobMock = prismaMock.job;
 const invitationMock = prismaMock.invitation;
 const userMock = prismaMock.user;
@@ -53,7 +57,13 @@ function authHeader(userId = CLIENT_A_ID) {
 // Route user.findUnique by the fields each caller selects so the auth
 // middleware, freelancer lookup and inviter lookup each get the right shape.
 function setupUserLookups() {
-  userMock.findUnique.mockImplementation(({ where, select }: any) => {
+  userMock.findUnique.mockImplementation(({
+    where,
+    select,
+  }: {
+    where: { id: string };
+    select?: { emailVerified?: boolean; role?: boolean; username?: boolean };
+  }) => {
     if (select?.emailVerified) {
       // auth middleware
       return Promise.resolve({ role: "CLIENT", emailVerified: true });

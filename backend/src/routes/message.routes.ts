@@ -272,7 +272,7 @@ router.get("/",
 
     const conversationsMap = new Map();
 
-    allMessages.forEach((msg: any) => {
+    allMessages.forEach((msg) => {
       const otherUser = msg.senderId === req.userId ? msg.receiver : msg.sender;
       const key = `${otherUser.id}-${msg.jobId || "no-job"}`;
 

@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from "react";
 import { X, SlidersHorizontal, ChevronDown, ChevronUp } from "lucide-react";
 import { JobFilters } from "@/hooks/useJobFilters";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
-import { JOB_SKILLS } from "@/constants/jobs";
 import axios from "axios";
 
 const STATUSES = [
@@ -74,6 +73,8 @@ export default function FilterSidebar({
   const drawerRef = useRef<HTMLDivElement>(null);
   const [categories, setCategories] = useState<string[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
+  const [skills, setSkills] = useState<string[]>([]);
+  const [loadingSkills, setLoadingSkills] = useState(true);
 
   useFocusTrap(drawerRef, { open: isOpen, onClose });
 
@@ -94,6 +95,26 @@ export default function FilterSidebar({
     };
 
     fetchCategories();
+  }, []);
+
+  // Fetch skills from API
+  useEffect(() => {
+    const fetchSkills = async () => {
+      try {
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
+        const response = await axios.get<{ skills: { id: string; name: string }[] }>(`${API_URL}/skills`);
+        const skillNames = (response.data?.skills ?? []).map((s) => s.name);
+        setSkills(skillNames);
+      } catch (error) {
+        console.error("Failed to fetch skills:", error);
+        // Fallback to hardcoded skills if API fails
+        setSkills(["Rust", "TypeScript", "React", "Figma", "Solidity", "Node.js", "Python", "Go", "Next.js", "Tailwind", "PostgreSQL", "GraphQL", "Docker", "AWS"]);
+      } finally {
+        setLoadingSkills(false);
+      }
+    };
+
+    fetchSkills();
   }, []);
 
   const content = (
@@ -160,7 +181,7 @@ export default function FilterSidebar({
       {/* Skills */}
       <FilterSection title="Skills">
         <div className="flex flex-wrap gap-2">
-          {JOB_SKILLS.map((skill) => (
+          {skills.map((skill) => (
             <button
               key={skill}
               onClick={() => toggleArrayFilter("skills", skill)}
@@ -174,6 +195,9 @@ export default function FilterSidebar({
             </button>
           ))}
         </div>
+        {loadingSkills && (
+          <p className="text-xs text-theme-text mt-2">Loading skills...</p>
+        )}
       </FilterSection>
 
       {/* Status */}

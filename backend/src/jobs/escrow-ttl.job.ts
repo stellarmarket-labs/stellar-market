@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, NotificationType } from "@prisma/client";
 import { Keypair, TransactionBuilder, rpc, nativeToScVal, Contract, BASE_FEE } from "@stellar/stellar-sdk";
 import { config } from "../config";
 import { logger } from "../lib/logger";
@@ -47,22 +47,27 @@ async function checkEscrowTtls(): Promise<void> {
         const lastAlerts = await prisma.notification.findMany({
           where: {
             userId: job.clientId,
-            type: "ESCROW_TTL_WARNING" as any,
+            type: NotificationType.ESCROW_TTL_WARNING,
             createdAt: {
               gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
             },
           },
         });
 
-        const alreadyAlerted = lastAlerts.some(alert => {
-          const meta = alert.metadata as any;
-          return meta && meta.jobId === job.id;
+        const alreadyAlerted = lastAlerts.some((alert) => {
+          const meta = alert.metadata;
+          return (
+            meta !== null &&
+            typeof meta === "object" &&
+            !Array.isArray(meta) &&
+            (meta as { jobId?: unknown }).jobId === job.id
+          );
         });
 
         if (!alreadyAlerted) {
           await NotificationService.sendNotification({
             userId: job.clientId,
-            type: "ESCROW_TTL_WARNING" as any,
+            type: NotificationType.ESCROW_TTL_WARNING,
             title: "Escrow Expiry Warning",
             message: `The escrow for your job "${job.title}" has ${daysRemaining} days remaining before archival.`,
             metadata: { jobId: job.id, daysRemaining },

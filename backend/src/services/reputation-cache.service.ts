@@ -1,7 +1,6 @@
 import { BadgeTier } from "@prisma/client";
 import RedisClient from "../lib/redis";
 import { logger } from "../lib/logger";
-import { ReputationService } from "./reputation.service";
 import { config } from "../config";
 import { Contract, Address, rpc, scValToNative } from "@stellar/stellar-sdk";
 import { CircuitBreaker } from "../lib/circuit-breaker";
@@ -29,7 +28,6 @@ const CACHE_TTL_SECONDS = 1800; // 30 minutes
 const CACHE_REFRESH_INTERVAL_MS = 1500000; // 25 minutes (stale-while-revalidate)
 const LEADERBOARD_SIZE = 200;
 const CACHE_KEY_PREFIX = "rep:";
-const LEADERBOARD_CACHE_KEY = "rep:leaderboard";
 
 // Circuit breaker for reputation contract calls
 const reputationCB = new CircuitBreaker({
@@ -132,7 +130,13 @@ export class ReputationCacheService {
 
       // Check for successful simulation
       if ("result" in result && result.result) {
-        const native = scValToNative(result.result.retval) as any;
+        const native = scValToNative(result.result.retval) as {
+          tier?: unknown;
+          total_jobs?: number | bigint;
+          dispute_losses?: number | bigint;
+          endorsement_weight?: number | bigint;
+          value?: number | bigint;
+        };
 
           // Extract badge tier
           const tier = this.extractBadgeTier(native.tier);
@@ -272,7 +276,7 @@ export class ReputationCacheService {
           if (reputation) {
             await this.cacheReputation(entry.address, reputation);
           }
-        } catch (error) {
+        } catch {
           logger.debug(
             { address: entry.address },
             "Failed to warm cache for address"
@@ -339,9 +343,9 @@ export class ReputationCacheService {
 
         if (Array.isArray(native)) {
           reputationCB.onSuccess();
-          return native.map((entry: any) => ({
+          return native.map((entry: unknown[]) => ({
             address: String(entry[0] ?? ""),
-            score: BigInt(entry[1] ?? 0),
+            score: BigInt((entry[1] as string | number | bigint | boolean | undefined) ?? 0),
           }));
         }
       }

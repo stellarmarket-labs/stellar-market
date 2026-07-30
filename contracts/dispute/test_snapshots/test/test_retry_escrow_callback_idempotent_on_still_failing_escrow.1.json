@@ -3788,7 +3788,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'escrow_fail_simulated' from contract function 'Symbol(obj#1981)'"
+                  "string": "caught panic 'escrow_fail_simulated' from contract function 'Symbol(obj#1983)'"
                 },
                 {
                   "u64": 1
@@ -4013,7 +4013,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'escrow_fail_simulated' from contract function 'Symbol(obj#2157)'"
+                  "string": "caught panic 'escrow_fail_simulated' from contract function 'Symbol(obj#2161)'"
                 },
                 {
                   "u64": 1

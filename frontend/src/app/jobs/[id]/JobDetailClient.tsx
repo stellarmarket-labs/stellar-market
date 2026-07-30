@@ -43,6 +43,7 @@ import ShareMenu from "@/components/ShareMenu";
 import { useToast } from "@/components/Toast";
 import WalletAddress from "@/components/WalletAddress";
 import ApproveMilestoneModal from "@/components/ApproveMilestoneModal";
+import Avatar from "@/components/Avatar";
 
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
@@ -1129,18 +1130,11 @@ export default function JobDetailClient() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex items-center justify-center text-white text-sm font-bold overflow-hidden">
-                          {review.reviewer.avatarUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={review.reviewer.avatarUrl}
-                              alt={review.reviewer.username}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            review.reviewer.username.charAt(0).toUpperCase()
-                          )}
-                        </div>
+                        <Avatar
+                          src={review.reviewer.avatarUrl}
+                          alt={review.reviewer.username}
+                          size={36}
+                        />
                         <div>
                           <div className="text-sm font-medium text-theme-heading">
                             {review.reviewer.username}
@@ -1207,9 +1201,11 @@ export default function JobDetailClient() {
                         className="flex items-center justify-between p-4 bg-theme-bg rounded-lg border border-theme-border"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex items-center justify-center text-white text-sm font-bold">
-                            {app.freelancer.username.charAt(0).toUpperCase()}
-                          </div>
+                          <Avatar
+                            src={app.freelancer.avatarUrl}
+                            alt={app.freelancer.username}
+                            size={36}
+                          />
                           <div>
                             <p className="font-medium text-theme-heading text-sm">
                               {app.freelancer.username}
@@ -1545,7 +1541,11 @@ export default function JobDetailClient() {
               About the Client
             </h3>
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple" />
+              <Avatar
+                src={job.client.avatarUrl}
+                alt={job.client.username}
+                size={40}
+              />
               <div>
                 <div className="font-medium text-theme-heading">
                   {job.client.username}

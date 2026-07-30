@@ -1,9 +1,26 @@
+interface MockFraudPrismaClient {
+  user: { findUnique: jest.Mock };
+  job: { findUnique: jest.Mock; findMany: jest.Mock; count: jest.Mock };
+  transaction: { count: jest.Mock };
+  escrowEvent: { findMany: jest.Mock };
+  auditLog: { findMany: jest.Mock };
+  riskFlag: {
+    findUnique: jest.Mock;
+    upsert: jest.Mock;
+    update: jest.Mock;
+    findMany: jest.Mock;
+    count: jest.Mock;
+    groupBy: jest.Mock;
+  };
+  riskAssessment: { create: jest.Mock; findMany: jest.Mock };
+}
+
 // Mock the Prisma client so the service's `new PrismaClient()` returns a mock we
 // control. Enums are kept real via requireActual so the scoring maths and level
 // comparisons behave exactly as in production.
 jest.mock("@prisma/client", () => {
   const actual = jest.requireActual("@prisma/client");
-  const mockPrisma = {
+  const mockPrisma: MockFraudPrismaClient = {
     user: { findUnique: jest.fn() },
     job: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     transaction: { count: jest.fn() },
@@ -21,7 +38,7 @@ jest.mock("@prisma/client", () => {
   };
   return {
     ...actual,
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
     __mockPrisma: mockPrisma,
   };
 });
@@ -35,7 +52,7 @@ jest.mock("../../lib/logger", () => ({
   },
 }));
 
-import { PrismaClient, RiskLevel, RiskSubjectType, RiskTrigger, RiskFlagStatus } from "@prisma/client";
+import { RiskLevel, RiskSubjectType, RiskTrigger, RiskFlagStatus } from "@prisma/client";
 import { logger } from "../../lib/logger";
 import {
   computeUserSignals,
@@ -55,7 +72,9 @@ import {
 } from "../fraud-detection.service";
 
 // The mock object created inside jest.mock above.
-const prismaMock = (jest.requireMock("@prisma/client") as any).__mockPrisma;
+const prismaMock = (
+  jest.requireMock("@prisma/client") as unknown as { __mockPrisma: MockFraudPrismaClient }
+).__mockPrisma;
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;

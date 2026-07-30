@@ -1,5 +1,5 @@
 import { Router, Response, Request } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma, TransactionType } from "@prisma/client";
 import { z } from "zod";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { asyncHandler } from "../middleware/error";
@@ -14,7 +14,7 @@ import { config, MAX_PAGE_SIZE } from "../config";
 const router = Router();
 const prisma = new PrismaClient();
 
-const EARNING_TX_TYPES = ["RELEASE", "DISPUTE_PAYOUT"] as const;
+const EARNING_TX_TYPES = [TransactionType.RELEASE, TransactionType.DISPUTE_PAYOUT] as const;
 
 /**
  * Default reconciliation/export window: last 90 days.
@@ -284,9 +284,9 @@ router.get(
     }));
 
     // ── Transaction history (paginated) ──
-    const whereTx = {
+    const whereTx: Prisma.TransactionWhereInput = {
       toAddress: wallet,
-      type: { in: ["RELEASE", "DISPUTE_PAYOUT"] } as any,
+      type: { in: [TransactionType.RELEASE, TransactionType.DISPUTE_PAYOUT] },
     };
 
     const [transactions, totalTx] = await Promise.all([
@@ -387,7 +387,7 @@ async function loadDbEarnings(
   const txs = await prisma.transaction.findMany({
     where: {
       toAddress: wallet,
-      type: { in: [...EARNING_TX_TYPES] as any },
+      type: { in: [...EARNING_TX_TYPES] },
       createdAt: { gte: from, lte: to },
     },
     orderBy: { createdAt: "desc" },
@@ -626,7 +626,7 @@ router.get(
     const offset = parseInt(req.query.offset as string) || 0;
     const category = req.query.category as string | undefined;
 
-    const where: any = {
+    const where: Prisma.UserWhereInput = {
       role: "FREELANCER",
       averageRating: { gte: 4.0 },
       reviewCount: { gt: 0 },

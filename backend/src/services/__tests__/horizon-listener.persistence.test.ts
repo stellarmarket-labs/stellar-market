@@ -1,20 +1,33 @@
+import type { Prisma } from "@prisma/client";
+
+interface DlqEntry {
+  id: number;
+  cursor: string;
+  payload: unknown;
+  error: string;
+  attempt: number;
+  replayedAt: Date | null;
+}
+
 const mockState = {
   cursor: "0",
   cursorUpdates: [] as string[],
   lastIndexedLedger: null as number | null,
-  dlq: [] as Array<Record<string, any>>,
+  dlq: [] as DlqEntry[],
   jobFindFirstFailure: null as Error | null,
 };
 
 const mockGetEvents = jest.fn();
 const mockGetLatestLedger = jest.fn();
 
-const mockCursorUpsert = jest.fn(async ({ update, create }: any) => {
-  const next = update.cursor ?? create.cursor;
-  mockState.cursor = next;
-  mockState.cursorUpdates.push(next);
-  return { id: 1, cursor: mockState.cursor, updatedAt: new Date() };
-});
+const mockCursorUpsert = jest.fn(
+  async ({ update, create }: Prisma.HorizonCursorUpsertArgs) => {
+    const next = update.cursor ?? create.cursor;
+    mockState.cursor = next as string;
+    mockState.cursorUpdates.push(next as string);
+    return { id: 1, cursor: mockState.cursor, updatedAt: new Date() };
+  },
+);
 
 const mockJobFindFirst = jest.fn(async () => {
   if (mockState.jobFindFirstFailure) throw mockState.jobFindFirstFailure;
@@ -27,14 +40,18 @@ const mockPrisma = {
     findUnique: jest.fn(async () => ({ id: 1, cursor: mockState.cursor })),
   },
   syncState: {
-    upsert: jest.fn(async ({ update }: any) => {
-      mockState.lastIndexedLedger = update.lastIndexedLedger;
+    upsert: jest.fn(async ({ update }: Prisma.SyncStateUpsertArgs) => {
+      mockState.lastIndexedLedger = update.lastIndexedLedger as number;
       return { id: "default", lastIndexedLedger: mockState.lastIndexedLedger };
     }),
   },
   horizonDlq: {
-    create: jest.fn(async ({ data }: any) => {
-      const entry = { id: mockState.dlq.length + 1, ...data, replayedAt: null };
+    create: jest.fn(async ({ data }: Prisma.HorizonDlqCreateArgs) => {
+      const entry: DlqEntry = {
+        id: mockState.dlq.length + 1,
+        replayedAt: null,
+        ...(data as unknown as Omit<DlqEntry, "id" | "replayedAt">),
+      };
       mockState.dlq.push(entry);
       return entry;
     }),
@@ -149,10 +166,12 @@ describe("durable Horizon listener", () => {
     mockGetLatestLedger.mockResolvedValue({ sequence: 1_000 });
 
     const events = Array.from({ length: 10 }, (_, index) => makeEvent(String(101 + index)));
-    mockGetEvents.mockImplementation(async ({ pagination }: any) => {
-      const offset = Number(pagination.cursor) - 100;
-      return { events: events.slice(offset, offset + 5) };
-    });
+    mockGetEvents.mockImplementation(
+      async ({ cursor }: { cursor: string; limit: number }) => {
+        const offset = Number(cursor) - 100;
+        return { events: events.slice(offset, offset + 5) };
+      },
+    );
 
     let service = await import("../horizon-listener.service");
     await service.pollHorizonOnce();
@@ -161,7 +180,7 @@ describe("durable Horizon listener", () => {
     service = await import("../horizon-listener.service");
     await service.pollHorizonOnce();
 
-    expect(mockGetEvents.mock.calls.map(([request]) => request.pagination.cursor)).toEqual([
+    expect(mockGetEvents.mock.calls.map(([request]) => request.cursor)).toEqual([
       "100",
       "105",
     ]);
@@ -175,7 +194,9 @@ describe("durable Horizon listener", () => {
     const service = await import("../horizon-listener.service");
 
     await service.processHorizonEvent(
-      makeEvent("42", ["escrow", "created"], [42]) as any,
+      makeEvent("42", ["escrow", "created"], [42]) as unknown as Parameters<
+        typeof service.processHorizonEvent
+      >[0],
     );
 
     expect(mockJobFindFirst).toHaveBeenCalledTimes(3);

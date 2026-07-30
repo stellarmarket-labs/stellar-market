@@ -31,6 +31,7 @@ import ProfileSkeleton from "@/components/skeletons/ProfileSkeleton";
 import WalletAddress from "@/components/WalletAddress";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import InviteToJobModal from "@/components/InviteToJobModal";
+import Avatar from "@/components/Avatar";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
 // Base URL without /api for serving static files
@@ -188,20 +189,13 @@ export default function ProfileClient() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       <div className="flex flex-col md:flex-row gap-8 items-start mb-12">
-        <div className="w-32 h-32 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex-shrink-0 flex items-center justify-center text-4xl overflow-hidden border-4 border-theme-card shadow-xl">
-          {profile.avatarUrl ? (
-            <Image
-              src={profile.avatarUrl}
-              alt={profile.username}
-              width={128}
-              height={128}
-              className="w-full h-full object-cover"
-              unoptimized
-            />
-          ) : (
-            <User size={64} className="text-white/50" />
-          )}
-        </div>
+        <Avatar
+          src={profile.avatarUrl}
+          alt={profile.username}
+          size={128}
+          unoptimized
+          className="flex-shrink-0 border-4 border-theme-card shadow-xl"
+        />
 
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-4 mb-4">
@@ -480,7 +474,11 @@ export default function ProfileClient() {
                   <div key={review.id} className="card">
                     <div className="flex justify-between items-start mb-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex-shrink-0" />
+                        <Avatar
+                          src={review.reviewer.avatarUrl}
+                          alt={review.reviewer.username}
+                          size={32}
+                        />
                         <div>
                           <div className="font-semibold text-theme-heading">
                             {review.reviewer.username}

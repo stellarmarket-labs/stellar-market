@@ -19,12 +19,11 @@ let currentUserId = "CLIENT_ID_PLACEHOLDER";
 
 jest.mock("../../middleware/auth", () => ({
   // Bypass real JWT validation; just inject the test-controlled userId
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  authenticate: jest.fn((req: any, _res: any, next: any) => {
+  authenticate: jest.fn((req, _res, next) => {
     req.userId = currentUserId;
     next();
   }),
-  walletSourceGuard: jest.fn((_req: any, _res: any, next: any) => next()),
+  walletSourceGuard: jest.fn((_req, _res, next) => next()),
 }));
 
 // ── Contract service mock ─────────────────────────────────────────────────────

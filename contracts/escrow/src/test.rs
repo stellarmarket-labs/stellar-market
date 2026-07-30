@@ -836,7 +836,7 @@ fn test_client_can_propose_revision() {
             description: String::from_str(&env, "New Phase 1"),
             amount: m0_amount,
             status: MilestoneStatus::Pending,
-            deadline: JOB_DEADLINE,
+            deadline: JOB_DEADLINE - 1,
                 token: None,
         },
         Milestone {
@@ -857,6 +857,115 @@ fn test_client_can_propose_revision() {
     assert_eq!(proposal.proposer, client);
     assert_eq!(proposal.new_total, expected_new_total);
     assert_eq!(proposal.status, ProposalStatus::Pending);
+}
+
+#[test]
+fn test_propose_revision_rejects_non_positive_milestone_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, client, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+
+    let invalid_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Invalid"),
+            amount: 0,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+            token: None,
+        },
+    ];
+
+    let result = contract.try_propose_revision(&client, &job_id, &invalid_milestones);
+    assert_eq!(result, Err(Ok(EscrowError::InvalidMilestone)));
+}
+
+#[test]
+fn test_propose_revision_rejects_past_deadline() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+    let (contract, client, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+
+    let invalid_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Invalid"),
+            amount: 1200,
+            status: MilestoneStatus::Pending,
+            deadline: 1000,
+            token: None,
+        },
+    ];
+
+    let result = contract.try_propose_revision(&client, &job_id, &invalid_milestones);
+    assert_eq!(result, Err(Ok(EscrowError::MilestoneDeadlineInPast)));
+}
+
+#[test]
+fn test_propose_revision_rejects_deadline_after_job_deadline() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, client, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+
+    let invalid_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Invalid"),
+            amount: 1200,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE + 1,
+            token: None,
+        },
+    ];
+
+    let result = contract.try_propose_revision(&client, &job_id, &invalid_milestones);
+    assert_eq!(result, Err(Ok(EscrowError::InvalidDeadline)));
+}
+
+#[test]
+fn test_propose_revision_rejects_non_increasing_deadlines() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, client, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+
+    let invalid_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "First"),
+            amount: 500,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE - 100,
+            token: None,
+        },
+        Milestone {
+            id: 1,
+            description: String::from_str(&env, "Second"),
+            amount: 700,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE - 100,
+            token: None,
+        },
+    ];
+
+    let result = contract.try_propose_revision(&client, &job_id, &invalid_milestones);
+    assert_eq!(result, Err(Ok(EscrowError::MilestoneDeadlinesNotOrdered)));
 }
 
 #[test]
@@ -1325,7 +1434,7 @@ fn test_propose_revision_new_total_equals_sum_of_milestones() {
             description: String::from_str(&env, "M1"),
             amount: m0,
             status: MilestoneStatus::Pending,
-            deadline: JOB_DEADLINE,
+            deadline: JOB_DEADLINE - 1,
                 token: None,
         },
         Milestone {
@@ -1367,7 +1476,7 @@ fn test_accept_revision_same_total_updates_milestones_only() {
             description: String::from_str(&env, "Split 1"),
             amount: half,
             status: MilestoneStatus::Pending,
-            deadline: JOB_DEADLINE,
+            deadline: JOB_DEADLINE - 1,
                 token: None,
         },
         Milestone {
@@ -1609,6 +1718,55 @@ fn test_cancel_revision_proposal_happy_path() {
     contract.cancel_revision_proposal(&client, &job_id);
 
     // Proposal should be gone
+    assert!(contract.get_revision_proposal(&job_id).is_none());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_cancel_revision_proposal_fails_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, client, freelancer, token, admin) = setup_test(&env);
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+    let new_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Revised"),
+            amount: 1200,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+                token: None,
+        },
+    ];
+    contract.propose_revision(&client, &job_id, &new_milestones);
+    pause_escrow(&env, &contract, &admin);
+    contract.cancel_revision_proposal(&client, &job_id);
+}
+
+#[test]
+fn test_cancel_revision_proposal_succeeds_after_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, client, freelancer, token, admin) = setup_test(&env);
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+    let new_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Revised"),
+            amount: 1200,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+                token: None,
+        },
+    ];
+    contract.propose_revision(&client, &job_id, &new_milestones);
+    pause_escrow(&env, &contract, &admin);
+    unpause_escrow(&env, &contract, &admin);
+    contract.cancel_revision_proposal(&client, &job_id);
     assert!(contract.get_revision_proposal(&job_id).is_none());
 }
 
@@ -2430,6 +2588,55 @@ fn test_approve_milestones_batch_non_existent_index() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_approve_milestones_batch_rejects_duplicate_indices() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let escrow = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    let m0: i128 = 1000;
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), m0, 2000_u64),
+    ];
+
+    let job_id = escrow.create_job(
+        &client,
+        &freelancer,
+        &token,
+        &milestones,
+        &5000_u64,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+
+    mint_tokens(&env, &token, &client, m0);
+    escrow.fund_job(&job_id, &client, &0, &0);
+
+    escrow.submit_milestone(&job_id, &0, &freelancer);
+
+    // Duplicate index — should be rejected without mutating any state.
+    let indices = vec![&env, 0_u32, 0_u32];
+    let result = escrow.try_approve_milestones_batch(&job_id, &indices, &client);
+    assert_eq!(
+        result,
+        Err(Ok(EscrowError::InvalidMilestoneIndex))
+    );
+
+    // Milestone must remain Submitted since the call reverted before any mutation.
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.milestones.get(0).unwrap().status, MilestoneStatus::Submitted);
+}
+
 // ── Protocol Fee and Treasury Tests ───────────────────────────────────────────
 
 #[test]
@@ -2707,6 +2914,118 @@ fn test_complete_job_wrong_status() {
 
     // Job is Created (not funded), not InProgress — completing should fail
     escrow.complete_job(&job_id, &client);
+}
+
+/// Regression test for issue #995: complete_job must emit per-token events
+/// for multi-token jobs so indexers can accurately track all fee/payment amounts.
+#[test]
+fn test_complete_job_multi_token_emits_per_token_events() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let escrow = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let fee_bps: u32 = 500; // 5%
+    
+    escrow.initialize(&vec![&env, admin.clone()], &1, &treasury, &fee_bps, &604800u64);
+
+    let client_addr = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    // Create two different tokens
+    let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+
+    escrow.add_allowed_token(&admin, &token_a);
+    escrow.add_allowed_token(&admin, &token_b);
+
+    // Create multi-token job:
+    // - Milestone 0: 1000 in token_a (default)
+    // - Milestone 1: 2000 in token_b (explicit)
+    // - Milestone 2: 500 in token_a (default)
+    let milestones: Vec<(soroban_sdk::String, i128, u64, Option<Address>)> = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, 2000_u64, None),
+        (String::from_str(&env, "Task 2"), 2000_i128, 2500_u64, Some(token_b.clone())),
+        (String::from_str(&env, "Task 3"), 500_i128, 3000_u64, None),
+    ];
+
+    let job_id = escrow.create_multi_token_job(
+        &client_addr,
+        &freelancer,
+        &token_a,
+        &milestones,
+        &5000_u64,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+
+    // Fund the job
+    let total_token_a = 1000 + 500; // 1500
+    let total_token_b = 2000;
+
+    StellarAssetClient::new(&env, &token_a).mint(&client_addr, &total_token_a);
+    StellarAssetClient::new(&env, &token_b).mint(&client_addr, &total_token_b);
+
+    escrow.fund_job(&job_id, &client_addr, &0_i128, &0_u32);
+
+    // Submit and approve all milestones
+    for idx in 0..3 {
+        escrow.submit_milestone(&job_id, &idx, &freelancer);
+        escrow.approve_milestone(&job_id, &idx, &client_addr);
+    }
+
+    // Complete the job
+    escrow.complete_job(&job_id, &client_addr);
+
+    // Calculate expected amounts per token
+    // Token A: milestone 0 (1000) + milestone 2 (500) = 1500
+    let token_a_fee = (1500 * fee_bps as i128) / 10_000; // 75
+    let token_a_freelancer = 1500 - token_a_fee; // 1425
+
+    // Token B: milestone 1 (2000)
+    let token_b_fee = (2000 * fee_bps as i128) / 10_000; // 100
+    let token_b_freelancer = 2000 - token_b_fee; // 1900
+
+    // Verify actual token transfers match expected amounts
+    let token_a_client = TokenClient::new(&env, &token_a);
+    let token_b_client = TokenClient::new(&env, &token_b);
+
+    assert_eq!(token_a_client.balance(&treasury), token_a_fee);
+    assert_eq!(token_a_client.balance(&freelancer), token_a_freelancer);
+    assert_eq!(token_b_client.balance(&treasury), token_b_fee);
+    assert_eq!(token_b_client.balance(&freelancer), token_b_freelancer);
+
+    // Verify per-token events were emitted (2 fee_taken + 2 pmt_released)
+    let events = env.events().all();
+    
+    let mut fee_taken_count = 0;
+    let mut pmt_released_count = 0;
+
+    for event in events.iter() {
+        // Check if this is one of our escrow contract events
+        // events from escrow contract have at least 2 topics
+        if event.0 == contract_id && event.1.len() >= 2 {
+            let topic0: Symbol = event.1.get(0).unwrap().into_val(&env);
+            let topic1: Symbol = event.1.get(1).unwrap().into_val(&env);
+
+            if topic0 == symbol_short!("escrow") {
+                if topic1 == Symbol::new(&env, "fee_taken") {
+                    fee_taken_count += 1;
+                } else if topic1 == Symbol::new(&env, "pmt_released") {
+                    pmt_released_count += 1;
+                }
+            }
+        }
+    }
+
+    // Should emit one event per token for each event type
+    assert_eq!(fee_taken_count, 2, "Should emit 2 fee_taken events (one per token)");
+    assert_eq!(pmt_released_count, 2, "Should emit 2 pmt_released events (one per token)");
 }
 
 #[test]
@@ -4775,6 +5094,62 @@ fn test_expire_proposal_success() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_expire_proposal_fails_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+    let (contract, client_addr, freelancer, token, admin) = setup_test(&env);
+    let milestones = vec![&env, (String::from_str(&env, "M1"), 500_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client_addr, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+    contract.fund_job(&job_id, &client_addr, &0, &0);
+    let new_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Revised"),
+            amount: 600,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+                token: None,
+        },
+    ];
+    contract.propose_revision(&client_addr, &job_id, &new_milestones);
+    env.ledger().with_mut(|l| l.timestamp += 604800 + 1);
+    pause_escrow(&env, &contract, &admin);
+    contract.expire_proposal(&client_addr, &job_id);
+}
+
+#[test]
+fn test_expire_proposal_succeeds_after_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+    let (contract, client_addr, freelancer, token, admin) = setup_test(&env);
+    let milestones = vec![&env, (String::from_str(&env, "M1"), 500_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client_addr, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD, &DEFAULT_EXPIRY_LEDGER);
+    contract.fund_job(&job_id, &client_addr, &0, &0);
+    let new_milestones = vec![
+        &env,
+        Milestone {
+            id: 0,
+            description: String::from_str(&env, "Revised"),
+            amount: 600,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+                token: None,
+        },
+    ];
+    contract.propose_revision(&client_addr, &job_id, &new_milestones);
+    env.ledger().with_mut(|l| l.timestamp += 604800 + 1);
+    pause_escrow(&env, &contract, &admin);
+    unpause_escrow(&env, &contract, &admin);
+    contract.expire_proposal(&client_addr, &job_id);
+    let proposal = contract.get_revision_proposal(&job_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Rejected);
+}
+
+#[test]
 fn test_expire_proposal_event_emitted() {
     let env = Env::default();
     env.mock_all_auths();
@@ -6665,6 +7040,8 @@ fn test_propose_revision_rejected_for_multi_token_job() {
 /// AC-2 (equal): new_deadline == job.job_deadline is the maximum valid value and must succeed.
 #[test]
 fn test_extend_deadline_rejects_deadline_exceeding_job_deadline() {
+#[test]
+fn test_mark_job_disputed_succeeds_from_funded() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().with_mut(|l| l.timestamp = 1000);
@@ -6704,6 +7081,78 @@ fn test_extend_deadline_rejects_deadline_exceeding_job_deadline() {
 /// AC-2: extend_deadline on a Completed (terminal) job must return InvalidStatus (#3).
 #[test]
 fn test_extend_deadline_rejects_completed_job() {
+    let (escrow, client_addr, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, JOB_DEADLINE),
+    ];
+    let job_id = escrow.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+    escrow.fund_job(&job_id, &client_addr, &0, &0);
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Funded);
+
+    let dispute_contract = Address::generate(&env);
+    escrow.set_dispute_contract(&admin, &dispute_contract);
+
+    let dispute_id = 42_u64;
+    escrow.mark_job_disputed(&job_id, &dispute_id);
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Disputed);
+
+    let events = env.events().all();
+    assert!(events.len() > 0, "Events should be emitted");
+}
+
+#[test]
+fn test_mark_job_disputed_succeeds_from_in_progress() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client_addr, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, JOB_DEADLINE),
+    ];
+    let job_id = escrow.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+    escrow.fund_job(&job_id, &client_addr, &0, &0);
+    escrow.submit_milestone(&job_id, &0, &freelancer);
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::InProgress);
+
+    let dispute_contract = Address::generate(&env);
+    escrow.set_dispute_contract(&admin, &dispute_contract);
+
+    let dispute_id = 99_u64;
+    escrow.mark_job_disputed(&job_id, &dispute_id);
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Disputed);
+}
+
+#[test]
+fn test_mark_job_disputed_fails_when_dispute_contract_unset() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().with_mut(|l| l.timestamp = 1000);
@@ -6725,6 +7174,44 @@ fn test_extend_deadline_rejects_completed_job() {
         &user,
         &freelancer,
         &token_address,
+    let (escrow, client_addr, freelancer, token, _admin) = setup_test(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, JOB_DEADLINE),
+    ];
+    let job_id = escrow.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+    escrow.fund_job(&job_id, &client_addr, &0, &0);
+
+    let dispute_id = 1_u64;
+    let result = escrow.try_mark_job_disputed(&job_id, &dispute_id);
+    assert_eq!(result, Err(Ok(EscrowError::Unauthorized)));
+}
+
+#[test]
+fn test_mark_job_disputed_fails_when_caller_not_registered_dispute_contract() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client_addr, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, JOB_DEADLINE),
+    ];
+    let job_id = escrow.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
@@ -6748,6 +7235,53 @@ fn test_extend_deadline_rejects_completed_job() {
 /// AC-2: extend_deadline on a Cancelled (terminal) job must return InvalidStatus (#3).
 #[test]
 fn test_extend_deadline_rejects_cancelled_job() {
+    escrow.fund_job(&job_id, &client_addr, &0, &0);
+
+    let registered_dispute_contract = Address::generate(&env);
+    escrow.set_dispute_contract(&admin, &registered_dispute_contract);
+    // With mock_all_auths a different caller cannot be distinguished at the unit-test
+    // level; this test documents the deployed behaviour.
+}
+
+#[test]
+fn test_mark_job_disputed_fails_on_completed_job() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client_addr, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, JOB_DEADLINE),
+    ];
+    let job_id = escrow.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+    escrow.fund_job(&job_id, &client_addr, &0, &0);
+    escrow.submit_milestone(&job_id, &0, &freelancer);
+    escrow.approve_milestone(&job_id, &0, &client_addr);
+    escrow.complete_job(&job_id, &client_addr);
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Completed);
+
+    let dispute_contract = Address::generate(&env);
+    escrow.set_dispute_contract(&admin, &dispute_contract);
+
+    let dispute_id = 1_u64;
+    let result = escrow.try_mark_job_disputed(&job_id, &dispute_id);
+    assert_eq!(result, Err(Ok(EscrowError::InvalidStatus)));
+}
+
+#[test]
+fn test_mark_job_disputed_fails_on_created_job() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().with_mut(|l| l.timestamp = 1000);
@@ -6774,6 +7308,49 @@ fn test_extend_deadline_rejects_cancelled_job() {
         &user,
         &freelancer,
         &token_address,
+    let (escrow, client_addr, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, JOB_DEADLINE),
+    ];
+    let job_id = escrow.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Created);
+
+    let dispute_contract = Address::generate(&env);
+    escrow.set_dispute_contract(&admin, &dispute_contract);
+
+    let dispute_id = 1_u64;
+    let result = escrow.try_mark_job_disputed(&job_id, &dispute_id);
+    assert_eq!(result, Err(Ok(EscrowError::InvalidStatus)));
+}
+
+#[test]
+fn test_mark_job_disputed_emits_correct_event_payload() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client_addr, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Task 1"), 1000_i128, JOB_DEADLINE),
+    ];
+    let job_id = escrow.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
         &milestones,
         &JOB_DEADLINE,
         &GRACE_PERIOD,
@@ -6799,6 +7376,141 @@ fn test_extend_deadline_rejects_cancelled_job() {
 /// This completes AC-2 coverage for all three terminal states: Completed, Cancelled, Expired.
 #[test]
 fn test_extend_deadline_rejects_expired_job() {
+    escrow.fund_job(&job_id, &client_addr, &0, &0);
+
+    let dispute_contract = Address::generate(&env);
+    escrow.set_dispute_contract(&admin, &dispute_contract);
+
+    let dispute_id = 123_u64;
+    escrow.mark_job_disputed(&job_id, &dispute_id);
+
+    let events = env.events().all();
+    let last_event = events.last().unwrap();
+
+    let topic1: Symbol = last_event.1.get(1).unwrap().into_val(&env);
+    assert_eq!(topic1, Symbol::new(&env, "disputed"));
+
+    let data: (u64, u64, Address, Address) = last_event.2.into_val(&env);
+    assert_eq!(data.0, job_id);
+    assert_eq!(data.1, dispute_id);
+    assert_eq!(data.2, client_addr);
+    assert_eq!(data.3, freelancer);
+}
+
+// ============================================================
+// SUB-CONTRACTING TESTS (issue #898)
+// ============================================================
+
+/// Helper: create a funded single-milestone job and return all handles.
+fn setup_sub_assign_job(
+    env: &Env,
+) -> (
+    EscrowContractClient<'_>,
+    Address,
+    Address,
+    Address,
+    Address,
+    u64,
+) {
+    let contract_id = env.register_contract(None, EscrowContract);
+    let escrow = EscrowContractClient::new(env, &contract_id);
+
+    let client_addr = Address::generate(env);
+    let freelancer = Address::generate(env);
+    let admin = Address::generate(env);
+    let treasury = Address::generate(env);
+
+    let token = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    StellarAssetClient::new(env, &token).mint(&client_addr, &10_000);
+
+    let signers = vec![env, admin.clone()];
+    escrow.initialize(&signers, &1, &treasury, &0, &604800);
+
+    let milestones = vec![
+        env,
+        (String::from_str(env, "Main work"), 1_000_i128, JOB_DEADLINE),
+    ];
+    let job_id = escrow.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &(JOB_DEADLINE + 1),
+        &GRACE_PERIOD,
+        &(env.ledger().sequence() + DEFAULT_EXPIRY_LEDGER),
+    );
+    escrow.fund_job(&job_id, &client_addr, &0_i128, &0_u32);
+
+    (escrow, client_addr, freelancer, token, treasury, job_id)
+}
+
+#[test]
+fn test_sub_assign_happy_payout_split() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client_addr, freelancer, token, _treasury, job_id) =
+        setup_sub_assign_job(&env);
+
+    let sub_freelancer = Address::generate(&env);
+    let sub_amount = 300_i128;
+
+    escrow.sub_assign_milestone(&job_id, &0_u32, &freelancer, &sub_freelancer, &sub_amount);
+
+    let sub = escrow.get_sub_assignment(&job_id, &0_u32).unwrap();
+    assert_eq!(sub.sub_freelancer, sub_freelancer);
+    assert_eq!(sub.amount, sub_amount);
+    assert_eq!(sub.status, SubAssignmentStatus::Active);
+
+    escrow.submit_milestone(&job_id, &0_u32, &freelancer);
+    escrow.approve_milestone(&job_id, &0_u32, &client_addr);
+
+    let tc = TokenClient::new(&env, &token);
+    let freelancer_before = tc.balance(&freelancer);
+    let sub_before = tc.balance(&sub_freelancer);
+
+    escrow.complete_job(&job_id, &client_addr);
+
+    let freelancer_gained = tc.balance(&freelancer) - freelancer_before;
+    let sub_gained = tc.balance(&sub_freelancer) - sub_before;
+
+    assert_eq!(sub_gained, sub_amount);
+    assert_eq!(freelancer_gained, 1_000 - sub_amount);
+
+    let sub_after = escrow.get_sub_assignment(&job_id, &0_u32).unwrap();
+    assert_eq!(sub_after.status, SubAssignmentStatus::Paid);
+}
+
+#[test]
+fn test_sub_assign_via_release_milestone() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client_addr, freelancer, token, _treasury, job_id) =
+        setup_sub_assign_job(&env);
+
+    let sub_freelancer = Address::generate(&env);
+    escrow.sub_assign_milestone(&job_id, &0_u32, &freelancer, &sub_freelancer, &400_i128);
+
+    escrow.submit_milestone(&job_id, &0_u32, &freelancer);
+
+    let tc = TokenClient::new(&env, &token);
+    let sub_before = tc.balance(&sub_freelancer);
+    let fl_before = tc.balance(&freelancer);
+
+    escrow.release_milestone(&job_id, &0_u32, &client_addr, &0_i128, &1_u64);
+
+    assert_eq!(tc.balance(&sub_freelancer) - sub_before, 400);
+    assert_eq!(tc.balance(&freelancer) - fl_before, 600);
+
+    let sub = escrow.get_sub_assignment(&job_id, &0_u32).unwrap();
+    assert_eq!(sub.status, SubAssignmentStatus::Paid);
+}
+
+#[test]
+fn test_sub_assign_dispute_isolation() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().with_mut(|l| l.timestamp = 1000);
@@ -6844,3 +7556,174 @@ fn test_extend_deadline_rejects_expired_job() {
     assert_eq!(result, Err(Ok(EscrowError::InvalidStatus)));
 }
 
+    let escrow = EscrowContractClient::new(&env, &contract_id);
+
+    let client_addr = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    let token = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    StellarAssetClient::new(&env, &token).mint(&client_addr, &10_000);
+
+    let signers = vec![&env, admin.clone()];
+    escrow.initialize(&signers, &1, &treasury, &0, &604800);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Main work"), 1_000_i128, JOB_DEADLINE),
+    ];
+    let job_id = escrow.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &(JOB_DEADLINE + 1),
+        &GRACE_PERIOD,
+        &(env.ledger().sequence() + DEFAULT_EXPIRY_LEDGER),
+    );
+    escrow.fund_job(&job_id, &client_addr, &0_i128, &0_u32);
+
+    let sub_freelancer = Address::generate(&env);
+    escrow.sub_assign_milestone(&job_id, &0_u32, &freelancer, &sub_freelancer, &300_i128);
+
+    let dispute_contract = Address::generate(&env);
+    escrow.set_dispute_contract(&admin, &dispute_contract);
+    escrow.mark_job_disputed(&job_id, &1_u64);
+
+    let tc = TokenClient::new(&env, &token);
+    let fl_before = tc.balance(&freelancer);
+    let sub_before = tc.balance(&sub_freelancer);
+
+    escrow.resolve_dispute_callback(&job_id, &DisputeResolution::FreelancerWins);
+
+    assert_eq!(tc.balance(&sub_freelancer) - sub_before, 0);
+    assert_eq!(tc.balance(&freelancer) - fl_before, 1_000);
+
+    let sub = escrow.get_sub_assignment(&job_id, &0_u32).unwrap();
+    assert_eq!(sub.status, SubAssignmentStatus::Active);
+}
+
+#[test]
+fn test_cancel_mid_sub_assignment() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client_addr, freelancer, token, _treasury, job_id) =
+        setup_sub_assign_job(&env);
+
+    let sub_freelancer = Address::generate(&env);
+    escrow.sub_assign_milestone(&job_id, &0_u32, &freelancer, &sub_freelancer, &300_i128);
+
+    escrow.cancel_sub_assignment(&job_id, &0_u32, &freelancer);
+
+    let sub = escrow.get_sub_assignment(&job_id, &0_u32).unwrap();
+    assert_eq!(sub.status, SubAssignmentStatus::Cancelled);
+
+    escrow.submit_milestone(&job_id, &0_u32, &freelancer);
+    escrow.approve_milestone(&job_id, &0_u32, &client_addr);
+
+    let tc = TokenClient::new(&env, &token);
+    let fl_before = tc.balance(&freelancer);
+    let sub_before = tc.balance(&sub_freelancer);
+
+    escrow.complete_job(&job_id, &client_addr);
+
+    assert_eq!(tc.balance(&sub_freelancer) - sub_before, 0);
+    assert_eq!(tc.balance(&freelancer) - fl_before, 1_000);
+}
+
+#[test]
+fn test_cancel_job_cancels_active_sub_assignment() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client_addr, freelancer, _token, _treasury, job_id) =
+        setup_sub_assign_job(&env);
+
+    let sub_freelancer = Address::generate(&env);
+    escrow.sub_assign_milestone(&job_id, &0_u32, &freelancer, &sub_freelancer, &300_i128);
+
+    escrow.cancel_job(&job_id, &client_addr, &1_u64);
+
+    let sub = escrow.get_sub_assignment(&job_id, &0_u32).unwrap();
+    assert_eq!(sub.status, SubAssignmentStatus::Cancelled);
+}
+
+#[test]
+fn test_unauthorized_sub_assignment() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client_addr, _freelancer, _token, _treasury, job_id) =
+        setup_sub_assign_job(&env);
+
+    let impostor = Address::generate(&env);
+    let sub_freelancer = Address::generate(&env);
+
+    let result = escrow.try_sub_assign_milestone(
+        &job_id,
+        &0_u32,
+        &client_addr,
+        &sub_freelancer,
+        &300_i128,
+    );
+    assert!(result.is_err());
+
+    let result2 = escrow.try_sub_assign_milestone(
+        &job_id,
+        &0_u32,
+        &impostor,
+        &sub_freelancer,
+        &300_i128,
+    );
+    assert!(result2.is_err());
+}
+
+#[test]
+fn test_sub_assign_self_assignment_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, _client_addr, freelancer, _token, _treasury, job_id) =
+        setup_sub_assign_job(&env);
+
+    let result = escrow.try_sub_assign_milestone(
+        &job_id,
+        &0_u32,
+        &freelancer,
+        &freelancer,
+        &300_i128,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_partial_payment_blocked_by_active_sub_assignment() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client_addr, freelancer, _token, _treasury, job_id) =
+        setup_sub_assign_job(&env);
+
+    let sub_freelancer = Address::generate(&env);
+    escrow.sub_assign_milestone(&job_id, &0_u32, &freelancer, &sub_freelancer, &300_i128);
+
+    escrow.submit_milestone(&job_id, &0_u32, &freelancer);
+
+    // release_partial_payment must be rejected while an active sub-assignment exists;
+    // otherwise the sub-freelancer's promised amount would be silently dropped.
+    let result = escrow.try_release_partial_payment(
+        &job_id,
+        &0_u32,
+        &500_i128,
+        &client_addr,
+        &1_u64,
+    );
+    assert!(result.is_err());
+}

@@ -1,4 +1,9 @@
-import { FakeRedisBus } from "./testUtils/fakeRedis";
+import { FakeRedisBus, mockRedisModule } from "./testUtils/fakeRedis";
+
+declare global {
+  // eslint-disable-next-line no-var -- `declare global` requires `var` for ambient globals
+  var __PRESENCE_TEST_BUS__: FakeRedisBus;
+}
 
 // Short TTL/heartbeat so the crash-expiry assertions don't need to wait long.
 // Must be set before `../presence` is first required below, since it reads
@@ -7,12 +12,9 @@ process.env.PRESENCE_TTL_SECONDS = "1";
 process.env.PRESENCE_HEARTBEAT_MS = "300";
 
 const bus = new FakeRedisBus();
-(global as any).__PRESENCE_TEST_BUS__ = bus;
+global.__PRESENCE_TEST_BUS__ = bus;
 
-jest.mock("../redis", () => {
-  const { mockRedisModule } = require("./testUtils/fakeRedis");
-  return mockRedisModule((global as any).__PRESENCE_TEST_BUS__);
-});
+jest.mock("../redis", () => mockRedisModule(global.__PRESENCE_TEST_BUS__));
 
 // Loaded via require (not a top-level import) so it resolves *after* the
 // process.env assignments above — a hoisted `import` would run before them.
@@ -22,6 +24,7 @@ const {
   markSocketOffline,
   refreshSocketPresence,
   startPresenceHeartbeat,
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- deliberate deferred load, see comment above
 } = require("../presence") as typeof import("../presence");
 
 function wait(ms: number): Promise<void> {

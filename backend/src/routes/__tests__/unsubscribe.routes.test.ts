@@ -1,7 +1,15 @@
 import request from "supertest";
 import express from "express";
-import jwt from "jsonwebtoken";
+import jwt, { JwtPayload, SignOptions } from "jsonwebtoken";
 import { config } from "../../config";
+
+interface MockNotificationPreference {
+  upsert: jest.Mock;
+}
+
+interface MockPrismaClient {
+  notificationPreference: MockNotificationPreference;
+}
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 jest.mock("@prisma/client", () => {
@@ -10,13 +18,13 @@ jest.mock("@prisma/client", () => {
       upsert: jest.fn().mockResolvedValue({ userId: "user-1", marketingEmails: false }),
     },
   };
-  return { PrismaClient: jest.fn(() => mockPrisma) as any };
+  return { PrismaClient: jest.fn(() => mockPrisma) };
 });
 
 import { PrismaClient } from "@prisma/client";
 import unsubscribeRouter from "../unsubscribe.routes";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 const prefMock = prismaMock.notificationPreference;
 
 const app = express();
@@ -26,7 +34,7 @@ afterEach(() => jest.clearAllMocks());
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 function makeToken(payload: Record<string, unknown>, expiresIn: string | number = "90d") {
-  return jwt.sign(payload, config.jwtSecret, { expiresIn } as any);
+  return jwt.sign(payload, config.jwtSecret, { expiresIn } as SignOptions);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -72,10 +80,10 @@ describe("GET /api/unsubscribe (#800)", () => {
 
 // ─── EmailService.generateUnsubscribeToken ────────────────────────────────────
 describe("EmailService.generateUnsubscribeToken (#800)", () => {
-  it("generates a verifiable JWT with userId and type=unsubscribe", () => {
-    const { EmailService } = require("../../services/email.service");
+  it("generates a verifiable JWT with userId and type=unsubscribe", async () => {
+    const { EmailService } = await import("../../services/email.service");
     const token = EmailService.generateUnsubscribeToken("user-42");
-    const payload = jwt.verify(token, config.jwtSecret) as any;
+    const payload = jwt.verify(token, config.jwtSecret) as JwtPayload;
     expect(payload.userId).toBe("user-42");
     expect(payload.type).toBe("unsubscribe");
   });
@@ -87,7 +95,7 @@ describe("EmailService.generateUnsubscribeToken (#800)", () => {
       }),
     }));
 
-    const { EmailService } = require("../../services/email.service");
+    const { EmailService } = await import("../../services/email.service");
     const url = EmailService.buildUnsubscribeUrl("user-99");
     expect(url).toContain("unsubscribe?token=");
     expect(url).toContain(config.frontendUrl);

@@ -37,7 +37,7 @@ async function checkPendingTransactions(): Promise<void> {
           where: { id: tx.id },
           data: {
             status: "SUCCESS",
-            confirmedLedger: (result as any).ledger ?? null,
+            confirmedLedger: result.ledger ?? null,
           },
         });
         logger.info({ txHash: tx.txHash }, "[PendingTxJob] Marked SUCCESS");

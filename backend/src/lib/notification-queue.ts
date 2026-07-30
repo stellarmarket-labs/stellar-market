@@ -1,4 +1,4 @@
-import { Queue, Worker, Job, QueueEvents } from "bullmq";
+import { Queue, Worker, Job } from "bullmq";
 import { PrismaClient, NotificationType } from "@prisma/client";
 import RedisClient from "./redis";
 import { logger } from "./logger";
@@ -24,8 +24,8 @@ export interface NotificationJobData {
 
 const connection = RedisClient.getInstance();
 
-export const notificationQueue = new Queue<NotificationJobData, any, string>("notifications", {
-  connection: connection as any,
+export const notificationQueue = new Queue<NotificationJobData, void, string>("notifications", {
+  connection,
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 1000 },
@@ -58,20 +58,20 @@ export function getNotificationPriority(type: NotificationType): NotificationPri
   }
 }
 
-let worker: Worker<NotificationJobData, any, string> | null = null;
+let worker: Worker<NotificationJobData, void, string> | null = null;
 
 export function startNotificationWorker(
   getSocketEmitter: (userId: string) => boolean | Promise<boolean>,
   emitToUser: (userId: string, event: string, data: unknown) => void,
 ) {
-  worker = new Worker<NotificationJobData, any, string>(
+  worker = new Worker<NotificationJobData, void, string>(
     "notifications",
-    async (job: Job<NotificationJobData, any, string>) => {
+    async (job: Job<NotificationJobData, void, string>) => {
       const { userId, notificationId } = job.data;
 
       const rateLimitKey = `notif:ratelimit:${userId}`;
-      const count = await (connection as any).incr(rateLimitKey);
-      if (count === 1) await (connection as any).expire(rateLimitKey, 1);
+      const count = await connection.incr(rateLimitKey);
+      if (count === 1) await connection.expire(rateLimitKey, 1);
 
       if (count > 10) {
         await notificationQueue.add("send", job.data, {
@@ -84,8 +84,8 @@ export function startNotificationWorker(
       // We need to try/catch external delivery here. If it fails, BullMQ handles retry.
       // But we need to use `NotificationService` dynamically to avoid circular import.
       // We pass the function in `startNotificationWorker` instead, but wait, `notificationQueue` is exported.
-      // Actually, we can just require it inline here.
-      const { NotificationService } = require("../services/notification.service");
+      // Actually, we can just import it inline here.
+      const { NotificationService } = await import("../services/notification.service");
 
       try {
         await NotificationService.deliverExternalNotification({
@@ -130,7 +130,7 @@ export function startNotificationWorker(
       }
     },
     {
-      connection: connection as any,
+      connection,
       concurrency: 20,
     },
   );

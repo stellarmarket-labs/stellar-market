@@ -1,9 +1,10 @@
-import express from "express";
+import express, { NextFunction, Request, Response } from "express";
 import request from "supertest";
+import type { AuthRequest } from "../../middleware/auth";
 
 // ── Mock auth so the route trusts a fixed userId ──
 jest.mock("../../middleware/auth", () => ({
-  authenticate: (req: any, _res: any, next: any) => {
+  authenticate: (req: AuthRequest, _res: Response, next: NextFunction) => {
     req.userId = "freelancer-1";
     next();
   },
@@ -31,15 +32,20 @@ jest.mock("@prisma/client", () => {
 import { PrismaClient } from "@prisma/client";
 import freelancerRouter from "../freelancer.routes";
 import { fetchOnChainPayments } from "../../services/earnings-reconciliation.service";
+import type { ApiError } from "../../middleware/error";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as {
+  user: { findUnique: jest.Mock };
+  transaction: { findMany: jest.Mock };
+  $queryRaw: jest.Mock;
+};
 const fetchOnChainMock = fetchOnChainPayments as jest.Mock;
 
 const app = express();
 app.use(express.json());
 app.use("/api/freelancers", freelancerRouter);
 // Minimal error handler mirroring the app's createError shape.
-app.use((err: any, _req: any, res: any, _next: any) => {
+app.use((err: ApiError, _req: Request, res: Response, _next: NextFunction) => {
   res.status(err.statusCode || 500).json({ error: err.message });
 });
 

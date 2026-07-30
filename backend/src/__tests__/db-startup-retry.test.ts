@@ -8,11 +8,12 @@ jest.mock("../lib/logger", () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+import type { PrismaClient } from "@prisma/client";
 import { logger } from "../lib/logger";
 import { connectWithRetry } from "../lib/db-connect";
 
 const mockConnect = jest.fn();
-const mockPrisma = { $connect: mockConnect } as any;
+const mockPrisma = { $connect: mockConnect } as unknown as PrismaClient;
 
 beforeEach(() => {
   jest.clearAllMocks();

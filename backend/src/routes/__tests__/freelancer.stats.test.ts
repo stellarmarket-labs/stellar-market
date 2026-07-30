@@ -1,9 +1,10 @@
-import express from "express";
+import express, { NextFunction, Response } from "express";
 import request from "supertest";
+import type { AuthRequest } from "../../middleware/auth";
 
 // Mock auth middleware
 jest.mock("../../middleware/auth", () => ({
-  authenticate: (req: any, _res: any, next: any) => {
+  authenticate: (req: AuthRequest, _res: Response, next: NextFunction) => {
     req.userId = "freelancer-1";
     next();
   },
@@ -26,7 +27,11 @@ jest.mock("@prisma/client", () => {
 import { PrismaClient } from "@prisma/client";
 import freelancerRouter from "../freelancer.routes";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as {
+  user: { findUnique: jest.Mock };
+  transaction: { aggregate: jest.Mock };
+  job: { count: jest.Mock };
+};
 
 const app = express();
 app.use(express.json());

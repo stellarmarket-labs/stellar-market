@@ -25,12 +25,18 @@ interface SkillComboboxProps {
  * pressing Enter on free text not in the taxonomy) adds a removable chip;
  * unmatched text is still accepted as a custom skill.
  */
+let comboboxIdCounter = 0;
+
 export default function SkillCombobox({
   skills,
   onChange,
   maxSkills = 20,
   placeholder = "Add a skill (e.g., React, Node.js)",
 }: SkillComboboxProps) {
+  const [instanceId] = useState(() => `skill-combobox-${++comboboxIdCounter}`);
+  const listboxId = `${instanceId}-listbox`;
+  const getOptionId = (id: string) => `${instanceId}-option-${id}`;
+
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<SkillSuggestion[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -121,14 +127,25 @@ export default function SkillCombobox({
         role="combobox"
         aria-expanded={open && suggestions.length > 0}
         aria-autocomplete="list"
+        aria-controls={listboxId}
+        aria-activedescendant={
+          activeIndex >= 0 ? getOptionId(suggestions[activeIndex]?.id) : undefined
+        }
       />
 
       {open && suggestions.length > 0 && (
-        <ul className="absolute z-10 mt-1 w-full bg-theme-card border border-theme-border rounded-lg shadow-lg max-h-56 overflow-y-auto">
+        <ul
+          id={listboxId}
+          role="listbox"
+          className="absolute z-10 mt-1 w-full bg-theme-card border border-theme-border rounded-lg shadow-lg max-h-56 overflow-y-auto"
+        >
           {suggestions.map((suggestion, idx) => (
-            <li key={suggestion.id}>
+            <li key={suggestion.id} role="presentation">
               <button
                 type="button"
+                id={getOptionId(suggestion.id)}
+                role="option"
+                aria-selected={idx === activeIndex}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => addSkill(suggestion.name)}
                 className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-theme-border/40 ${

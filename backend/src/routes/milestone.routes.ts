@@ -1,5 +1,5 @@
 import { Router, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import fs from "fs";
 import path from "path";
 import { authenticate, AuthRequest } from "../middleware/auth";
@@ -8,7 +8,7 @@ import { asyncHandler } from "../middleware/error";
 import { NotificationService } from "../services/notification.service";
 import { NotificationType } from "@prisma/client";
 import { ContractService } from "../services/contract.service";
-import { upload, UPLOAD_DIR, MAX_FILE_SIZE } from "../config/upload";
+import { upload, UPLOAD_DIR } from "../config/upload";
 import { validateFileMimeType, formatFileSize } from "../utils/fileValidation";
 import { z } from "zod";
 import {
@@ -70,10 +70,12 @@ router.get(
   authenticate,
   validate({ query: getMilestonesQuerySchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { page, limit, jobId, status } = req.query as any;
+    const { page, limit, jobId, status } = req.query as unknown as z.infer<
+      typeof getMilestonesQuerySchema
+    >;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: Prisma.MilestoneWhereInput = {};
     if (jobId) where.jobId = jobId;
     if (status) where.status = status;
 
@@ -163,8 +165,8 @@ router.get(
     }
 
     // Check if user is authorized to view this milestone
-    const isClient = (milestone as any).job.clientId === req.userId;
-    const isFreelancer = (milestone as any).job.freelancerId === req.userId;
+    const isClient = milestone.job.clientId === req.userId;
+    const isFreelancer = milestone.job.freelancerId === req.userId;
 
     if (!isClient && !isFreelancer) {
       return res
@@ -200,7 +202,7 @@ router.put(
     if (!milestone) {
       return res.status(404).json({ error: "Milestone not found." });
     }
-    if ((milestone as any).job.clientId !== req.userId) {
+    if (milestone.job.clientId !== req.userId) {
       return res
         .status(403)
         .json({ error: "Not authorized to update this milestone." });
@@ -234,7 +236,7 @@ router.delete(
     if (!milestone) {
       return res.status(404).json({ error: "Milestone not found." });
     }
-    if ((milestone as any).job.clientId !== req.userId) {
+    if (milestone.job.clientId !== req.userId) {
       return res
         .status(403)
         .json({ error: "Not authorized to delete this milestone." });
@@ -266,7 +268,7 @@ router.patch(
       return res.status(404).json({ error: "Milestone not found." });
     }
 
-    const job = (milestone as any).job;
+    const job = milestone.job;
     const isClient = job.clientId === req.userId;
     const isFreelancer = job.freelancerId === req.userId;
 
@@ -390,7 +392,7 @@ router.post(
       return res.status(404).json({ error: "Milestone not found." });
     }
 
-    const job = (milestone as any).job;
+    const job = milestone.job;
 
     if (job.freelancerId !== req.userId) {
       fs.unlinkSync(req.file.path);
@@ -459,7 +461,7 @@ router.get(
       return res.status(404).json({ error: "Milestone not found." });
     }
 
-    const job = (milestone as any).job;
+    const job = milestone.job;
     if (job.clientId !== req.userId && job.freelancerId !== req.userId) {
       return res.status(403).json({ error: "Access denied." });
     }
@@ -473,7 +475,7 @@ router.get(
     });
 
     res.json({
-      attachments: attachments.map((a: any) => ({
+      attachments: attachments.map((a) => ({
         ...a,
         sizeFormatted: formatFileSize(a.size),
       })),
@@ -507,7 +509,7 @@ router.delete(
       return res.status(403).json({ error: "Only the uploader can delete this deliverable." });
     }
 
-    if ((attachment as any).milestone?.status === "APPROVED") {
+    if (attachment.milestone?.status === "APPROVED") {
       return res.status(400).json({ error: "Cannot delete a deliverable from an approved milestone." });
     }
 

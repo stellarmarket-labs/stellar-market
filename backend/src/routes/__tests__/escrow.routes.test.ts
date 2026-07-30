@@ -19,15 +19,15 @@ jest.mock("@prisma/client", () => {
   };
 
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
     EscrowStatus: {
       UNFUNDED: "UNFUNDED",
       FUNDED: "FUNDED",
       COMPLETED: "COMPLETED",
-    } as any,
+    },
     NotificationType: {
       MILESTONE_APPROVED: "MILESTONE_APPROVED",
-    } as any,
+    },
   };
 });
 
@@ -53,7 +53,10 @@ jest.mock("../../services/notification.service", () => ({
 import { PrismaClient } from "@prisma/client";
 import { ContractService } from "../../services/contract.service";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as {
+  job: { findUnique: jest.Mock };
+  user: { findUnique: jest.Mock };
+};
 const jobMock = prismaMock.job;
 const buildCreateJobTxMock = ContractService.buildCreateJobTx as jest.Mock;
 

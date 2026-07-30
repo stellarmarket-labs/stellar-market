@@ -9,6 +9,7 @@ import { useToast } from "@/components/Toast";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
 const categories = ["Development", "Design", "Writing", "Marketing", "Other"];
+const STORAGE_KEY = "service-form-draft";
 
 export default function NewServicePage() {
   const router = useRouter();
@@ -33,6 +34,24 @@ export default function NewServicePage() {
     }
   }, [isLoading, user, router, toast]);
 
+  // Restore draft from localStorage
+  useEffect(() => {
+    const draft = localStorage.getItem(STORAGE_KEY);
+    if (draft) {
+      try {
+        const parsed = JSON.parse(draft);
+        if (parsed && typeof parsed === "object") {
+          setFormData((prev) => ({ ...prev, ...parsed }));
+        }
+      } catch {}
+    }
+  }, []);
+
+  // Persist draft to localStorage on change
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(formData));
+  }, [formData]);
+
   // Show loading state while checking auth
   if (isLoading) {
     return (
@@ -51,12 +70,22 @@ export default function NewServicePage() {
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    if (!formData.title.trim()) {
+    const title = formData.title.trim();
+    if (!title) {
       newErrors.title = "Title is required";
+    } else if (title.length < 5) {
+      newErrors.title = "Title must be at least 5 characters long";
+    } else if (title.length > 200) {
+      newErrors.title = "Title must be less than 200 characters";
     }
 
-    if (!formData.description.trim()) {
+    const description = formData.description.trim();
+    if (!description) {
       newErrors.description = "Description is required";
+    } else if (description.length < 20) {
+      newErrors.description = "Description must be at least 20 characters long";
+    } else if (description.length > 5000) {
+      newErrors.description = "Description must be less than 5000 characters";
     }
 
     if (!formData.category) {
@@ -108,6 +137,7 @@ export default function NewServicePage() {
       );
 
       toast.success("Service created successfully!");
+      localStorage.removeItem(STORAGE_KEY);
       router.push("/services");
     } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
