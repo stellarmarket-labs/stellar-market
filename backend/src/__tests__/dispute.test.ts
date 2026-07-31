@@ -34,6 +34,7 @@ jest.mock("@prisma/client", () => {
     user: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
     job: {
       findUnique: jest.fn(),
