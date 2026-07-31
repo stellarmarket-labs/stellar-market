@@ -28,8 +28,10 @@ jest.mock("../middleware/validation", () => ({
 }));
 
 // ── asyncHandler mock (pass-through) ────────────────────────────────────────
+type RouteHandler = (req: Request, res: Response, next: NextFunction) => unknown;
+
 jest.mock("../middleware/error", () => ({
-  asyncHandler: (fn: Function) => (req: Request, res: Response, next: NextFunction) =>
+  asyncHandler: (fn: RouteHandler) => (req: Request, res: Response, next: NextFunction) =>
     Promise.resolve(fn(req, res, next)).catch(next),
   errorHandler: (_err: unknown, _req: Request, res: Response, _next: NextFunction) =>
     res.status(500).json({ error: "internal" }),
@@ -39,8 +41,10 @@ jest.mock("../middleware/error", () => ({
 let mockUserId = "user-1";
 let mockUserRole = "FREELANCER";
 
+type RequestWithAuth = Request & { userId?: string; userRole?: string };
+
 jest.mock("../middleware/auth", () => ({
-  authenticate: (req: any, _res: Response, next: NextFunction) => {
+  authenticate: (req: RequestWithAuth, _res: Response, next: NextFunction) => {
     req.userId = mockUserId;
     req.userRole = mockUserRole;
     next();
@@ -50,7 +54,15 @@ jest.mock("../middleware/auth", () => ({
 }));
 
 // ── Other mocks needed by the route file ────────────────────────────────────
-jest.mock("../config/upload", () => ({ upload: { array: () => (_: any, __: any, next: any) => next() }, UPLOAD_DIR: "/tmp" }));
+jest.mock("../config/upload", () => ({
+  upload: {
+    array:
+      () =>
+      (_req: Request, _res: Response, next: NextFunction) =>
+        next(),
+  },
+  UPLOAD_DIR: "/tmp",
+}));
 jest.mock("../services/evidence-storage.service", () => ({
   createEvidenceDownloadUrl: jest.fn(),
   isEvidenceStorageConfigured: jest.fn().mockReturnValue(false),

@@ -13,28 +13,56 @@ jest.mock("../lib/logger", () => ({
   },
 }));
 
+interface MockEscrowEventRecord {
+  id: string;
+  jobId: string;
+  contractJobId: string;
+  eventType: string;
+  ledgerSeq: number;
+  txHash: string;
+  payload: unknown;
+  processedAt: Date;
+}
+
+interface MockJobState {
+  id: string;
+  contractJobId: string;
+  status: string;
+  escrowStatus: string;
+  title: string;
+  clientId: string;
+  freelancerId: string;
+}
+
+declare global {
+  // eslint-disable-next-line no-var -- `declare global` requires `var` for ambient globals
+  var mockEventsDb: MockEscrowEventRecord[];
+  // eslint-disable-next-line no-var -- `declare global` requires `var` for ambient globals
+  var mockJobState: MockJobState;
+}
+
 jest.mock("@prisma/client", () => {
   const original = jest.requireActual("@prisma/client");
-  
+
   const mockPrisma = {
     escrowEvent: {
       create: jest.fn().mockImplementation((args) => {
         const { jobId, contractJobId, eventType, ledgerSeq, txHash, payload } = args.data;
 
-        const duplicate = (global as any).mockEventsDb.find(
-          (e: any) =>
+        const duplicate = global.mockEventsDb.find(
+          (e) =>
             e.contractJobId === contractJobId &&
             e.eventType === eventType &&
             e.ledgerSeq === ledgerSeq
         );
 
         if (duplicate) {
-          const error = new Error("Unique constraint failed");
-          (error as any).code = "P2002";
+          const error = new Error("Unique constraint failed") as Error & { code?: string };
+          error.code = "P2002";
           throw error;
         }
 
-        const record = {
+        const record: MockEscrowEventRecord = {
           id: `event-${Date.now()}-${Math.random()}`,
           jobId,
           contractJobId,
@@ -44,12 +72,12 @@ jest.mock("@prisma/client", () => {
           payload,
           processedAt: new Date(),
         };
-        (global as any).mockEventsDb.push(record);
+        global.mockEventsDb.push(record);
         return record;
       }),
       findMany: jest.fn().mockImplementation((args) => {
         if (args.where.jobId === "job-abc") {
-          return [...(global as any).mockEventsDb].sort((a, b) => a.ledgerSeq - b.ledgerSeq);
+          return [...global.mockEventsDb].sort((a, b) => a.ledgerSeq - b.ledgerSeq);
         }
         return [];
       }),
@@ -57,17 +85,17 @@ jest.mock("@prisma/client", () => {
     job: {
       findUnique: jest.fn().mockImplementation((args) => {
         if (args.where.id === "job-abc") {
-          return (global as any).mockJobState;
+          return global.mockJobState;
         }
         return null;
       }),
       update: jest.fn().mockImplementation((args) => {
         if (args.where.id === "job-abc") {
-          (global as any).mockJobState = {
-            ...(global as any).mockJobState,
+          global.mockJobState = {
+            ...global.mockJobState,
             ...args.data,
           };
-          return (global as any).mockJobState;
+          return global.mockJobState;
         }
         return null;
       }),
@@ -80,13 +108,13 @@ jest.mock("@prisma/client", () => {
 
   return {
     ...original,
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
   };
 });
 
 // Setup mockEventsDb and mockJobState in global scope before anything else
-(global as any).mockEventsDb = [];
-(global as any).mockJobState = {
+global.mockEventsDb = [];
+global.mockJobState = {
   id: "job-abc",
   contractJobId: "contract-abc",
   status: "OPEN",
@@ -96,14 +124,14 @@ jest.mock("@prisma/client", () => {
   freelancerId: "freelancer-1",
 };
 
-import { handleEscrowEvent, projectJobState } from "../services/escrow-projection.service";
+import { handleEscrowEvent } from "../services/escrow-projection.service";
 import { NotificationService } from "../services/notification.service";
 import { EscrowEventType, JobStatus, EscrowStatus } from "@prisma/client";
 
 describe("Escrow State Event Sourcing Integration Tests", () => {
   beforeEach(() => {
-    (global as any).mockEventsDb = [];
-    (global as any).mockJobState = {
+    global.mockEventsDb = [];
+    global.mockJobState = {
       id: "job-abc",
       contractJobId: "contract-abc",
       status: JobStatus.OPEN,
@@ -128,7 +156,7 @@ describe("Escrow State Event Sourcing Integration Tests", () => {
 
     // JOB_CREATED should set UNFUNDED (already default status), so no state change notification
     expect(NotificationService.sendNotification).not.toHaveBeenCalled();
-    expect((global as any).mockJobState.escrowStatus).toBe(EscrowStatus.UNFUNDED);
+    expect(global.mockJobState.escrowStatus).toBe(EscrowStatus.UNFUNDED);
 
     // 2. Process JOB_FUNDED
     await handleEscrowEvent({
@@ -140,8 +168,8 @@ describe("Escrow State Event Sourcing Integration Tests", () => {
       payload: {},
     });
 
-    expect((global as any).mockJobState.status).toBe(JobStatus.IN_PROGRESS);
-    expect((global as any).mockJobState.escrowStatus).toBe(EscrowStatus.FUNDED);
+    expect(global.mockJobState.status).toBe(JobStatus.IN_PROGRESS);
+    expect(global.mockJobState.escrowStatus).toBe(EscrowStatus.FUNDED);
 
     // 3. Process PAYMENT_RELEASED (should trigger PAYMENT_RELEASED notification)
     await handleEscrowEvent({
@@ -153,8 +181,8 @@ describe("Escrow State Event Sourcing Integration Tests", () => {
       payload: { amount: "1000" },
     });
 
-    expect((global as any).mockJobState.status).toBe(JobStatus.COMPLETED);
-    expect((global as any).mockJobState.escrowStatus).toBe(EscrowStatus.COMPLETED);
+    expect(global.mockJobState.status).toBe(JobStatus.COMPLETED);
+    expect(global.mockJobState.escrowStatus).toBe(EscrowStatus.COMPLETED);
     expect(NotificationService.sendNotification).toHaveBeenCalledTimes(2); // Sent to client & freelancer
   });
 
@@ -195,7 +223,7 @@ describe("Escrow State Event Sourcing Integration Tests", () => {
     // Notifications shouldn't have increased
     const callsCountAfterDuplicate = (NotificationService.sendNotification as jest.Mock).mock.calls.length;
     expect(callsCountAfterDuplicate).toBe(callsCountBeforeDuplicate);
-    expect((global as any).mockEventsDb.length).toBe(2); // only unique events stored
+    expect(global.mockEventsDb.length).toBe(2); // only unique events stored
   });
 
   it("should produce correct final state (COMPLETED) when events arrive out-of-order", async () => {
@@ -210,7 +238,7 @@ describe("Escrow State Event Sourcing Integration Tests", () => {
     });
 
     // Because only PAYMENT_RELEASED (ledgerSeq 3) is in log, it reduces to COMPLETED
-    expect((global as any).mockJobState.status).toBe(JobStatus.COMPLETED);
+    expect(global.mockJobState.status).toBe(JobStatus.COMPLETED);
 
     // Send JOB_FUNDED (ledgerSeq 2) second (out-of-order arrival)
     await handleEscrowEvent({
@@ -225,7 +253,7 @@ describe("Escrow State Event Sourcing Integration Tests", () => {
     // The projection sorts [JOB_FUNDED (2), PAYMENT_RELEASED (3)]
     // Reducing sequence: JOB_CREATED (implicit) -> JOB_FUNDED -> PAYMENT_RELEASED
     // Final state should still be COMPLETED
-    expect((global as any).mockJobState.status).toBe(JobStatus.COMPLETED);
-    expect((global as any).mockJobState.escrowStatus).toBe(EscrowStatus.COMPLETED);
+    expect(global.mockJobState.status).toBe(JobStatus.COMPLETED);
+    expect(global.mockJobState.escrowStatus).toBe(EscrowStatus.COMPLETED);
   });
 });

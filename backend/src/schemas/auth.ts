@@ -15,7 +15,7 @@ export const registerSchema = z.object({
 
 export const loginSchema = z.object({
   email: emailSchema,
-  password: z.string().min(1, "Password is required"),
+  password: z.string().min(1, "Password is required").max(128, "Password must be at most 128 characters long"),
 });
 
 export const walletAuthSchema = z.object({
@@ -45,7 +45,7 @@ export const resetPasswordSchema = z.object({
 });
 
 export const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1, "Current password is required"),
+  currentPassword: z.string().min(1, "Current password is required").max(128, "Password must be at most 128 characters long"),
   newPassword: passwordSchema,
 });
 
@@ -58,7 +58,7 @@ export const twoFactorVerifySchema = z.object({
 });
 
 export const twoFactorDisableSchema = z.object({
-  password: z.string().min(1, "Password is required"),
+  password: z.string().min(1, "Password is required").max(128, "Password must be at most 128 characters long"),
 });
 
 export const twoFactorValidateSchema = z.object({

@@ -101,7 +101,7 @@ export class EmailService {
         preheader = "A dispute was opened on your job.";
         actionLabel = actionUrl ? "View dispute" : undefined;
         break;
-      case "dispute.resolved":
+      case "dispute.resolved": {
         const outcomeText =
           outcome === "CLIENT"
             ? "The dispute was resolved in favor of the client."
@@ -116,6 +116,7 @@ export class EmailService {
         preheader = "Your dispute has been resolved.";
         actionLabel = actionUrl ? "View job details" : undefined;
         break;
+      }
       case "milestone.approved":
         bodyHtml = renderEmailTemplate("milestone-approved", { message, actionUrl });
         preheader = "A milestone was approved.";

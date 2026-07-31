@@ -1,5 +1,6 @@
 import { DisputeService } from "../services/dispute.service";
 import { ContractService } from "../services/contract.service";
+import { ReputationCacheService } from "../services/reputation-cache.service";
 
 jest.mock("../services/contract.service", () => ({
   ContractService: {
@@ -9,6 +10,12 @@ jest.mock("../services/contract.service", () => ({
 
 jest.mock("../services/dispute-event.service", () => ({
   recordDisputeEvent: jest.fn().mockResolvedValue({ id: 1 }),
+}));
+
+jest.mock("../services/reputation-cache.service", () => ({
+  ReputationCacheService: {
+    invalidateCache: jest.fn().mockResolvedValue(undefined),
+  },
 }));
 
 // Local runtime-friendly enums for tests (use string literals to avoid TS value/type mismatch
@@ -29,8 +36,34 @@ const JobStatus = {
 } as const;
 
 // ─── Prisma mock ─────────────────────────────────────────────────────────────
+type MockPrismaClient = {
+  user: {
+    findUnique: jest.Mock;
+    findFirst: jest.Mock;
+  };
+  job: {
+    findUnique: jest.Mock;
+    update: jest.Mock;
+  };
+  dispute: {
+    create: jest.Mock;
+    findUnique: jest.Mock;
+    findMany: jest.Mock;
+    update: jest.Mock;
+    count: jest.Mock;
+  };
+  disputeVote: {
+    create: jest.Mock;
+    findUnique: jest.Mock;
+    findMany: jest.Mock;
+    count: jest.Mock;
+  };
+  $disconnect: jest.Mock;
+  $transaction: jest.Mock;
+};
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma: any = {
+  const mockPrisma: MockPrismaClient = {
     user: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
@@ -53,42 +86,44 @@ jest.mock("@prisma/client", () => {
       count: jest.fn(),
     },
     $disconnect: jest.fn(),
-    $transaction: jest.fn(async (cb: any): Promise<any> => await cb(mockPrisma)),
+    $transaction: jest.fn(
+      async (cb: (tx: MockPrismaClient) => Promise<unknown>) => await cb(mockPrisma),
+    ),
   };
 
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
     DisputeStatus: {
       OPEN: "OPEN",
       IN_PROGRESS: "IN_PROGRESS",
       RESOLVED: "RESOLVED",
-    } as any,
+    },
     JobStatus: {
       OPEN: "OPEN",
       IN_PROGRESS: "IN_PROGRESS",
       COMPLETED: "COMPLETED",
       CANCELLED: "CANCELLED",
       DISPUTED: "DISPUTED",
-    } as any,
+    },
     EscrowStatus: {
       UNFUNDED: "UNFUNDED",
       FUNDED: "FUNDED",
       COMPLETED: "COMPLETED",
       CANCELLED: "CANCELLED",
       DISPUTED: "DISPUTED",
-    } as any,
+    },
     DisputeEventType: {
       DISPUTE_OPENED: "DISPUTE_OPENED",
       EVIDENCE_SUBMITTED: "EVIDENCE_SUBMITTED",
       ARBITRATOR_ASSIGNED: "ARBITRATOR_ASSIGNED",
       VOTE_CAST: "VOTE_CAST",
       VERDICT_REACHED: "VERDICT_REACHED",
-    } as any,
+    },
   };
 });
 
 import { PrismaClient } from "@prisma/client";
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 
 // ─── Test data ────────────────────────────────────────────────────────────────
 const clientId = "00000000-0000-4000-8000-000000000001";
@@ -448,6 +483,14 @@ describe("Dispute Management System", () => {
       expect(dispute.status).toBe(DisputeStatus.RESOLVED);
       expect(dispute.outcome).toBe("Resolved in favor of client");
       expect(dispute.resolvedAt).toBeDefined();
+
+      expect(ReputationCacheService.invalidateCache).toHaveBeenCalledWith(
+        mockClient.walletAddress,
+      );
+      expect(ReputationCacheService.invalidateCache).toHaveBeenCalledWith(
+        mockFreelancer.walletAddress,
+      );
+      expect(ReputationCacheService.invalidateCache).toHaveBeenCalledTimes(2);
     });
 
     it("should prevent resolving already resolved dispute", async () => {
@@ -487,7 +530,7 @@ describe("Dispute Management System", () => {
     it("should handle unknown webhook type", async () => {
       await expect(
         DisputeService.processWebhook({
-          type: "UNKNOWN_TYPE" as any,
+          type: "UNKNOWN_TYPE",
           disputeId: "test",
         }),
       ).rejects.toThrow("Unknown webhook type");

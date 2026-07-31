@@ -15,6 +15,7 @@ import EscrowStatusBadge from "./EscrowStatusBadge";
 import { Job, User as UserType } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import { useRelativeTime } from "@/hooks/useRelativeTime";
+import Avatar from "@/components/Avatar";
 
 interface JobCardProps {
   job: Job;
@@ -187,7 +188,11 @@ export default function JobCard({
 
       <div className="flex items-center justify-between mt-4 pt-4 border-t border-theme-border">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple" />
+          <Avatar
+            src={job.client.avatarUrl}
+            alt={job.client.username}
+            size={24}
+          />
           <span className="text-sm text-theme-text">{job.client.username}</span>
         </div>
 

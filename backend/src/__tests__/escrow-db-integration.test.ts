@@ -1,6 +1,5 @@
 import { PrismaClient, EscrowEventType, JobStatus, EscrowStatus } from "@prisma/client";
 import { handleEscrowEvent } from "../services/escrow-projection.service";
-import { NotificationService } from "../services/notification.service";
 import net from "net";
 
 jest.mock("../services/notification.service", () => ({
@@ -45,7 +44,7 @@ describe("Escrow Database Integration (Real DB Constraints)", () => {
     try {
       await prisma.$connect();
       isDbReachable = true;
-    } catch (e) {
+    } catch {
       console.warn("Real database is not reachable. Skipping database constraint integration tests.");
     }
   });

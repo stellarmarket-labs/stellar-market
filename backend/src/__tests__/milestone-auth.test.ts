@@ -8,8 +8,20 @@
  */
 
 // ─── Prisma mock ──────────────────────────────────────────────────────────────
+type MockPrismaClient = {
+  job: {
+    findUnique: jest.Mock;
+  };
+  milestone: {
+    findMany: jest.Mock;
+  };
+  user: {
+    findUnique: jest.Mock;
+  };
+};
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma = {
+  const mockPrisma: MockPrismaClient = {
     job: {
       findUnique: jest.fn(),
     },
@@ -22,7 +34,7 @@ jest.mock("@prisma/client", () => {
   };
 
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
   };
 });
 
@@ -67,7 +79,7 @@ import request from "supertest";
 import milestoneRouter from "../routes/milestone.routes";
 import { errorHandler } from "../middleware/error";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 const jwtVerify = jwt.verify as jest.Mock;
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────

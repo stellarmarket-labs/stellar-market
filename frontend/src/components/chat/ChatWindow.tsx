@@ -12,6 +12,7 @@ import { Send, ChevronDown, AlertCircle, RotateCw, Clock } from "lucide-react";
 import { useSocket } from "@/context/SocketContext";
 import { useChatOutbox, OutgoingMessage } from "@/hooks/useChatOutbox";
 import TypingIndicator from "./TypingIndicator";
+import Avatar from "../Avatar";
 
 const TYPING_DEBOUNCE_MS = 1500;
 
@@ -236,9 +237,11 @@ export default function ChatWindow({
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="px-4 py-3 border-b border-theme-border flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex items-center justify-center text-white text-sm font-bold">
-          {partnerUsername[0]?.toUpperCase()}
-        </div>
+        <Avatar
+          src={partnerUsername ? null : undefined}
+          alt={partnerUsername}
+          size={32}
+        />
         <span className="font-semibold text-theme-heading">{partnerUsername}</span>
       </div>
 

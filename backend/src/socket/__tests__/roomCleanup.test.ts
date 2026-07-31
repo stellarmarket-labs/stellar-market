@@ -9,6 +9,9 @@ jest.mock("../../lib/notification-queue", () => ({
 // ─── Redis mock (socket/index.ts now needs a client for the redis adapter and
 // presence registry; the fake supports the pub/sub + KV surface both use) ────
 jest.mock("../../lib/redis", () => {
+  // jest.mock factories are hoisted above imports and can't close over
+  // module-scoped bindings, so this must stay a require().
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { FakeRedisBus, mockRedisModule } = require("../../lib/__tests__/testUtils/fakeRedis");
   return mockRedisModule(new FakeRedisBus());
 });

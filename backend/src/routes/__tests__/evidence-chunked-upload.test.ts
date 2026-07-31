@@ -6,6 +6,10 @@ import os from "os";
 import path from "path";
 import crypto from "crypto";
 import { Buffer } from "buffer";
+// Imported here (rather than required inside the jest.mock factory below) using
+// jest's "mock"-prefixed variable exemption so the factory can reference them
+// without violating the out-of-scope-variable restriction on jest.mock factories.
+import * as mockJwt from "jsonwebtoken";
 
 // Drive the session service to a temp dir and mark storage configured BEFORE any
 // module that reads those values is required.
@@ -14,6 +18,13 @@ const TEMP_SESSION_DIR = fs.mkdtempSync(
 );
 process.env.EVIDENCE_SESSION_DIR = TEMP_SESSION_DIR;
 process.env.EVIDENCE_S3_BUCKET = "test-bucket";
+
+// `config` is a top-level singleton evaluated at module-load time from
+// process.env — it must be required (not statically imported, which ES
+// import hoisting would run before the env vars above are set) after the
+// env vars are in place.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { config: mockAuthConfig } = require("../../config") as typeof import("../../config");
 
 jest.mock("@prisma/client", () => {
   const mockPrisma = {
@@ -27,7 +38,7 @@ jest.mock("@prisma/client", () => {
         }),
     },
     dispute: {
-      findUnique: jest.fn().mockImplementation((args: any) =>
+      findUnique: jest.fn().mockImplementation((args) =>
         Promise.resolve({
           id: args?.where?.id ?? "dispute-1",
           clientId: "00000000-0000-4000-8000-000000000001",
@@ -42,7 +53,7 @@ jest.mock("@prisma/client", () => {
       create: jest.fn().mockResolvedValue({ id: "evt-1" }),
     },
     attachment: {
-      create: jest.fn().mockImplementation((args: any) =>
+      create: jest.fn().mockImplementation((args) =>
         Promise.resolve({ id: "att-123", ...args.data }),
       ),
     },
@@ -83,27 +94,26 @@ jest.mock("../../utils/auditLogger", () => ({
 }));
 
 jest.mock("../../middleware/auth", () => {
-  const jwt = require("jsonwebtoken");
-  const { config } = require("../../config");
   return {
-    authenticate: (req: any, res: any, next: any) => {
+    authenticate: jest.fn((req, res, next) => {
       const header = req.headers.authorization || "";
       const token = header.replace(/^Bearer\s+/i, "");
       try {
-        const decoded = jwt.verify(token, config.jwtSecret);
+        const decoded = mockJwt.verify(token, mockAuthConfig.jwtSecret) as {
+          userId: string;
+        };
         req.userId = decoded.userId;
         req.userRole = "CLIENT";
       } catch {
         return res.status(401).json({ error: "Invalid token" });
       }
       next();
-    },
-    requireAdmin: (req: any, res: any, next: any) => next(),
+    }),
+    requireAdmin: jest.fn((req, res, next) => next()),
   };
 });
 
-const { config } = require("../../config");
-const disputeRouter = require("../dispute.routes").default;
+import disputeRouter from "../dispute.routes";
 
 const app = express();
 app.use(express.json());
@@ -111,7 +121,7 @@ app.use("/api/disputes", disputeRouter);
 
 const CLIENT_ID = "00000000-0000-4000-8000-000000000001";
 function authHeader(userId = CLIENT_ID) {
-  const token = jwt.sign({ userId }, config.jwtSecret, { expiresIn: "1h" });
+  const token = jwt.sign({ userId }, mockAuthConfig.jwtSecret, { expiresIn: "1h" });
   return { Authorization: `Bearer ${token}` };
 }
 

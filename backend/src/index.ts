@@ -17,6 +17,7 @@ import { initYjsServer } from "./socket/yjsServer";
 import { startExpiryJob } from "./jobs/expiry.job";
 import { startPendingTxJob } from "./jobs/pending-tx.job";
 import { startEscrowTtlJob } from "./jobs/escrow-ttl.job";
+import { startEarningsReconciliationJob } from "./jobs/earnings-reconciliation.job";
 import {
   startHorizonListener,
   stopHorizonListener,
@@ -73,8 +74,8 @@ prisma.$use(async (params, next) => {
   try {
     const result = await next(params);
     return result;
-  } catch (err: any) {
-    if (err?.code === "P2024") {
+  } catch (err) {
+    if ((err as { code?: string })?.code === "P2024") {
       poolMetrics.exhaustedCount += 1;
       logger.error(
         { err, model: params.model, action: params.action },
@@ -129,6 +130,7 @@ const corsOptions: cors.CorsOptions = {
 
 // Security middleware
 app.use(helmet());
+app.use(compression());
 
 // Swagger UI setup (disabled in production)
 if (process.env.NODE_ENV !== "production") {
@@ -152,19 +154,9 @@ app.get("/health", async (_req, res) => {
   res.status(health.status === "ok" ? 200 : 503).json(health);
 });
 
-app.get("/metrics", metricsHandler);
+app.get("/metrics", requireAdmin, metricsHandler);
 
 app.use(requestDurationMiddleware);
-// Metrics endpoint — exposes pool stats and process counters
-app.get("/metrics", (_req, res) => {
-  res.json({
-    db_pool_size: poolMetrics.active,
-    db_pool_waiting: poolMetrics.waiting,
-    db_pool_exhausted_total: poolMetrics.exhaustedCount,
-    process_uptime_seconds: Math.floor(process.uptime()),
-    process_memory_rss_bytes: process.memoryUsage().rss,
-  });
-});
 
 // Database-only health probe (used by some platforms/LB checks)
 app.get("/health/db", async (_req, res) => {
@@ -236,6 +228,7 @@ async function startServer(): Promise<void> {
     startExpiryJob();
     startPendingTxJob();
     startEscrowTtlJob();
+    startEarningsReconciliationJob();
     startHorizonListener();
     RecommendationQueueService.startWorker();
     AuditService.startWorker();

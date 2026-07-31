@@ -23,7 +23,7 @@ export const logAdminAction = async (
   adminId: string,
   action: string,
   target: string,
-  metadata?: any,
+  metadata?: unknown,
 ): Promise<void> => {
   await AuditService.record({
     category: "ADMIN_ACTION",
@@ -42,7 +42,7 @@ export const logAdminAction = async (
 interface AuditLogEntry {
   action: string;
   userId: string;
-  details: any;
+  details: unknown;
   ipAddress: string;
 }
 

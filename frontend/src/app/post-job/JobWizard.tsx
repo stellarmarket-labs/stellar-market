@@ -17,7 +17,8 @@ import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
-import { JOB_CATEGORIES, JOB_SKILLS, PAYMENT_TOKENS } from "@/constants/jobs";
+import { JOB_CATEGORIES, PAYMENT_TOKENS } from "@/constants/jobs";
+import SkillCombobox from "@/components/SkillCombobox";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
 const PLATFORM_MIN_BUDGET_XLM = Number(
@@ -77,11 +78,13 @@ export default function JobWizard() {
 
   const [currentStep, setCurrentStep] = useState(1);
   const [skills, setSkills] = useState<string[]>([]);
-  const [skillInput, setSkillInput] = useState("");
   const [paymentToken, setPaymentToken] =
     useState<(typeof PAYMENT_TOKENS)[number]>("XLM");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  // Today's date in YYYY-MM-DD format for date input min attribute
+  const todayStr = new Date().toISOString().split("T")[0];
 
   // Load draft from localStorage
   useEffect(() => {
@@ -197,27 +200,6 @@ export default function JobWizard() {
 
   const handleBack = () => {
     setCurrentStep(1);
-  };
-
-  const filteredSkillSuggestions = useMemo(() => {
-    const query = skillInput.trim().toLowerCase();
-    if (!query) return [];
-    return JOB_SKILLS.filter(
-      (skill) => skill.toLowerCase().includes(query) && !skills.includes(skill),
-    ).slice(0, 6);
-  }, [skillInput, skills]);
-
-  const handleAddSkill = () => {
-    const trimmed = skillInput.trim();
-    if (!trimmed) return;
-    if (!skills.includes(trimmed)) {
-      setSkills([...skills, trimmed]);
-    }
-    setSkillInput("");
-  };
-
-  const handleRemoveSkill = (skill: string) => {
-    setSkills(skills.filter((s) => s !== skill));
   };
 
   const onSubmit = async (values: FormValues) => {
@@ -423,6 +405,7 @@ export default function JobWizard() {
               <input
                 type="date"
                 className="input-field"
+                min={todayStr}
                 {...register("deadline")}
               />
               {errors.deadline && (
@@ -436,44 +419,7 @@ export default function JobWizard() {
               <label className="block text-sm font-medium text-theme-heading mb-2">
                 Required Skills
               </label>
-              <div className="flex gap-2 mb-3">
-                <input
-                  type="text"
-                  placeholder="e.g., Rust"
-                  className="input-field"
-                  value={skillInput}
-                  onChange={(e) => setSkillInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAddSkill();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={handleAddSkill}
-                  className="btn-secondary px-4 h-11"
-                >
-                  <Plus size={20} />
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {skills.map((skill) => (
-                  <span
-                    key={skill}
-                    className="flex items-center gap-2 bg-theme-card border border-theme-border px-3 py-1.5 rounded-lg text-sm"
-                  >
-                    <Tag size={14} /> {skill}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveSkill(skill)}
-                    >
-                      <Plus className="rotate-45 text-theme-error" size={16} />
-                    </button>
-                  </span>
-                ))}
-              </div>
+              <SkillCombobox skills={skills} onChange={setSkills} />
             </div>
 
             <button
@@ -569,6 +515,7 @@ export default function JobWizard() {
                     <input
                       type="date"
                       className="input-field"
+                      min={todayStr}
                       {...register(`milestones.${index}.deadline`)}
                     />
                     {errors.milestones?.[index]?.deadline && (

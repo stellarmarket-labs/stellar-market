@@ -4,7 +4,6 @@ import jwt from "jsonwebtoken";
 import fs from "fs";
 import path from "path";
 import { Buffer } from "buffer";
-import { PrismaClient } from "@prisma/client";
 import { config } from "../../config";
 import uploadRouter from "../upload.routes";
 import { UPLOAD_DIR } from "../../config/upload";

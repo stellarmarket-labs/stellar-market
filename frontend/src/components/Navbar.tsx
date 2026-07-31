@@ -31,6 +31,7 @@ import {
   Container,
   Grid3X3,
 } from "lucide-react";
+import Avatar from "./Avatar";
 import axios from "axios";
 import { useState, useRef, useEffect, type TouchEvent } from "react";
 import { useWallet, truncateAddress } from "@/context/WalletContext";
@@ -101,20 +102,12 @@ function UserMenu({ className }: { className?: string }) {
           onClick={() => setMenuOpen(!menuOpen)}
           className={`flex items-center gap-3 px-3 py-1.5 rounded-lg border border-theme-border hover:bg-theme-border/50 transition-colors ${className ?? ""}`}
         >
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex items-center justify-center text-white font-bold text-sm">
-            {user.avatarUrl ? (
-              <Image
-                src={user.avatarUrl}
-                alt={user.username}
-                width={32}
-                height={32}
-                className="w-full h-full rounded-full object-cover"
-                unoptimized
-              />
-            ) : (
-              user.username.charAt(0).toUpperCase()
-            )}
-          </div>
+          <Avatar
+            src={user.avatarUrl}
+            alt={user.username}
+            size={32}
+            unoptimized
+          />
           <div className="text-left hidden lg:block">
             <p className="text-sm font-medium text-theme-heading leading-tight">
               {user.username}

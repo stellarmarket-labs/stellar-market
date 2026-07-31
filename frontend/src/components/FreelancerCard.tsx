@@ -3,6 +3,7 @@ import { Star, User } from "lucide-react";
 import { User as UserType } from "@/types";
 import Image from "next/image";
 import StarRating from "./StarRating";
+import Avatar from "./Avatar";
 
 interface FreelancerCardProps {
   freelancer: UserType;
@@ -52,22 +53,13 @@ export default function FreelancerCard({ freelancer, index = 0 }: FreelancerCard
       <div className="card hover:border-stellar-blue/50 transition-all duration-200 cursor-pointer h-full flex flex-col p-6 group">
         <div className="flex items-center gap-4 mb-5">
           <div className="relative w-16 h-16 flex-shrink-0">
-            {freelancer.avatarUrl ? (
-              <Image
-                src={freelancer.avatarUrl}
-                alt={`${freelancer.username} avatar`}
-                fill
-                sizes="64px"
-                priority={isPriority}
-                loading={isPriority ? undefined : "lazy"}
-                placeholder="empty"
-                className="rounded-full object-cover border-2 border-theme-border group-hover:border-stellar-blue/30 transition-colors"
-              />
-            ) : (
-              <div className="w-full h-full rounded-full bg-gradient-to-br from-stellar-blue/20 to-stellar-purple/20 flex items-center justify-center text-stellar-blue border-2 border-theme-border group-hover:border-stellar-blue/30 transition-colors">
-                <User size={32} />
-              </div>
-            )}
+            <Avatar
+              src={freelancer.avatarUrl}
+              alt={freelancer.username}
+              size={64}
+              priority={isPriority}
+              className="border-2 border-theme-border group-hover:border-stellar-blue/30 transition-colors"
+            />
             {availConfig && (
               <div
                 className={`absolute bottom-0 right-0 w-4 h-4 ${availConfig.color} border-2 border-theme-bg rounded-full`}

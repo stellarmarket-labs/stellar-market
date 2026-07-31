@@ -16,8 +16,24 @@ jest.mock("@stellar/stellar-sdk", () => ({
 import transactionRoutes from "../transaction.routes";
 
 // Mock Prisma
+type MockPrismaClient = {
+  transaction: {
+    create: jest.Mock;
+    upsert: jest.Mock;
+    update: jest.Mock;
+    findUnique: jest.Mock;
+    findMany: jest.Mock;
+    count: jest.Mock;
+    aggregate: jest.Mock;
+    groupBy: jest.Mock;
+  };
+  job: { findUnique: jest.Mock };
+  milestone: { findUnique: jest.Mock };
+  user: { findUnique: jest.Mock };
+};
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma = {
+  const mockPrisma: MockPrismaClient = {
     transaction: {
       create: jest.fn(),
       upsert: jest.fn(),
@@ -54,7 +70,9 @@ jest.mock("../../middleware/auth", () => ({
 }));
 
 // Get the mock prisma instance
-const { __mockPrisma: mockPrisma } = jest.requireMock("@prisma/client") as any;
+const { __mockPrisma: mockPrisma } = jest.requireMock("@prisma/client") as {
+  __mockPrisma: MockPrismaClient;
+};
 
 const app = express();
 app.use(express.json());

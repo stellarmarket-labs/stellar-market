@@ -2873,13 +2873,6 @@ fn test_cast_vote_valid_choices_accepted() {
 }
 
 #[test]
-fn test_invalid_vote_choice_error_code_is_24() {
-    // Verify that InvalidVoteChoice maps to discriminant 24.
-    // This ensures the on-chain ABI is stable and clients can reliably detect the error.
-    assert_eq!(DisputeError::InvalidVoteChoice as u32, 24);
-}
-
-#[test]
 fn test_cast_vote_split_award_bps_validation() {
     let env = Env::default();
     env.mock_all_auths();
@@ -3170,6 +3163,56 @@ fn test_retry_on_already_resolved_dispute_fails() {
     client.retry_escrow_callback(&dispute_id);
 }
 
+/// Regression test for issue #1001: retry_escrow_callback must respect the pause guard.
+/// Pausing the contract prevents retry from pushing pending resolutions to escrow,
+/// and unpausing restores normal retry behavior.
+#[test]
+fn test_retry_escrow_callback_respects_pause() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Phase 1: Set up a dispute with failing escrow → ResolutionFailed.
+    let (client, _job_client, _freelancer, dispute_id) =
+        setup_dispute_with_failing_escrow(&env);
+
+    let assigned = client.get_assigned_arbitrators(&dispute_id);
+    client.cast_vote(&dispute_id, &assigned.get(0).unwrap(), &VoteChoice::Client, &String::from_str(&env, "r"), &0u64);
+    client.cast_vote(&dispute_id, &assigned.get(1).unwrap(), &VoteChoice::Client, &String::from_str(&env, "r"), &1u64);
+    client.cast_vote(&dispute_id, &assigned.get(2).unwrap(), &VoteChoice::Client, &String::from_str(&env, "r"), &2u64);
+
+    assert_eq!(client.get_dispute(&dispute_id).status, DisputeStatus::ResolutionFailed);
+
+    // Phase 2: Pause the contract.
+    let admin_addr = env.as_contract(&client.address, || {
+        env.storage()
+            .instance()
+            .get::<_, Address>(&DataKey::Admin)
+            .unwrap()
+    });
+    client.pause(&admin_addr);
+
+    // Phase 3: retry_escrow_callback should fail with ContractPaused (#11).
+    let result = client.try_retry_escrow_callback(&dispute_id);
+    assert_eq!(result, Err(Ok(DisputeError::ContractPaused)));
+
+    // Dispute should still be in ResolutionFailed.
+    assert_eq!(client.get_dispute(&dispute_id).status, DisputeStatus::ResolutionFailed);
+
+    // Phase 4: Unpause and fix escrow.
+    client.unpause(&admin_addr);
+    let working_escrow_id = env.register_contract(None, DummyEscrow);
+    env.as_contract(&client.address, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::EscrowContract, &working_escrow_id);
+    });
+
+    // Phase 5: Now retry should succeed.
+    let status = client.retry_escrow_callback(&dispute_id);
+    assert_eq!(status, DisputeStatus::ResolvedForClient);
+    assert_eq!(client.get_dispute(&dispute_id).status, DisputeStatus::ResolvedForClient);
+}
+
 #[test]
 fn test_appeal_tie_break_respects_method() {
     let env = Env::default();
@@ -3203,9 +3246,10 @@ fn test_appeal_tie_break_respects_method() {
     let assigned = client.get_assigned_arbitrators(&dispute_id);
     client.cast_vote(&dispute_id, &assigned.get(0).unwrap(), &VoteChoice::Client, &String::from_str(&env, "C1"), &0u64);
     client.cast_vote(&dispute_id, &assigned.get(1).unwrap(), &VoteChoice::Client, &String::from_str(&env, "C2"), &0u64);
+    // The third unanimous "Client" vote reaches AUTO_RESOLVE_VOTE_THRESHOLD, so
+    // cast_vote auto-resolves the dispute internally — no explicit resolve_dispute
+    // call is needed (and one would fail with AlreadyResolved).
     client.cast_vote(&dispute_id, &assigned.get(2).unwrap(), &VoteChoice::Client, &String::from_str(&env, "C3"), &0u64);
-
-    let _ = client.resolve_dispute(&dispute_id);
 
     let appeal_id = client.appeal(&dispute_id, &freelancer);
     

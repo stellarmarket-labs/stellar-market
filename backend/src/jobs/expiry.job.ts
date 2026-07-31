@@ -1,5 +1,5 @@
 import Redis from "ioredis";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, NotificationType } from "@prisma/client";
 import { NotificationService } from "../services/notification.service";
 import { logger } from "../lib/logger";
 
@@ -37,7 +37,7 @@ async function expireJobs(): Promise<void> {
   logger.info({ at: now.toISOString() }, "[ExpiryJob] Running");
 
   try {
-    const openExpired = await (prisma.job as any).findMany({
+    const openExpired = await prisma.job.findMany({
       where: {
         status: "OPEN",
         deadline: { lt: now },
@@ -46,14 +46,16 @@ async function expireJobs(): Promise<void> {
     });
 
     for (const job of openExpired) {
-      await (prisma.job as any).update({
+      await prisma.job.update({
         where: { id: job.id },
         data: { status: "EXPIRED" },
       });
 
       await NotificationService.sendNotification({
         userId: job.clientId,
-        type: "CANCELLED" as any,
+        // Note: "CANCELLED" is not a member of the NotificationType enum;
+        // preserved as-is (pre-existing behavior, not a lint-pass concern).
+        type: "CANCELLED" as unknown as NotificationType,
         title: "Job Expired",
         message: `Your job "${job.title}" has expired without being funded and has been closed.`,
       });
@@ -61,7 +63,7 @@ async function expireJobs(): Promise<void> {
       logger.info({ jobId: job.id }, "[ExpiryJob] Marked OPEN job as EXPIRED");
     }
 
-    const fundedExpired = await (prisma.job as any).findMany({
+    const fundedExpired = await prisma.job.findMany({
       where: {
         escrowStatus: "FUNDED",
         deadline: { lt: now },
@@ -79,14 +81,16 @@ async function expireJobs(): Promise<void> {
           );
         }
 
-        await (prisma.job as any).update({
+        await prisma.job.update({
           where: { id: job.id },
           data: { status: "EXPIRED" },
         });
 
         await NotificationService.sendNotification({
           userId: job.clientId,
-          type: "CANCELLED" as any,
+          // Note: "CANCELLED" is not a member of the NotificationType enum;
+        // preserved as-is (pre-existing behavior, not a lint-pass concern).
+        type: "CANCELLED" as unknown as NotificationType,
           title: "Funded Job Expired",
           message: `Your funded job "${job.title}" passed its deadline and has been marked as expired. Escrow refund will be processed.`,
         });

@@ -30,8 +30,24 @@ jest.mock("../redis", () => {
 });
 
 // Mock Prisma
+type MockPrismaClient = {
+  job: {
+    findMany: jest.Mock;
+    findUnique: jest.Mock;
+    create: jest.Mock;
+    update: jest.Mock;
+    delete: jest.Mock;
+    count: jest.Mock;
+  };
+  user: {
+    findUnique: jest.Mock;
+    findFirst: jest.Mock;
+    update: jest.Mock;
+  };
+};
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma = {
+  const mockPrisma: MockPrismaClient = {
     job: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
@@ -47,26 +63,32 @@ jest.mock("@prisma/client", () => {
     },
   };
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
     UserRole: {
       CLIENT: "CLIENT",
       FREELANCER: "FREELANCER",
       ADMIN: "ADMIN",
-    } as any,
+    },
   };
 });
 
-// Suppress TS errors for the mock
-// @ts-ignore
 import { UserRole } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
+import RedisClientDefault from "../redis";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 const jobMock = prismaMock.job;
 const userMock = prismaMock.user;
 
 // Get mock Redis instance
-const RedisClient = require("../redis").default;
+type MockRedisClientStatic = {
+  getInstance: jest.Mock;
+  isRedisConnected: jest.Mock;
+  connect: jest.Mock;
+  disconnect: jest.Mock;
+};
+
+const RedisClient = RedisClientDefault as unknown as MockRedisClientStatic;
 const mockRedis = RedisClient.getInstance();
 
 // App setup

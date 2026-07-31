@@ -5,8 +5,27 @@ import { config } from "../../config";
 import applicationRouter from "../application.routes";
 
 // ─── Prisma & NotificationService mocks ───────────────────────────────────────
+type MockPrismaClient = {
+  job: {
+    findUnique: jest.Mock;
+    update: jest.Mock;
+  };
+  application: {
+    create: jest.Mock;
+    findUnique: jest.Mock;
+    findMany: jest.Mock;
+    count: jest.Mock;
+    update: jest.Mock;
+    updateMany: jest.Mock;
+    delete: jest.Mock;
+  };
+  user: {
+    findUnique: jest.Mock;
+  };
+};
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma = {
+  const mockPrisma: MockPrismaClient = {
     job: {
       findUnique: jest.fn(),
       update: jest.fn(),
@@ -31,11 +50,11 @@ jest.mock("@prisma/client", () => {
   };
 
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
     NotificationType: {
       JOB_APPLIED: "JOB_APPLIED",
       APPLICATION_ACCEPTED: "APPLICATION_ACCEPTED",
-    } as any,
+    },
   };
 });
 
@@ -57,7 +76,7 @@ jest.mock("../../lib/token-version", () => ({
 }));
 
 import { PrismaClient } from "@prisma/client";
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 const jobMock = prismaMock.job;
 const applicationMock = prismaMock.application;
 const userMock = prismaMock.user;

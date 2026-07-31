@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Gift, Copy, CheckCheck, Users, Star, Loader2 } from "lucide-react";
 import axios from "axios";
+import Avatar from "@/components/Avatar";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
 
@@ -131,9 +132,11 @@ export default function ReferralsPage() {
                 className="flex items-center justify-between py-2 border-b border-theme-border last:border-b-0"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex items-center justify-center text-white font-bold text-sm">
-                    {r.username.charAt(0).toUpperCase()}
-                  </div>
+                  <Avatar
+                    src={null}
+                    alt={r.username}
+                    size={32}
+                  />
                   <span className="text-sm font-medium text-theme-heading">{r.username}</span>
                 </div>
                 <span className="text-xs text-theme-text">

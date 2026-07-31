@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient, Prisma, AuditCategory } from "@prisma/client";
 import RedisClient from "../lib/redis";
 import { logger } from "../lib/logger";
 
@@ -269,7 +269,7 @@ async function persist(item: OutboxItem): Promise<void> {
   await prisma.auditLog.create({
     data: {
       sequence,
-      category: item.category as any,
+      category: item.category as AuditCategory,
       action: item.action,
       actorId: item.actorId,
       target: item.target,

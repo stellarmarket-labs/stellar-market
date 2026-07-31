@@ -46,7 +46,7 @@ async function drainQueueOnce(): Promise<void> {
 
     const redis = getQueueConnection();
 
-    while (true) {
+    for (;;) {
       const rawJob = await redis.lpop(RECOMMENDATION_REBUILD_QUEUE_KEY);
       if (!rawJob) {
         break;

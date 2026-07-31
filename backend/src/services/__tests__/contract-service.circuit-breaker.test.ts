@@ -1,5 +1,5 @@
 import { rpc } from "@stellar/stellar-sdk";
-import { logger } from "../../lib/logger";
+import type { ApiError } from "../../middleware/error";
 
 // Mock logger to avoid cluttering test output
 jest.mock("../../lib/logger", () => ({
@@ -57,8 +57,6 @@ import { ContractService } from "../contract.service";
 describe("ContractService Circuit Breaker", () => {
   let mockPrimaryGetAccount: jest.Mock;
   let mockSecondaryGetAccount: jest.Mock;
-  let mockPrimaryGetLatestLedger: jest.Mock;
-  let mockSecondaryGetLatestLedger: jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -68,19 +66,15 @@ describe("ContractService Circuit Breaker", () => {
 
     mockPrimaryGetAccount = jest.fn();
     mockSecondaryGetAccount = jest.fn();
-    mockPrimaryGetLatestLedger = jest.fn().mockResolvedValue({});
-    mockSecondaryGetLatestLedger = jest.fn().mockResolvedValue({});
 
     (rpc.Server as jest.Mock).mockImplementation((url) => {
       if (url && url.includes("secondary")) {
         return {
           getAccount: mockSecondaryGetAccount,
-          getLatestLedger: mockSecondaryGetLatestLedger,
         };
       } else {
         return {
           getAccount: mockPrimaryGetAccount,
-          getLatestLedger: mockPrimaryGetLatestLedger,
         };
       }
     });
@@ -105,14 +99,13 @@ describe("ContractService Circuit Breaker", () => {
     );
 
     expect(result).toBeDefined();
-    expect(mockPrimaryGetLatestLedger).toHaveBeenCalledTimes(1);
     expect(mockPrimaryGetAccount).toHaveBeenCalledTimes(1);
     expect(mockSecondaryGetAccount).not.toHaveBeenCalled();
     expect(ContractService.getCircuitBreakerStatus().state).toBe("CLOSED");
   });
 
   it("should open circuit after 5 failures and route to secondary RPC", async () => {
-    mockPrimaryGetLatestLedger.mockRejectedValue(new Error("Primary RPC Error"));
+    mockPrimaryGetAccount.mockRejectedValue(new Error("Primary RPC Error"));
     mockSecondaryGetAccount.mockResolvedValue({
       accountId: () => "GSECONDARY",
       sequenceNumber: () => "1",
@@ -141,15 +134,18 @@ describe("ContractService Circuit Breaker", () => {
 
     expect(result).toBeDefined();
     expect(ContractService.getCircuitBreakerStatus().state).toBe("OPEN");
-    expect(mockPrimaryGetLatestLedger).toHaveBeenCalledTimes(5);
-    expect(mockSecondaryGetLatestLedger).toHaveBeenCalledTimes(1);
+    expect(mockPrimaryGetAccount).toHaveBeenCalledTimes(5);
     expect(mockSecondaryGetAccount).toHaveBeenCalledTimes(1);
 
     // A 6th call while open should bypass primary entirely and call secondary.
-    mockPrimaryGetLatestLedger.mockClear();
-    mockSecondaryGetLatestLedger.mockClear();
+    mockPrimaryGetAccount.mockClear();
     mockSecondaryGetAccount.mockClear();
-    
+    mockSecondaryGetAccount.mockResolvedValue({
+      accountId: () => "GSECONDARY",
+      sequenceNumber: () => "1",
+      incrementSequenceNumber: () => {},
+    });
+
     const result6 = await ContractService.buildCreateJobTx(
       "GPRIMARY",
       "GFREELANCER",
@@ -158,14 +154,13 @@ describe("ContractService Circuit Breaker", () => {
       123456
     );
     expect(result6).toBeDefined();
-    expect(mockPrimaryGetLatestLedger).not.toHaveBeenCalled();
-    expect(mockSecondaryGetLatestLedger).toHaveBeenCalledTimes(1);
+    expect(mockPrimaryGetAccount).not.toHaveBeenCalled();
     expect(mockSecondaryGetAccount).toHaveBeenCalledTimes(1);
   });
 
   it("should throw a 503 error when both primary and secondary RPCs fail", async () => {
-    mockPrimaryGetLatestLedger.mockRejectedValue(new Error("Primary RPC Error"));
-    mockSecondaryGetLatestLedger.mockRejectedValue(new Error("Secondary RPC Error"));
+    mockPrimaryGetAccount.mockRejectedValue(new Error("Primary RPC Error"));
+    mockSecondaryGetAccount.mockRejectedValue(new Error("Secondary RPC Error"));
 
     // Force circuit to open
     for (let i = 0; i < 4; i++) {
@@ -175,23 +170,23 @@ describe("ContractService Circuit Breaker", () => {
     }
 
     // 5th failure should trigger primary fail + secondary fail -> throws 503
-    let error: any;
+    let error: ApiError | undefined;
     try {
       await ContractService.buildCreateJobTx("GPRIMARY", "GFREELANCER", "CTOKEN", [], 123456);
     } catch (e) {
-      error = e;
+      error = e as ApiError;
     }
 
     expect(error).toBeDefined();
-    expect(error.statusCode).toBe(503);
-    expect(error.message).toBe("Stellar RPC services unavailable");
+    expect(error?.statusCode).toBe(503);
+    expect(error?.message).toBe("Stellar RPC services unavailable");
     expect(ContractService.getCircuitBreakerStatus().state).toBe("OPEN");
   });
 
   it("should transition to HALF_OPEN and probe primary RPC after 60s cooldown", async () => {
     jest.useFakeTimers();
 
-    mockPrimaryGetLatestLedger.mockRejectedValue(new Error("Primary RPC Error"));
+    mockPrimaryGetAccount.mockRejectedValue(new Error("Primary RPC Error"));
     mockSecondaryGetAccount.mockResolvedValue({
       accountId: () => "GSECONDARY",
       sequenceNumber: () => "1",
@@ -209,14 +204,13 @@ describe("ContractService Circuit Breaker", () => {
     jest.advanceTimersByTime(61000);
 
     // Next call should probe primary
-    mockPrimaryGetLatestLedger.mockClear();
-    mockPrimaryGetLatestLedger.mockResolvedValueOnce({});
+    mockPrimaryGetAccount.mockClear();
     mockPrimaryGetAccount.mockResolvedValueOnce({
       accountId: () => "GPRIMARY",
       sequenceNumber: () => "2",
       incrementSequenceNumber: () => {},
     });
-    mockSecondaryGetLatestLedger.mockClear();
+    mockSecondaryGetAccount.mockClear();
 
     const result = await ContractService.buildCreateJobTx(
       "GPRIMARY",
@@ -227,9 +221,8 @@ describe("ContractService Circuit Breaker", () => {
     );
 
     expect(result).toBeDefined();
-    expect(mockPrimaryGetLatestLedger).toHaveBeenCalledTimes(1);
     expect(mockPrimaryGetAccount).toHaveBeenCalledTimes(1);
-    expect(mockSecondaryGetLatestLedger).not.toHaveBeenCalled();
+    expect(mockSecondaryGetAccount).not.toHaveBeenCalled();
     expect(ContractService.getCircuitBreakerStatus().state).toBe("CLOSED");
 
     jest.useRealTimers();

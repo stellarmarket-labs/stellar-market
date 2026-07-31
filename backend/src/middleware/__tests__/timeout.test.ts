@@ -3,11 +3,19 @@ jest.mock("../../lib/logger", () => ({
 }));
 
 import { EventEmitter } from "events";
+import type { Request, Response } from "express";
 import { requestTimeoutMiddleware, REQUEST_TIMEOUT_MS } from "../timeout";
 import { logger } from "../../lib/logger";
 
-function makeRes() {
-  const res = new EventEmitter() as any;
+type MockResponse = EventEmitter & {
+  headersSent: boolean;
+  status: jest.Mock;
+  json: jest.Mock;
+  end: jest.Mock;
+};
+
+function makeRes(): MockResponse {
+  const res = new EventEmitter() as MockResponse;
   res.headersSent = false;
   res.status = jest.fn(() => res);
   res.json = jest.fn(() => res);
@@ -26,11 +34,11 @@ describe("requestTimeoutMiddleware", () => {
   });
 
   it("calls next immediately and does not respond before the timeout elapses", () => {
-    const req: any = { originalUrl: "/api/jobs", method: "GET", requestId: "req-1" };
+    const req = { originalUrl: "/api/jobs", method: "GET", requestId: "req-1" } as Partial<Request> as Request;
     const res = makeRes();
     const next = jest.fn();
 
-    requestTimeoutMiddleware(req, res, next);
+    requestTimeoutMiddleware(req, res as unknown as Response, next);
 
     expect(next).toHaveBeenCalledTimes(1);
     jest.advanceTimersByTime(REQUEST_TIMEOUT_MS - 1);
@@ -38,11 +46,15 @@ describe("requestTimeoutMiddleware", () => {
   });
 
   it("responds 503 RequestTimeout and logs a warning once the timeout elapses", () => {
-    const req: any = { originalUrl: "/api/escrow/job-1/ttl", method: "GET", requestId: "req-2" };
+    const req = {
+      originalUrl: "/api/escrow/job-1/ttl",
+      method: "GET",
+      requestId: "req-2",
+    } as Partial<Request> as Request;
     const res = makeRes();
     const next = jest.fn();
 
-    requestTimeoutMiddleware(req, res, next);
+    requestTimeoutMiddleware(req, res as unknown as Response, next);
     jest.advanceTimersByTime(REQUEST_TIMEOUT_MS);
 
     expect(res.status).toHaveBeenCalledWith(503);
@@ -54,11 +66,11 @@ describe("requestTimeoutMiddleware", () => {
   });
 
   it("does not fire the timeout once the response has already finished", () => {
-    const req: any = { originalUrl: "/api/jobs", method: "GET", requestId: "req-3" };
+    const req = { originalUrl: "/api/jobs", method: "GET", requestId: "req-3" } as Partial<Request> as Request;
     const res = makeRes();
     const next = jest.fn();
 
-    requestTimeoutMiddleware(req, res, next);
+    requestTimeoutMiddleware(req, res as unknown as Response, next);
     res.emit("finish");
     jest.advanceTimersByTime(REQUEST_TIMEOUT_MS);
 
@@ -66,12 +78,12 @@ describe("requestTimeoutMiddleware", () => {
   });
 
   it("does not double-respond if headers were already sent", () => {
-    const req: any = { originalUrl: "/api/jobs", method: "GET", requestId: "req-4" };
+    const req = { originalUrl: "/api/jobs", method: "GET", requestId: "req-4" } as Partial<Request> as Request;
     const res = makeRes();
     res.headersSent = true;
     const next = jest.fn();
 
-    requestTimeoutMiddleware(req, res, next);
+    requestTimeoutMiddleware(req, res as unknown as Response, next);
     jest.advanceTimersByTime(REQUEST_TIMEOUT_MS);
 
     expect(res.status).not.toHaveBeenCalled();
@@ -79,17 +91,17 @@ describe("requestTimeoutMiddleware", () => {
   });
 
   it("skips timeout for SSE stream routes", () => {
-    const req: any = {
+    const req = {
       originalUrl: "/api/v1/disputes/abc/stream",
       path: "/abc/stream",
       method: "GET",
       headers: { accept: "text/event-stream" },
       requestId: "req-5",
-    };
+    } as Partial<Request> as Request;
     const res = makeRes();
     const next = jest.fn();
 
-    requestTimeoutMiddleware(req, res, next);
+    requestTimeoutMiddleware(req, res as unknown as Response, next);
     jest.advanceTimersByTime(REQUEST_TIMEOUT_MS);
 
     expect(next).toHaveBeenCalledTimes(1);

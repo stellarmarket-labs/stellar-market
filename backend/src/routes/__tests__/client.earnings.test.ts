@@ -1,16 +1,24 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import request from "supertest";
 
+type RequestWithAuth = Request & { userId?: string };
+
 jest.mock("../../middleware/auth", () => ({
-  authenticate: (req: any, _res: any, next: any) => {
+  authenticate: (req: RequestWithAuth, _res: Response, next: NextFunction) => {
     req.userId = "client-1";
     next();
   },
 }));
 
+type MockPrismaClient = {
+  user: { findUnique: jest.Mock };
+  transaction: { aggregate: jest.Mock };
+  $queryRaw: jest.Mock;
+};
+
 jest.mock("@prisma/client", () => {
   const actual = jest.requireActual("@prisma/client") as typeof import("@prisma/client");
-  const mockPrisma = {
+  const mockPrisma: MockPrismaClient = {
     user: { findUnique: jest.fn() },
     transaction: { aggregate: jest.fn() },
     $queryRaw: jest.fn(),
@@ -24,12 +32,12 @@ jest.mock("@prisma/client", () => {
 import { PrismaClient } from "@prisma/client";
 import clientRouter from "../client.routes";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 
 const app = express();
 app.use(express.json());
 app.use("/api/clients", clientRouter);
-app.use((err: any, _req: any, res: any, _next: any) => {
+app.use((err: Error & { statusCode?: number }, _req: Request, res: Response, _next: NextFunction) => {
   res.status(err.statusCode || 500).json({ error: err.message });
 });
 
@@ -57,7 +65,7 @@ describe("GET /api/clients/earnings", () => {
     const res = await request(app).get("/api/clients/earnings");
 
     expect(res.status).toBe(200);
-    const totals = res.body.freelancerBreakdown.map((f: any) => f.totalPaid);
+    const totals = res.body.freelancerBreakdown.map((f: { totalPaid: number }) => f.totalPaid);
     expect(totals).toEqual([...totals].sort((a, b) => b - a));
     expect(res.body.freelancerBreakdown[0]).toMatchObject({ freelancerId: "f-1", totalPaid: 1500 });
   });
