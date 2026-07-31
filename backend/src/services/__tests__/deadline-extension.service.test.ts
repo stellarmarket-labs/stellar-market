@@ -22,8 +22,26 @@ const DeadlineExtensionStatus = {
   EXPIRED: "EXPIRED",
 } as const;
 
+interface MockMilestoneModel {
+  findUnique: jest.Mock;
+  update: jest.Mock;
+}
+
+interface MockDeadlineExtensionRequestModel {
+  create: jest.Mock;
+  findFirst: jest.Mock;
+  findUnique: jest.Mock;
+  findMany: jest.Mock;
+  update: jest.Mock;
+}
+
+interface MockPrismaClient {
+  milestone: MockMilestoneModel;
+  deadlineExtensionRequest: MockDeadlineExtensionRequestModel;
+}
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma: any = {
+  const mockPrisma: MockPrismaClient = {
     milestone: {
       findUnique: jest.fn(),
       update: jest.fn(),
@@ -38,7 +56,7 @@ jest.mock("@prisma/client", () => {
   };
 
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
     DeadlineExtensionStatus: {
       PENDING: "PENDING",
       APPROVED_BY_CLIENT: "APPROVED_BY_CLIENT",
@@ -46,18 +64,18 @@ jest.mock("@prisma/client", () => {
       APPROVED_BY_BOTH: "APPROVED_BY_BOTH",
       REJECTED: "REJECTED",
       EXPIRED: "EXPIRED",
-    } as any,
+    },
     JobStatus: {
       OPEN: "OPEN",
       IN_PROGRESS: "IN_PROGRESS",
       COMPLETED: "COMPLETED",
-    } as any,
+    },
   };
 });
 
 import { PrismaClient } from "@prisma/client";
 import { NotificationService } from "../notification.service";
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 
 // ─── Test data ────────────────────────────────────────────────────────────────
 const clientId = "00000000-0000-4000-8000-000000000001";

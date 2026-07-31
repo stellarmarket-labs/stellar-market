@@ -340,6 +340,7 @@ export default function MilestoneTimeline({
 }: MilestoneTimelineProps) {
   const { isOnline } = useOfflineStatus();
   const isOffline = !isOnline;
+  const [revisionConfirmId, setRevisionConfirmId] = useState<string | null>(null);
   const completedCount = milestones.filter(
     (m) => m.status === "APPROVED",
   ).length;
@@ -529,11 +530,47 @@ export default function MilestoneTimeline({
                         <button
                           type="button"
                           disabled={isActioning}
-                          onClick={() => onRequestRevision(milestone.id)}
+                          onClick={() => setRevisionConfirmId(milestone.id)}
                           className="btn-secondary py-1.5 text-xs flex items-center gap-2 disabled:opacity-50"
                         >
                           <PencilLine size={14} /> Request Revision
                         </button>
+                        {revisionConfirmId === milestone.id && (
+                          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                            <div className="bg-theme-card border border-theme-border rounded-xl shadow-2xl w-full max-w-md p-6">
+                              <h2 className="text-lg font-semibold text-theme-heading mb-2">
+                                Request Revision?
+                              </h2>
+                              <p className="text-sm text-theme-text mb-6">
+                                Requesting a revision will reject this milestone submission.
+                                The freelancer will need to resubmit it for review.
+                                This action cannot be easily undone.
+                              </p>
+                              <div className="flex gap-3 justify-end">
+                                <button
+                                  onClick={() => setRevisionConfirmId(null)}
+                                  className="btn-secondary"
+                                  disabled={isActioning}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setRevisionConfirmId(null);
+                                    onRequestRevision(milestone.id);
+                                  }}
+                                  disabled={isActioning}
+                                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-theme-error text-white text-sm font-medium hover:bg-theme-error/90 transition-colors disabled:opacity-50"
+                                >
+                                  {isActioning ? (
+                                    <Loader2 size={14} className="animate-spin" />
+                                  ) : null}
+                                  Request Revision
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </>
                     )}
                   </div>

@@ -1,9 +1,9 @@
-import { Notification, PrismaClient, NotificationType } from "@prisma/client";
+import { PrismaClient, Prisma, NotificationType } from "@prisma/client";
 import { getIo } from "../socket";
 import { EmailService } from "./email.service";
 import { config } from "../config";
 import { logger } from "../lib/logger";
-import webpush from "web-push";
+import webpush, { WebPushError } from "web-push";
 import {
   notificationQueue,
   getNotificationPriority,
@@ -16,7 +16,7 @@ interface BatchedNotification {
   type: NotificationType;
   title: string;
   message: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
   timestamp: number;
 }
 
@@ -50,7 +50,7 @@ export class NotificationService {
     type: NotificationType;
     title: string;
     message: string;
-    metadata?: any;
+    metadata?: Record<string, unknown>;
     skipBatching?: boolean; // Allow bypassing batching for urgent notifications
   }) {
     const {
@@ -105,7 +105,7 @@ export class NotificationService {
     type: NotificationType;
     title: string;
     message: string;
-    metadata?: any;
+    metadata?: Record<string, unknown>;
   }) {
     const { userId, type, title, message, metadata } = params;
 
@@ -116,14 +116,14 @@ export class NotificationService {
           type,
           title,
           message,
-          metadata: metadata || {},
+          metadata: (metadata || {}) as Prisma.InputJsonValue,
         },
       });
     });
 
     const priority = getNotificationPriority(type);
     await notificationQueue.add(
-      "send" as any,
+      "send",
       {
         userId,
         type,
@@ -243,7 +243,7 @@ export class NotificationService {
   private static createBatchedNotification(
     type: NotificationType,
     notifications: BatchedNotification[],
-  ): { title: string; message: string; metadata: any } {
+  ): { title: string; message: string; metadata: Record<string, unknown> } {
     const count = notifications.length;
 
     switch (type) {
@@ -314,7 +314,7 @@ export class NotificationService {
     type: NotificationType;
     title: string;
     message: string;
-    metadata: any;
+    metadata: Record<string, unknown>;
   }): Promise<void> {
     const { userId, type, title, message, metadata } = params;
 
@@ -384,7 +384,7 @@ export class NotificationService {
       event,
       title,
       message,
-      outcome: metadata?.outcome,
+      outcome: typeof metadata?.outcome === "string" ? metadata.outcome : undefined,
       actionUrl,
       unsubscribeUrl,
     });
@@ -568,7 +568,7 @@ export class NotificationService {
       body: string;
       icon?: string;
       badge?: string;
-      data?: any;
+      data?: Record<string, unknown>;
     },
   ) {
     try {
@@ -607,9 +607,9 @@ export class NotificationService {
               },
               JSON.stringify(payload),
             );
-          } catch (error: any) {
+          } catch (error) {
             // Remove invalid subscriptions
-            if (error.statusCode === 410 || error.statusCode === 404) {
+            if (error instanceof WebPushError && (error.statusCode === 410 || error.statusCode === 404)) {
               await prisma.pushSubscription.delete({
                 where: { id: sub.id },
               });

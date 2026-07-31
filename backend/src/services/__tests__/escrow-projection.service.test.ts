@@ -1,26 +1,34 @@
+interface MockEscrowEventModel {
+  findMany: jest.Mock;
+}
+
+interface MockPrismaClient {
+  escrowEvent: MockEscrowEventModel;
+}
+
 jest.mock("@prisma/client", () => {
   const original = jest.requireActual("@prisma/client");
-  const mockPrisma = {
+  const mockPrisma: MockPrismaClient = {
     escrowEvent: {
       findMany: jest.fn(),
     },
   };
   return {
     ...original,
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
   };
 });
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { applyEvent, initialState, projectJobState } from "../escrow-projection.service";
 import { EscrowEvent, EscrowEventType, JobStatus, EscrowStatus } from "@prisma/client";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 
 function createMockEvent(
   eventType: EscrowEventType,
   ledgerSeq: number,
-  payload: any = {}
+  payload: Prisma.JsonValue = {}
 ): EscrowEvent {
   return {
     id: `event-${ledgerSeq}`,

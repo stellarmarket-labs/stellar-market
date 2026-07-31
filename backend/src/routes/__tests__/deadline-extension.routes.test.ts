@@ -3,7 +3,7 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import { config } from "../../config";
 import deadlineExtensionRouter from "../deadline-extension.routes";
-import { errorHandler } from "../../middleware/error";
+import { errorHandler, ApiError } from "../../middleware/error";
 import { DeadlineExtensionService } from "../../services/deadline-extension.service";
 
 jest.mock("../../services/deadline-extension.service", () => ({
@@ -26,7 +26,7 @@ jest.mock("@prisma/client", () => ({
         deletedAt: null,
       }),
     },
-  })) as any,
+  })),
 }));
 
 jest.mock("../../lib/token-version", () => ({
@@ -149,7 +149,9 @@ describe("POST /api/deadline-extensions/:id/approve", () => {
   });
 
   it("propagates a 400 error from the service (e.g. self-approval)", async () => {
-    const err = new Error("You cannot approve your own extension request") as any;
+    const err = new Error(
+      "You cannot approve your own extension request",
+    ) as ApiError;
     err.statusCode = 400;
     (DeadlineExtensionService.approveExtension as jest.Mock).mockRejectedValueOnce(err);
 

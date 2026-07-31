@@ -1,6 +1,7 @@
 import { NotificationService } from "../notification.service";
 import webpush from "web-push";
 import { config } from "../../config";
+import type { NotificationType } from "@prisma/client";
 
 jest.mock("web-push", () => ({
   __esModule: true,
@@ -36,16 +37,22 @@ jest.mock("../../lib/notification-queue", () => ({
 const mockPushSubscriptionFindMany = jest.fn();
 const mockNotificationCreate = jest.fn();
 
+interface MockPrismaClient {
+  notification: { create: (...args: unknown[]) => unknown };
+  pushSubscription: { findMany: (...args: unknown[]) => unknown; delete: jest.Mock };
+  $transaction: jest.Mock;
+}
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma: any = {
+  const mockPrisma: MockPrismaClient = {
     notification: {
-      create: (...args: any[]) => mockNotificationCreate(...args),
+      create: (...args: unknown[]) => mockNotificationCreate(...args),
     },
     pushSubscription: {
-      findMany: (...args: any[]) => mockPushSubscriptionFindMany(...args),
+      findMany: (...args: unknown[]) => mockPushSubscriptionFindMany(...args),
       delete: jest.fn(),
     },
-    $transaction: jest.fn(async (cb: any) => cb(mockPrisma)),
+    $transaction: jest.fn(async (cb: (client: MockPrismaClient) => unknown) => cb(mockPrisma)),
   };
   return {
     PrismaClient: jest.fn(() => mockPrisma),
@@ -61,6 +68,8 @@ const webpushMocked = webpush as unknown as {
   sendNotification: jest.Mock;
 };
 
+const configMock = config as { vapidPublicKey: string; vapidPrivateKey: string };
+
 describe("NotificationService push dispatch", () => {
   const userId = "user-1";
   const subscription = {
@@ -73,8 +82,8 @@ describe("NotificationService push dispatch", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (config as any).vapidPublicKey = "";
-    (config as any).vapidPrivateKey = "";
+    configMock.vapidPublicKey = "";
+    configMock.vapidPrivateKey = "";
     mockNotificationCreate.mockResolvedValue({
       id: "notif-1",
       userId,
@@ -87,12 +96,12 @@ describe("NotificationService push dispatch", () => {
   });
 
   it("sends a push notification for a qualifying type when VAPID is configured", async () => {
-    (config as any).vapidPublicKey = "public-key";
-    (config as any).vapidPrivateKey = "private-key";
+    configMock.vapidPublicKey = "public-key";
+    configMock.vapidPrivateKey = "private-key";
 
     await NotificationService.sendNotification({
       userId,
-      type: "MILESTONE_APPROVED" as any,
+      type: "MILESTONE_APPROVED" as NotificationType,
       title: "Milestone Approved",
       message: "Your milestone was approved",
       skipBatching: true,
@@ -112,8 +121,8 @@ describe("NotificationService push dispatch", () => {
   });
 
   it("does not push for notification types outside the push-enabled list", async () => {
-    (config as any).vapidPublicKey = "public-key";
-    (config as any).vapidPrivateKey = "private-key";
+    configMock.vapidPublicKey = "public-key";
+    configMock.vapidPrivateKey = "private-key";
     mockNotificationCreate.mockResolvedValueOnce({
       id: "notif-2",
       userId,
@@ -125,7 +134,7 @@ describe("NotificationService push dispatch", () => {
 
     await NotificationService.sendNotification({
       userId,
-      type: "SOME_OTHER_TYPE" as any,
+      type: "SOME_OTHER_TYPE" as NotificationType,
       title: "Other",
       message: "Not push-enabled",
       skipBatching: true,
@@ -137,7 +146,7 @@ describe("NotificationService push dispatch", () => {
   it("skips push gracefully when VAPID keys are not configured", async () => {
     const result = await NotificationService.sendNotification({
       userId,
-      type: "MILESTONE_APPROVED" as any,
+      type: "MILESTONE_APPROVED" as NotificationType,
       title: "Milestone Approved",
       message: "Your milestone was approved",
       skipBatching: true,

@@ -36,8 +36,34 @@ const JobStatus = {
 } as const;
 
 // ─── Prisma mock ─────────────────────────────────────────────────────────────
+type MockPrismaClient = {
+  user: {
+    findUnique: jest.Mock;
+    findFirst: jest.Mock;
+  };
+  job: {
+    findUnique: jest.Mock;
+    update: jest.Mock;
+  };
+  dispute: {
+    create: jest.Mock;
+    findUnique: jest.Mock;
+    findMany: jest.Mock;
+    update: jest.Mock;
+    count: jest.Mock;
+  };
+  disputeVote: {
+    create: jest.Mock;
+    findUnique: jest.Mock;
+    findMany: jest.Mock;
+    count: jest.Mock;
+  };
+  $disconnect: jest.Mock;
+  $transaction: jest.Mock;
+};
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma: any = {
+  const mockPrisma: MockPrismaClient = {
     user: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
@@ -60,42 +86,44 @@ jest.mock("@prisma/client", () => {
       count: jest.fn(),
     },
     $disconnect: jest.fn(),
-    $transaction: jest.fn(async (cb: any): Promise<any> => await cb(mockPrisma)),
+    $transaction: jest.fn(
+      async (cb: (tx: MockPrismaClient) => Promise<unknown>) => await cb(mockPrisma),
+    ),
   };
 
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
     DisputeStatus: {
       OPEN: "OPEN",
       IN_PROGRESS: "IN_PROGRESS",
       RESOLVED: "RESOLVED",
-    } as any,
+    },
     JobStatus: {
       OPEN: "OPEN",
       IN_PROGRESS: "IN_PROGRESS",
       COMPLETED: "COMPLETED",
       CANCELLED: "CANCELLED",
       DISPUTED: "DISPUTED",
-    } as any,
+    },
     EscrowStatus: {
       UNFUNDED: "UNFUNDED",
       FUNDED: "FUNDED",
       COMPLETED: "COMPLETED",
       CANCELLED: "CANCELLED",
       DISPUTED: "DISPUTED",
-    } as any,
+    },
     DisputeEventType: {
       DISPUTE_OPENED: "DISPUTE_OPENED",
       EVIDENCE_SUBMITTED: "EVIDENCE_SUBMITTED",
       ARBITRATOR_ASSIGNED: "ARBITRATOR_ASSIGNED",
       VOTE_CAST: "VOTE_CAST",
       VERDICT_REACHED: "VERDICT_REACHED",
-    } as any,
+    },
   };
 });
 
 import { PrismaClient } from "@prisma/client";
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 
 // ─── Test data ────────────────────────────────────────────────────────────────
 const clientId = "00000000-0000-4000-8000-000000000001";
@@ -502,7 +530,7 @@ describe("Dispute Management System", () => {
     it("should handle unknown webhook type", async () => {
       await expect(
         DisputeService.processWebhook({
-          type: "UNKNOWN_TYPE" as any,
+          type: "UNKNOWN_TYPE",
           disputeId: "test",
         }),
       ).rejects.toThrow("Unknown webhook type");

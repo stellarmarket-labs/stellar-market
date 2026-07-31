@@ -1,5 +1,5 @@
 import { Router, Response } from "express";
-import { PrismaClient, UserRole, DisputeStatus } from "@prisma/client";
+import { PrismaClient, DisputeStatus, Prisma, NotificationType } from "@prisma/client";
 import { AuthRequest, requireAdmin } from "../middleware/auth";
 import { getDlqJobs } from "../lib/notification-queue";
 import {
@@ -11,50 +11,33 @@ import {
   queryPendingDisputesSchema,
   queryFlaggedUsersSchema,
   getAuditLogsQuerySchema,
+  GetJobsAdminQuery,
 } from "../schemas/admin";
 import { z, ZodError } from "zod";
 import { logAdminAction } from "../utils/auditLogger";
 import { AuditService } from "../services/audit.service";
 import { NotificationService } from "../services/notification.service";
 import { validate } from "../middleware/validation";
-import {
-  getHorizonStatus,
-  overrideHorizonCursor,
-  replayHorizonDlq,
-} from "../services/horizon-listener.service";
+import { getHorizonStatus, replayHorizonDlq, overrideHorizonCursor } from "../services/horizon-listener.service";
 import { projectJobState } from "../services/escrow-projection.service";
 import { ReputationCacheService } from "../services/reputation-cache.service";
+import { logger } from "../lib/logger";
 
 const router = Router();
 const prisma = new PrismaClient();
 
 /**
  * GET /api/admin/horizon/status
- * Return the durable listener cursor and unresolved DLQ depth.
+ * Get Horizon listener status including cursor and DLQ depth
  */
 router.get(
   "/horizon/status",
   async (_req: AuthRequest, res: Response): Promise<void> => {
     try {
-      res.json(await getHorizonStatus());
+      const status = await getHorizonStatus();
+      res.json(status);
     } catch (error) {
-      console.error("Error fetching Horizon listener status:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  },
-);
-
-/**
- * POST /api/admin/horizon/dlq/replay
- * Replay unresolved failed events in cursor order.
- */
-router.post(
-  "/horizon/dlq/replay",
-  async (_req: AuthRequest, res: Response): Promise<void> => {
-    try {
-      res.json(await replayHorizonDlq());
-    } catch (error) {
-      console.error("Error replaying Horizon DLQ:", error);
+      logger.error({ err: error }, "Error getting Horizon status:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -62,22 +45,56 @@ router.post(
 
 /**
  * POST /api/admin/horizon/cursor
- * Manually replace the persisted paging token for disaster recovery.
+ * Manually set Horizon cursor for disaster recovery
  */
 router.post(
   "/horizon/cursor",
   validate({
     body: z.object({
-      cursor: z.string().trim().min(1, "Cursor is required"),
+      cursor: z.string().min(1, "Cursor is required"),
     }),
   }),
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       const { cursor } = req.body as { cursor: string };
+
       await overrideHorizonCursor(cursor);
-      res.json({ cursor });
+
+      await logAdminAction(req.userId!, "HORIZON_CURSOR_OVERRIDE", "horizon", {
+        cursor,
+      });
+
+      res.json({
+        message: "Horizon cursor updated successfully",
+        cursor,
+      });
     } catch (error) {
-      console.error("Error overriding Horizon cursor:", error);
+      logger.error({ err: error }, "Error updating Horizon cursor:");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
+/**
+ * POST /api/admin/horizon/dlq/replay
+ * Replay all unresolved DLQ entries
+ */
+router.post(
+  "/horizon/dlq/replay",
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const result = await replayHorizonDlq();
+
+      await logAdminAction(
+        req.userId!,
+        "HORIZON_DLQ_REPLAY",
+        "horizon",
+        result,
+      );
+
+      res.json(result);
+    } catch (error) {
+      logger.error({ err: error }, "Error replaying DLQ:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -99,14 +116,14 @@ router.get(
       const query = getAuditLogsQuerySchema.parse(req.query);
       const { page, limit, category, action, actorId, from, to, format } = query;
 
-      const where: any = {};
+      const where: Prisma.AuditLogWhereInput = {};
       if (category) where.category = category;
       if (action) where.action = action;
       if (actorId) where.actorId = actorId;
       if (from || to) {
         where.timestamp = {};
-        if (from) where.timestamp.gte = from;
-        if (to) where.timestamp.lte = to;
+        if (from) (where.timestamp as Prisma.DateTimeFilter).gte = from;
+        if (to) (where.timestamp as Prisma.DateTimeFilter).lte = to;
       }
 
       if (format === "csv") {
@@ -187,7 +204,7 @@ router.get(
         res.status(400).json({ error: "Invalid query", details: error.issues });
         return;
       }
-      console.error("Error querying audit logs:", error);
+      logger.error({ err: error }, "Error querying audit logs:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -205,7 +222,7 @@ router.get(
       const result = await AuditService.verifyChain();
       res.status(result.valid ? 200 : 409).json(result);
     } catch (error) {
-      console.error("Error verifying audit log chain:", error);
+      logger.error({ err: error }, "Error verifying audit log chain:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -233,7 +250,7 @@ router.get(
       } = query;
       const skip = (page - 1) * limit;
 
-      const where: any = {};
+      const where: Prisma.UserWhereInput = {};
 
       if (search) {
         where.OR = [
@@ -277,7 +294,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error("Error fetching users:", error);
+      logger.error({ err: error }, "Error fetching users:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -298,7 +315,7 @@ router.get(
       });
       res.json({ failed });
     } catch (error) {
-      console.error("Error fetching failed notifications:", error);
+      logger.error({ err: error }, "Error fetching failed notifications:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -387,7 +404,9 @@ router.delete(
       if (job.clientId) {
         await NotificationService.sendNotification({
           userId: job.clientId,
-          type: "CANCELLED" as any,
+          // Note: "CANCELLED" is not a member of the NotificationType enum;
+          // preserved as-is (pre-existing behavior, not a lint-pass concern).
+          type: "CANCELLED" as unknown as NotificationType,
           title: "Job Removed by Moderator",
           message: `Your job listing "${job.title}" has been removed by a platform administrator for violating terms.`,
         });
@@ -397,7 +416,7 @@ router.delete(
 
       res.json({ message: "Job removed successfully" });
     } catch (error) {
-      console.error("Error removing job:", error);
+      logger.error({ err: error }, "Error removing job:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -416,11 +435,11 @@ router.get(
       const limit = parseInt(req.query.limit as string) || 20;
       // getJobsAdminQuerySchema transforms includeDeleted to a boolean
       const includeDeleted =
-        (req.query as any).includeDeleted === true ||
+        (req.query as unknown as GetJobsAdminQuery).includeDeleted === true ||
         req.query.includeDeleted === "true";
       const skip = (page - 1) * limit;
 
-      const where: any = {};
+      const where: Prisma.JobWhereInput = {};
 
       // By default, exclude deleted jobs unless explicitly requested
       if (!includeDeleted) {
@@ -461,7 +480,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error("Error fetching jobs:", error);
+      logger.error({ err: error }, "Error fetching jobs:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -502,7 +521,7 @@ router.post(
         job: restoredJob,
       });
     } catch (error) {
-      console.error("Error restoring job:", error);
+      logger.error({ err: error }, "Error restoring job:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -532,7 +551,7 @@ router.get(
 
       res.json({ disputes });
     } catch (error) {
-      console.error("Error fetching disputes:", error);
+      logger.error({ err: error }, "Error fetching disputes:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -653,7 +672,7 @@ router.get(
           totalPages: Math.ceil(total / limit),
         },
       });
-    } catch (error) {
+    } catch {
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -701,7 +720,7 @@ router.get(
         suspendedUsers: suspendedUsers,
       });
     } catch (error) {
-      console.error("Error fetching flagged content:", error);
+      logger.error({ err: error }, "Error fetching flagged content:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -756,7 +775,7 @@ router.get("/stats", async (req: AuthRequest, res: Response): Promise<void> => {
       disputeRate: parseFloat(disputeRate),
     });
   } catch (error) {
-    console.error("Error fetching stats:", error);
+    logger.error({ err: error }, "Error fetching stats:");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -829,7 +848,7 @@ router.get(
           .json({ error: "Validation error", details: error.issues });
         return;
       }
-      console.error("Error fetching pending disputes:", error);
+      logger.error({ err: error }, "Error fetching pending disputes:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -881,7 +900,7 @@ router.get(
           .json({ error: "Validation error", details: error.issues });
         return;
       }
-      console.error("Error fetching users:", error);
+      logger.error({ err: error }, "Error fetching users:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -911,7 +930,7 @@ router.get(
 
       res.json({ disputes });
     } catch (error) {
-      console.error("Error fetching disputes:", error);
+      logger.error({ err: error }, "Error fetching disputes:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -942,7 +961,7 @@ router.get(
 
       res.json({ disputes });
     } catch (error) {
-      console.error("Error fetching pending disputes:", error);
+      logger.error({ err: error }, "Error fetching pending disputes:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1063,7 +1082,7 @@ router.get(
           totalPages: Math.ceil(total / limit),
         },
       });
-    } catch (error) {
+    } catch {
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1111,7 +1130,7 @@ router.get(
         suspendedUsers: suspendedUsers,
       });
     } catch (error) {
-      console.error("Error fetching flagged content:", error);
+      logger.error({ err: error }, "Error fetching flagged content:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1139,7 +1158,7 @@ router.get(
 
       res.json({ users });
     } catch (error) {
-      console.error("Error fetching flagged users:", error);
+      logger.error({ err: error }, "Error fetching flagged users:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1166,7 +1185,7 @@ router.get("/stats", async (req: AuthRequest, res: Response): Promise<void> => {
       suspendedUsers,
     });
   } catch (error) {
-    console.error("Error fetching stats:", error);
+    logger.error({ err: error }, "Error fetching stats:");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -1242,7 +1261,7 @@ router.post(
       await logAdminAction(req.userId!, "DISMISS_JOB_FLAG", id);
 
       res.json({ message: "Job flag dismissed successfully", job: updatedJob });
-    } catch (error) {
+    } catch {
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1297,7 +1316,7 @@ router.post(
       });
 
       res.json({ message: "User suspended successfully", user: updatedUser });
-    } catch (error) {
+    } catch {
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1331,7 +1350,7 @@ router.post(
       await logAdminAction(req.userId!, "UNSUSPEND_USER", id);
 
       res.json({ message: "User restored successfully", user: updatedUser });
-    } catch (error) {
+    } catch {
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1352,12 +1371,13 @@ router.get(
       const limit = Math.min(100, parseInt(req.query.limit as string) || 20);
       const skip = (page - 1) * limit;
 
-      const where: any = {};
-      if (req.query.status) where.status = req.query.status;
-      if (req.query.targetType) where.targetType = req.query.targetType;
+      const where: Prisma.ReportWhereInput = {};
+      if (req.query.status) where.status = req.query.status as Prisma.ReportWhereInput["status"];
+      if (req.query.targetType)
+        where.targetType = req.query.targetType as Prisma.ReportWhereInput["targetType"];
 
       const [reports, total] = await Promise.all([
-        (prisma as any).report.findMany({
+        prisma.report.findMany({
           where,
           skip,
           take: limit,
@@ -1366,7 +1386,7 @@ router.get(
             reporter: { select: { id: true, username: true } },
           },
         }),
-        (prisma as any).report.count({ where }),
+        prisma.report.count({ where }),
       ]);
 
       res.json({
@@ -1379,7 +1399,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error("Error fetching reports:", error);
+      logger.error({ err: error }, "Error fetching reports:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1408,19 +1428,19 @@ router.patch(
         suspendReason?: string;
       };
 
-      const report = await (prisma as any).report.findUnique({ where: { id } });
+      const report = await prisma.report.findUnique({ where: { id } });
       if (!report) {
         res.status(404).json({ error: "Report not found" });
         return;
       }
 
-      const updated = await (prisma as any).report.update({
+      const updated = await prisma.report.update({
         where: { id },
         data: { status },
       });
 
       if (suspend && report.targetType === "USER") {
-        await (prisma.user as any).update({
+        await prisma.user.update({
           where: { id: report.targetId },
           data: {
             isSuspended: true,
@@ -1465,7 +1485,7 @@ router.get(
       });
       res.json({ events });
     } catch (error) {
-      console.error("Error fetching event log:", error);
+      logger.error({ err: error }, "Error fetching event log:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1502,7 +1522,7 @@ router.post(
         job: updatedJob,
       });
     } catch (error) {
-      console.error("Error reprojecting job state:", error);
+      logger.error({ err: error }, "Error reprojecting job state:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1534,7 +1554,7 @@ router.post(
         walletAddress,
       });
     } catch (error) {
-      console.error("Error invalidating reputation cache:", error);
+      logger.error({ err: error }, "Error invalidating reputation cache:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1559,7 +1579,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error("Error getting reputation cache stats:", error);
+      logger.error({ err: error }, "Error getting reputation cache stats:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
@@ -1586,11 +1606,10 @@ router.get(
         })),
       });
     } catch (error) {
-      console.error("Error fetching DLQ jobs:", error);
+      logger.error({ err: error }, "Error fetching DLQ jobs:");
       res.status(500).json({ error: "Internal server error" });
     }
   },
 );
-
 
 export default router;

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import { MessageSquare, Search, User, Briefcase } from "lucide-react";
 import axios from "axios";
 import { Conversation } from "@/types";
@@ -12,7 +13,18 @@ import MessageSkeleton from "@/components/skeletons/MessageSkeleton";
 import Avatar from "@/components/Avatar";
 
 export default function InboxPage() {
+  return (
+    <Suspense fallback={null}>
+      <InboxPageContent />
+    </Suspense>
+  );
+}
+
+function InboxPageContent() {
   const { token } = useAuth();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const jobId = searchParams.get("jobId");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -31,6 +43,16 @@ export default function InboxPage() {
           },
         );
         setConversations(response.data);
+
+        // Auto-navigate to conversation matching jobId if provided
+        if (jobId) {
+          const matchingConversation = response.data.find(
+            (conv: Conversation) => conv.job?.id === jobId,
+          );
+          if (matchingConversation) {
+            router.replace(`/messages/${matchingConversation.id}`);
+          }
+        }
       } catch (err) {
         console.error("Fetch conversations error:", err);
       } finally {
@@ -39,7 +61,7 @@ export default function InboxPage() {
     };
 
     fetchConversations();
-  }, [token]);
+  }, [token, jobId, router]);
 
   const filteredConversations = conversations.filter(
     (conv) =>

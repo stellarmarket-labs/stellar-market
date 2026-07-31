@@ -17,7 +17,7 @@ jest.mock("@prisma/client", () => {
       count: jest.fn().mockResolvedValue(0),
     },
   };
-  return { PrismaClient: jest.fn(() => mockPrisma) as any };
+  return { PrismaClient: jest.fn(() => mockPrisma) };
 });
 
 jest.mock("../../lib/cache", () => ({
@@ -39,7 +39,16 @@ import { PrismaClient } from "@prisma/client";
 import jobRouter from "../job.routes";
 import categoriesRouter from "../categories.routes";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as {
+  user: { findUnique: jest.Mock };
+  job: {
+    findMany: jest.Mock;
+    findFirst: jest.Mock;
+    create: jest.Mock;
+    update: jest.Mock;
+    count: jest.Mock;
+  };
+};
 const jobMock = prismaMock.job;
 const userMock = prismaMock.user;
 

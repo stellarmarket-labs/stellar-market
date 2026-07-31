@@ -31,11 +31,11 @@ jest.mock("@prisma/client", () => {
   };
 
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
+    PrismaClient: jest.fn(() => mockPrisma),
     NotificationType: {
       MILESTONE_SUBMITTED: "MILESTONE_SUBMITTED",
       MILESTONE_APPROVED: "MILESTONE_APPROVED",
-    } as any,
+    },
   };
 });
 
@@ -67,7 +67,24 @@ import { PrismaClient } from "@prisma/client";
 import { NotificationService } from "../../services/notification.service";
 import { ContractService } from "../../services/contract.service";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as {
+  job: { findUnique: jest.Mock };
+  milestone: {
+    findUnique: jest.Mock;
+    findMany: jest.Mock;
+    count: jest.Mock;
+    create: jest.Mock;
+    update: jest.Mock;
+    delete: jest.Mock;
+  };
+  attachment: {
+    findUnique: jest.Mock;
+    findMany: jest.Mock;
+    create: jest.Mock;
+    delete: jest.Mock;
+  };
+  user: { findUnique: jest.Mock };
+};
 const jobMock = prismaMock.job;
 const milestoneMock = prismaMock.milestone;
 const userMock = prismaMock.user;
@@ -435,7 +452,7 @@ describe("PUT /api/milestones/milestones/:id/approve", () => {
 
 describe("POST /api/milestones (create)", () => {
   it("returns 403 when caller is not the job's client", async () => {
-    jobMock.findUnique.mockResolvedValueOnce({ id: JOB_ID, clientId: CLIENT_ID });
+    jobMock.findUnique.mockResolvedValueOnce({ id: JOB_ID, clientId: CLIENT_ID, budget: 500 });
 
     const res = await request(app)
       .post("/api/milestones")
@@ -455,14 +472,41 @@ describe("POST /api/milestones (create)", () => {
     expect(milestoneMock.create).not.toHaveBeenCalled();
   });
 
-  it("creates a milestone for the job's client", async () => {
-    jobMock.findUnique.mockResolvedValueOnce({ id: JOB_ID, clientId: CLIENT_ID });
-    milestoneMock.count.mockResolvedValueOnce(0);
+  it("returns 400 when creating a milestone that would push total amount above job budget", async () => {
+    jobMock.findUnique.mockResolvedValueOnce({ id: JOB_ID, clientId: CLIENT_ID, budget: 500 });
+    milestoneMock.findMany.mockResolvedValueOnce([
+      { amount: 300 },
+      { amount: 150 },
+    ]);
+
+    const res = await request(app)
+      .post("/api/milestones")
+      .set(authHeader(CLIENT_ID, "CLIENT"))
+      .send({
+        jobId: JOB_ID,
+        title: "Excessive milestone",
+        description: "Deliver deliverables that exceed the remaining budget.",
+        amount: 100,
+        dueDate: new Date(Date.now() + 86400000).toISOString(),
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: "Total milestone amount exceeds job budget.",
+    });
+    expect(milestoneMock.create).not.toHaveBeenCalled();
+  });
+
+  it("creates a milestone for the job's client when total is within budget", async () => {
+    jobMock.findUnique.mockResolvedValueOnce({ id: JOB_ID, clientId: CLIENT_ID, budget: 500 });
+    milestoneMock.findMany.mockResolvedValueOnce([
+      { amount: 300 },
+    ]);
     milestoneMock.create.mockResolvedValueOnce({
       id: MILESTONE_ID,
       jobId: JOB_ID,
-      title: "Initial design",
-      order: 1,
+      title: "Valid milestone",
+      order: 2,
     });
 
     const res = await request(app)
@@ -470,9 +514,9 @@ describe("POST /api/milestones (create)", () => {
       .set(authHeader(CLIENT_ID, "CLIENT"))
       .send({
         jobId: JOB_ID,
-        title: "Initial design",
-        description: "Deliver the initial design mockups for review.",
-        amount: 100,
+        title: "Valid milestone",
+        description: "Deliver secondary milestone deliverables.",
+        amount: 150,
         dueDate: new Date(Date.now() + 86400000).toISOString(),
       });
 

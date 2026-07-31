@@ -1,5 +1,5 @@
 import { Router, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { rpc } from "@stellar/stellar-sdk";
 import { z } from "zod";
 import { authenticate, AuthRequest } from "../middleware/auth";
@@ -25,6 +25,11 @@ const createTransactionSchema = {
   }),
 };
 
+const simplePaginationQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 const listTransactionsSchema = {
   query: z.object({
     page: z.coerce.number().int().min(1).default(1),
@@ -36,6 +41,28 @@ const listTransactionsSchema = {
     maxAmount: z.coerce.number().optional(),
   }),
 };
+
+const transactionHistoryQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  type: z.enum(["DEPOSIT", "RELEASE", "REFUND", "DISPUTE_PAYOUT"]).optional(),
+  direction: z.enum(["incoming", "outgoing", "all"]).default("all"),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+  minAmount: z.coerce.number().optional(),
+  maxAmount: z.coerce.number().optional(),
+  jobId: z.string().optional(),
+  tokenAddress: z.string().optional(),
+  includeAnalytics: z.coerce.boolean().default(false),
+});
+
+const exportTransactionsQuerySchema = z.object({
+  type: z.enum(["DEPOSIT", "RELEASE", "REFUND", "DISPUTE_PAYOUT"]).optional(),
+  direction: z.enum(["incoming", "outgoing", "all"]).default("all"),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+  format: z.enum(["csv", "json"]).default("csv"),
+});
 
 const jobTransactionsSchema = {
   params: z.object({
@@ -159,7 +186,7 @@ router.get(
         const rpcResult = await rpcServer.getTransaction(txHash);
 
         if (rpcResult.status === "SUCCESS") {
-          const confirmedLedger = (rpcResult as any).ledger ?? null;
+          const confirmedLedger = rpcResult.ledger ?? null;
           await prisma.transaction.update({
             where: { id: record.id },
             data: { status: "SUCCESS", confirmedLedger },
@@ -321,12 +348,12 @@ router.get(
         dateTo,
         minAmount,
         maxAmount,
-      } = req.query;
+      } = req.query as unknown as z.infer<typeof listTransactionsSchema.query>;
 
       const skip = (Number(page) - 1) * Number(limit);
 
       // Build filter
-      const where: any = {
+      const where: Prisma.TransactionWhereInput = {
         OR: [
           { fromAddress: user.walletAddress },
           { toAddress: user.walletAddress },
@@ -407,21 +434,7 @@ router.get(
   "/history",
   authenticate,
   validate({
-    query: z.object({
-      page: z.coerce.number().int().min(1).default(1),
-      limit: z.coerce.number().int().min(1).max(100).default(20),
-      type: z
-        .enum(["DEPOSIT", "RELEASE", "REFUND", "DISPUTE_PAYOUT"])
-        .optional(),
-      direction: z.enum(["incoming", "outgoing", "all"]).default("all"),
-      dateFrom: z.string().optional(),
-      dateTo: z.string().optional(),
-      minAmount: z.coerce.number().optional(),
-      maxAmount: z.coerce.number().optional(),
-      jobId: z.string().optional(),
-      tokenAddress: z.string().optional(),
-      includeAnalytics: z.coerce.boolean().default(false),
-    }),
+    query: transactionHistoryQuerySchema,
   }),
   async (req: AuthRequest, res: Response) => {
     try {
@@ -445,12 +458,12 @@ router.get(
         jobId,
         tokenAddress,
         includeAnalytics = false,
-      } = req.query as any;
+      } = req.query as unknown as z.infer<typeof transactionHistoryQuerySchema>;
 
       const skip = (Number(page) - 1) * Number(limit);
 
       // Build base filter
-      const where: any = {};
+      const where: Prisma.TransactionWhereInput = {};
 
       // Filter by direction (incoming/outgoing)
       if (direction === "incoming") {
@@ -559,7 +572,6 @@ router.get(
       // Enhance transactions with direction and role information
       const enhancedTransactions = transactions.map((tx) => {
         const isIncoming = tx.toAddress === user.walletAddress;
-        const isOutgoing = tx.fromAddress === user.walletAddress;
 
         let userRole = "unknown";
         if (tx.job?.clientId === req.userId) {
@@ -581,7 +593,16 @@ router.get(
         };
       });
 
-      const response: any = {
+      const response: {
+        transactions: typeof enhancedTransactions;
+        pagination: {
+          page: number;
+          limit: number;
+          total: number;
+          totalPages: number;
+        };
+        analytics?: unknown;
+      } = {
         transactions: enhancedTransactions,
         pagination: {
           page: Number(page),
@@ -643,9 +664,9 @@ router.get(
             ORDER BY month DESC
           `,
           // Unique counterparties
-          prisma.$queryRaw`
-            SELECT COUNT(DISTINCT 
-              CASE 
+          prisma.$queryRaw<{ unique_counterparties: number }[]>`
+            SELECT COUNT(DISTINCT
+              CASE
                 WHEN "fromAddress" = ${user.walletAddress} THEN "toAddress"
                 ELSE "fromAddress"
               END
@@ -666,7 +687,7 @@ router.get(
             incomingTransactions: totalIncoming._count,
             outgoingTransactions: totalOutgoing._count,
             uniqueCounterparties:
-              (uniqueCounterparties as any)[0]?.unique_counterparties || 0,
+              uniqueCounterparties[0]?.unique_counterparties || 0,
           },
           byType: transactionsByType.map((item) => ({
             type: item.type,
@@ -693,15 +714,7 @@ router.get(
   "/export",
   authenticate,
   validate({
-    query: z.object({
-      type: z
-        .enum(["DEPOSIT", "RELEASE", "REFUND", "DISPUTE_PAYOUT"])
-        .optional(),
-      direction: z.enum(["incoming", "outgoing", "all"]).default("all"),
-      dateFrom: z.string().optional(),
-      dateTo: z.string().optional(),
-      format: z.enum(["csv", "json"]).default("csv"),
-    }),
+    query: exportTransactionsQuerySchema,
   }),
   async (req: AuthRequest, res: Response) => {
     try {
@@ -719,10 +732,10 @@ router.get(
         dateFrom,
         dateTo,
         format = "csv",
-      } = req.query as any;
+      } = req.query as unknown as z.infer<typeof exportTransactionsQuerySchema>;
 
       // Build filter
-      const where: any = {};
+      const where: Prisma.TransactionWhereInput = {};
 
       if (direction === "incoming") {
         where.toAddress = user.walletAddress;
@@ -783,27 +796,30 @@ router.get(
       let hasMore = true;
       let isFirst = true;
 
+      const exportInclude = {
+        job: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+        milestone: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+      } satisfies Prisma.TransactionInclude;
+      type ExportTransaction = Prisma.TransactionGetPayload<{ include: typeof exportInclude }>;
+
       while (hasMore) {
-        const transactions: any[] = await prisma.transaction.findMany({
+        const transactions: ExportTransaction[] = await prisma.transaction.findMany({
           take: BATCH_SIZE,
           skip: cursor ? 1 : 0,
           cursor: cursor ? { id: cursor } : undefined,
           where,
           orderBy: { createdAt: "desc" },
-          include: {
-            job: {
-              select: {
-                id: true,
-                title: true,
-              },
-            },
-            milestone: {
-              select: {
-                id: true,
-                title: true,
-              },
-            },
-          },
+          include: exportInclude,
         });
 
         if (transactions.length === 0) {
@@ -833,7 +849,7 @@ router.get(
               tx.tokenAddress,
               tx.fromAddress,
               tx.toAddress,
-              `"${tx.job.title.replace(/"/g, '""')}"`,
+              `"${tx.job!.title.replace(/"/g, '""')}"`,
               tx.milestone ? `"${tx.milestone.title.replace(/"/g, '""')}"` : "",
               tx.txHash,
             ].join(",");
@@ -921,7 +937,7 @@ router.get(
             }),
           ]);
 
-          const countField = (tokenGroup._count as any).tokenAddress as number;
+          const countField = tokenGroup._count.tokenAddress;
           const incomingSum = incoming._sum?.amount ?? 0;
           const outgoingSum = outgoing._sum?.amount ?? 0;
 
@@ -968,10 +984,7 @@ router.get(
   "/history/counterparties",
   authenticate,
   validate({
-    query: z.object({
-      page: z.coerce.number().int().min(1).default(1),
-      limit: z.coerce.number().int().min(1).max(100).default(20),
-    }),
+    query: simplePaginationQuerySchema,
   }),
   async (req: AuthRequest, res: Response) => {
     try {
@@ -983,7 +996,7 @@ router.get(
         return res.status(404).json({ error: "User not found" });
       }
 
-      const { page = 1, limit = 20 } = req.query as any;
+      const { page = 1, limit = 20 } = req.query as unknown as z.infer<typeof simplePaginationQuerySchema>;
       const skip = (Number(page) - 1) * Number(limit);
 
       // Get unique counterparties with transaction counts and volumes
@@ -1159,7 +1172,7 @@ router.get(
   async (req: AuthRequest, res: Response) => {
     try {
       const jobId = req.params.jobId as string;
-      const { page = 1, limit = 20 } = req.query as any;
+      const { page = 1, limit = 20 } = req.query as unknown as z.infer<typeof simplePaginationQuerySchema>;
 
       const skip = (Number(page) - 1) * Number(limit);
 

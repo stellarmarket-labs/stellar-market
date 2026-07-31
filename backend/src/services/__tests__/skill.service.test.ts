@@ -1,5 +1,9 @@
+type MockPrismaClient = {
+  skill: { findMany: jest.Mock };
+};
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma = {
+  const mockPrisma: MockPrismaClient = {
     skill: { findMany: jest.fn() },
   };
   return { PrismaClient: jest.fn(() => mockPrisma) };
@@ -8,7 +12,7 @@ jest.mock("@prisma/client", () => {
 import { PrismaClient } from "@prisma/client";
 import { normalizeSkills } from "../skill.service";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 
 beforeEach(() => {
   jest.clearAllMocks();

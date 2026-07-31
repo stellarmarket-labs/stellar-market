@@ -120,7 +120,9 @@ export default function JobDetailClient() {
   } = useQuery<Job | null>({
     queryKey: ["job", id],
     queryFn: async () => {
-      const token = localStorage.getItem("token");
+      // Read the auth token with the correct key (stellarmarket_jwt) falling
+      // back to the legacy "token" key for backward compatibility (#958).
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       const res = await axios.get(`${API_URL}/jobs/${id}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -135,7 +137,7 @@ export default function JobDetailClient() {
   } = useQuery<Review[]>({
     queryKey: ["reviews", id],
     queryFn: async () => {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       const res = await axios.get<PaginatedResponse<Review>>(`${API_URL}/reviews`, {
         params: { jobId: id, page: 1, limit: 50 },
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -150,7 +152,7 @@ export default function JobDetailClient() {
   } = useQuery<{ applied: boolean; appId: string | null }>({
     queryKey: ["application", id, user?.id],
     queryFn: async () => {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       if (!token || !user) return { applied: false, appId: null };
       try {
         const res = await axios.get<PaginatedResponse<Application>>(`${API_URL}/applications`, {
@@ -184,7 +186,7 @@ export default function JobDetailClient() {
   } = useInfiniteQuery({
     queryKey: ["applications", id],
     queryFn: async ({ pageParam = 1 }: { pageParam: number }) => {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       const res = await axios.get<{ data: Application[]; total: number; page: number; totalPages: number }>(
         `${API_URL}/jobs/${id}/applications`,
         {
@@ -273,7 +275,7 @@ export default function JobDetailClient() {
   ) => {
     setActioningApp(appId);
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       await axios.put(
         `${API_URL}/applications/${appId}/status`,
         { status },
@@ -383,7 +385,7 @@ export default function JobDetailClient() {
     }
 
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       const txType = MONEY_MOVING_TX_TYPE[action.confirmType];
       const meta = txType
         ? { type: txType, jobId: String(id), milestoneId: action.milestoneId }
@@ -487,7 +489,7 @@ export default function JobDetailClient() {
     setError(null);
 
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       let endpoint = "";
       let payload: Record<string, unknown> = { jobId: id };
       let type: PendingOnChainAction["confirmType"] = "CREATE_JOB";
@@ -593,7 +595,7 @@ export default function JobDetailClient() {
     setError(null);
     setProcessing(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       await axios.patch(
         `${API_URL}/jobs/${id}/complete`,
         {},
@@ -743,7 +745,7 @@ export default function JobDetailClient() {
   ) => {
     setError(null);
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       let endpoint = "";
       let type: PendingOnChainAction["confirmType"] = "PROPOSE_REVISION";
       let title = "";

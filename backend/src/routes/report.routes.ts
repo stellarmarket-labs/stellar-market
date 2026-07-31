@@ -82,27 +82,11 @@ async function incrementReporterCount(reporterId: string): Promise<number> {
   }
 }
 
-/**
- * Read the current 24-hour report count for a reporter without incrementing.
- */
-async function getReporterCount(reporterId: string): Promise<number> {
-  try {
-    if (!RedisClient.isRedisConnected()) {
-      await RedisClient.connect();
-    }
-    const redis = RedisClient.getInstance();
-    const val = await redis.get(reporterCountKey(reporterId));
-    return val ? parseInt(val, 10) : 0;
-  } catch {
-    return 0;
-  }
-}
-
 // ─── Admin notification helper ────────────────────────────────────────────────
 
 async function notifyAdminsOfSuspiciousReporter(reporterId: string): Promise<void> {
   try {
-    const admins = await (prisma.user as any).findMany({
+    const admins = await prisma.user.findMany({
       where: { role: "ADMIN" },
       select: { id: true },
     });
@@ -150,7 +134,7 @@ router.post(
     };
 
     // ── 1. Check if reporter is already flagged as suspicious ──────────────
-    const reporter = await (prisma.user as any).findUnique({
+    const reporter = await prisma.user.findUnique({
       where: { id: reporterId },
       select: { isSuspiciousReporter: true },
     });
@@ -164,7 +148,7 @@ router.post(
     const requiresReview = alreadySuspicious || reportCount > REPORT_WINDOW_LIMIT;
 
     // ── 4. Persist the report ──────────────────────────────────────────────
-    const report = await (prisma as any).report.create({
+    const report = await prisma.report.create({
       data: {
         reporterId,
         targetType,
@@ -176,7 +160,7 @@ router.post(
 
     // ── 5. Flag reporter on first threshold breach ─────────────────────────
     if (!alreadySuspicious && reportCount >= REPORT_WINDOW_LIMIT) {
-      await (prisma.user as any).update({
+      await prisma.user.update({
         where: { id: reporterId },
         data: { isSuspiciousReporter: true },
       });
@@ -192,12 +176,12 @@ router.post(
 
     // ── 6. Legacy: auto-flag the target user when they accumulate reports ──
     if (targetType === "USER" && !requiresReview) {
-      const pendingCount = await (prisma as any).report.count({
+      const pendingCount = await prisma.report.count({
         where: { targetId, targetType: "USER", status: "PENDING" },
       });
 
       if (pendingCount >= AUTO_FLAG_THRESHOLD) {
-        await (prisma.user as any).update({
+        await prisma.user.update({
           where: { id: targetId },
           data: {
             isFlagged: true,

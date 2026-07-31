@@ -83,6 +83,9 @@ export default function JobWizard() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  // Today's date in YYYY-MM-DD format for date input min attribute
+  const todayStr = new Date().toISOString().split("T")[0];
+
   // Load draft from localStorage
   useEffect(() => {
     const draft = localStorage.getItem(STORAGE_KEY);
@@ -402,6 +405,7 @@ export default function JobWizard() {
               <input
                 type="date"
                 className="input-field"
+                min={todayStr}
                 {...register("deadline")}
               />
               {errors.deadline && (
@@ -511,6 +515,7 @@ export default function JobWizard() {
                     <input
                       type="date"
                       className="input-field"
+                      min={todayStr}
                       {...register(`milestones.${index}.deadline`)}
                     />
                     {errors.milestones?.[index]?.deadline && (

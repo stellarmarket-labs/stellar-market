@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, type ChangeEvent, type FormEvent } from "react";
+import { useState, useRef, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { X, Star, Loader2, Clock } from "lucide-react";
 import axios, { AxiosError } from "axios";
 import { Job } from "@/types";
@@ -35,6 +35,18 @@ export default function ReviewModal({
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Reset form state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setRating(0);
+      setHoveredRating(0);
+      setComment("");
+      setSubmitting(false);
+      setSubmitted(false);
+      setError(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
