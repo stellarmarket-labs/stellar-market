@@ -119,7 +119,24 @@ router.post(
         .json({ error: "Not authorized to create milestones for this job." });
     }
 
-    const milestonesCount = await prisma.milestone.count({ where: { jobId } });
+    const existingMilestones = await prisma.milestone.findMany({
+      where: { jobId },
+      select: { amount: true },
+    });
+    const currentTotal = existingMilestones.reduce(
+      (sum, m) => sum + m.amount,
+      0,
+    );
+
+    if (
+      job.budget != null &&
+      Number((currentTotal + amount).toFixed(7)) > Number(job.budget.toFixed(7))
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Total milestone amount exceeds job budget." });
+    }
+
     const milestone = await prisma.milestone.create({
       data: {
         jobId,
@@ -127,7 +144,7 @@ router.post(
         description,
         amount,
         dueDate: new Date(dueDate),
-        order: milestonesCount + 1,
+        order: existingMilestones.length + 1,
       },
       include: {
         job: { select: { id: true, title: true } },
