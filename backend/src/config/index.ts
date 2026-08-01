@@ -11,13 +11,36 @@ const platformMinBudgetXlm =
 
 export const MAX_PAGE_SIZE = 100;
 
+// Validate encryption key at startup
+function validateEncryptionKey(key: string): void {
+  if (!key) {
+    throw new Error(
+      "ENCRYPTION_KEY is required. Please set it to a 64-character hex string (32 bytes)."
+    );
+  }
+  if (key.length !== 64) {
+    throw new Error(
+      `ENCRYPTION_KEY must be exactly 64 characters (got ${key.length}). It should be a 64-character hex string (32 bytes).`
+    );
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(key)) {
+    throw new Error(
+      "ENCRYPTION_KEY must be a valid hex string (only characters 0-9, a-f, A-F are allowed)."
+    );
+  }
+}
+
+// Validate encryption key at module load time
+const encryptionKey = process.env.ENCRYPTION_KEY || "";
+validateEncryptionKey(encryptionKey);
+
 export const config = {
   version,
   port: process.env.PORT || 5000,
   jwtSecret: process.env.JWT_SECRET || "default-secret-change-me",
   databaseUrl: process.env.DATABASE_URL,
   frontendUrl: process.env.FRONTEND_URL || "http://localhost:3000",
-  encryptionKey: process.env.ENCRYPTION_KEY || "",
+  encryptionKey,
   corsAllowedOrigins: (process.env.CORS_ALLOWED_ORIGINS || "")
     .split(",")
     .map((s) => s.trim())

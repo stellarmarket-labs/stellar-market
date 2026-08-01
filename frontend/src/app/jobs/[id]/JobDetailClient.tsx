@@ -43,6 +43,7 @@ import ShareMenu from "@/components/ShareMenu";
 import { useToast } from "@/components/Toast";
 import WalletAddress from "@/components/WalletAddress";
 import ApproveMilestoneModal from "@/components/ApproveMilestoneModal";
+import Avatar from "@/components/Avatar";
 
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
@@ -81,6 +82,29 @@ type PendingOnChainAction = {
   };
 };
 
+// Only the confirmTypes that actually move funds are tracked with the
+// backend's transaction-status endpoint (see WalletContext.signAndBroadcastTransaction),
+// since the Transaction model's `type` column is also used for the user-facing
+// financial transaction history and shouldn't be populated with non-monetary
+// actions (e.g. CREATE_JOB, PROPOSE_REVISION) under a misleading DEPOSIT/RELEASE/REFUND label.
+const MONEY_MOVING_TX_TYPE: Partial<
+  Record<PendingOnChainAction["confirmType"], "DEPOSIT" | "RELEASE" | "REFUND">
+> = {
+  FUND_JOB: "DEPOSIT",
+  APPROVE_MILESTONE: "RELEASE",
+  CANCEL_JOB: "REFUND",
+  CLAIM_REFUND: "REFUND",
+};
+
+// Endpoints that produce a fresh unsigned XDR for a given confirmType, reused
+// both for the initial build and to rebuild after an EXPIRED (canRetry) result.
+const CONFIRM_TYPE_ENDPOINT: Partial<Record<PendingOnChainAction["confirmType"], string>> = {
+  FUND_JOB: "/escrow/init-fund",
+  APPROVE_MILESTONE: "/escrow/init-approve",
+  CANCEL_JOB: "/escrow/init-cancel",
+  CLAIM_REFUND: "/escrow/init-refund",
+};
+
 export default function JobDetailClient() {
   const { id } = useParams();
   const { address, balances, signAndBroadcastTransaction } = useWallet();
@@ -96,7 +120,9 @@ export default function JobDetailClient() {
   } = useQuery<Job | null>({
     queryKey: ["job", id],
     queryFn: async () => {
-      const token = localStorage.getItem("token");
+      // Read the auth token with the correct key (stellarmarket_jwt) falling
+      // back to the legacy "token" key for backward compatibility (#958).
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       const res = await axios.get(`${API_URL}/jobs/${id}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -111,7 +137,7 @@ export default function JobDetailClient() {
   } = useQuery<Review[]>({
     queryKey: ["reviews", id],
     queryFn: async () => {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       const res = await axios.get<PaginatedResponse<Review>>(`${API_URL}/reviews`, {
         params: { jobId: id, page: 1, limit: 50 },
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -126,7 +152,7 @@ export default function JobDetailClient() {
   } = useQuery<{ applied: boolean; appId: string | null }>({
     queryKey: ["application", id, user?.id],
     queryFn: async () => {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       if (!token || !user) return { applied: false, appId: null };
       try {
         const res = await axios.get<PaginatedResponse<Application>>(`${API_URL}/applications`, {
@@ -160,7 +186,7 @@ export default function JobDetailClient() {
   } = useInfiniteQuery({
     queryKey: ["applications", id],
     queryFn: async ({ pageParam = 1 }: { pageParam: number }) => {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       const res = await axios.get<{ data: Application[]; total: number; page: number; totalPages: number }>(
         `${API_URL}/jobs/${id}/applications`,
         {
@@ -249,7 +275,7 @@ export default function JobDetailClient() {
   ) => {
     setActioningApp(appId);
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       await axios.put(
         `${API_URL}/applications/${appId}/status`,
         { status },
@@ -327,6 +353,27 @@ export default function JobDetailClient() {
     }
   };
 
+  const rebuildXdrForAction = async (
+    action: PendingOnChainAction,
+    authToken: string | null,
+  ): Promise<string> => {
+    const endpoint = CONFIRM_TYPE_ENDPOINT[action.confirmType];
+    if (!endpoint) {
+      throw new Error("This action cannot be automatically retried.");
+    }
+    const payload: Record<string, unknown> =
+      action.confirmType === "FUND_JOB"
+        ? { jobId: id, paymentToken: selectedPaymentToken }
+        : action.confirmType === "APPROVE_MILESTONE"
+          ? { milestoneId: action.milestoneId }
+          : { jobId: id };
+
+    const res = await axios.post(`${API_URL}${endpoint}`, payload, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    return res.data.xdr;
+  };
+
   const confirmPendingOnChainAction = async (preparedXdr: string) => {
     if (!pendingOnChainAction) return;
 
@@ -338,9 +385,29 @@ export default function JobDetailClient() {
     }
 
     try {
-      const token = localStorage.getItem("token");
-      const txResult = await signAndBroadcastTransaction(preparedXdr);
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
+      const txType = MONEY_MOVING_TX_TYPE[action.confirmType];
+      const meta = txType
+        ? { type: txType, jobId: String(id), milestoneId: action.milestoneId }
+        : undefined;
 
+      let xdrToSend = preparedXdr;
+      let txResult = await signAndBroadcastTransaction(xdrToSend, meta);
+
+      if (!txResult.success && txResult.canRetry && meta) {
+        // Transaction's ledger deadline passed before it was included — the
+        // original sequence number is no longer usable. Rebuild against the
+        // same init endpoint (which always fetches the account's current
+        // sequence number) and resubmit once.
+        xdrToSend = await rebuildXdrForAction(action, token);
+        txResult = await signAndBroadcastTransaction(xdrToSend, meta);
+      }
+
+      if (txResult.status === "STALE_SESSION") {
+        throw new Error(
+          "Wallet changed while the transaction was processing. No job update was confirmed.",
+        );
+      }
       if (!txResult.success) {
         throw new Error(txResult.error || "Transaction failed");
       }
@@ -422,7 +489,7 @@ export default function JobDetailClient() {
     setError(null);
 
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       let endpoint = "";
       let payload: Record<string, unknown> = { jobId: id };
       let type: PendingOnChainAction["confirmType"] = "CREATE_JOB";
@@ -528,7 +595,7 @@ export default function JobDetailClient() {
     setError(null);
     setProcessing(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       await axios.patch(
         `${API_URL}/jobs/${id}/complete`,
         {},
@@ -603,13 +670,29 @@ export default function JobDetailClient() {
         throw new Error("Please log in again.");
       }
 
-      const res = await axios.put(
-        `${API_URL}/milestones/${milestoneId}/approve`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
+      const fetchApproveXdr = async () => {
+        const r = await axios.put(
+          `${API_URL}/milestones/${milestoneId}/approve`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        return r.data.xdr as string;
+      };
 
-      const txResult = await signAndBroadcastTransaction(res.data.xdr);
+      const meta = { type: "RELEASE" as const, jobId: String(id), milestoneId };
+      let xdrToSend = await fetchApproveXdr();
+      let txResult = await signAndBroadcastTransaction(xdrToSend, meta);
+
+      if (!txResult.success && txResult.canRetry) {
+        xdrToSend = await fetchApproveXdr();
+        txResult = await signAndBroadcastTransaction(xdrToSend, meta);
+      }
+
+      if (txResult.status === "STALE_SESSION") {
+        throw new Error(
+          "Wallet changed while the milestone transaction was processing. The milestone was not confirmed.",
+        );
+      }
       if (!txResult.success) {
         throw new Error(txResult.error || "Transaction failed");
       }
@@ -662,7 +745,7 @@ export default function JobDetailClient() {
   ) => {
     setError(null);
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("stellarmarket_jwt") ?? localStorage.getItem("token");
       let endpoint = "";
       let type: PendingOnChainAction["confirmType"] = "PROPOSE_REVISION";
       let title = "";
@@ -1049,18 +1132,11 @@ export default function JobDetailClient() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex items-center justify-center text-white text-sm font-bold overflow-hidden">
-                          {review.reviewer.avatarUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={review.reviewer.avatarUrl}
-                              alt={review.reviewer.username}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            review.reviewer.username.charAt(0).toUpperCase()
-                          )}
-                        </div>
+                        <Avatar
+                          src={review.reviewer.avatarUrl}
+                          alt={review.reviewer.username}
+                          size={36}
+                        />
                         <div>
                           <div className="text-sm font-medium text-theme-heading">
                             {review.reviewer.username}
@@ -1127,9 +1203,11 @@ export default function JobDetailClient() {
                         className="flex items-center justify-between p-4 bg-theme-bg rounded-lg border border-theme-border"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex items-center justify-center text-white text-sm font-bold">
-                            {app.freelancer.username.charAt(0).toUpperCase()}
-                          </div>
+                          <Avatar
+                            src={app.freelancer.avatarUrl}
+                            alt={app.freelancer.username}
+                            size={36}
+                          />
                           <div>
                             <p className="font-medium text-theme-heading text-sm">
                               {app.freelancer.username}
@@ -1465,7 +1543,11 @@ export default function JobDetailClient() {
               About the Client
             </h3>
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple" />
+              <Avatar
+                src={job.client.avatarUrl}
+                alt={job.client.username}
+                size={40}
+              />
               <div>
                 <div className="font-medium text-theme-heading">
                   {job.client.username}

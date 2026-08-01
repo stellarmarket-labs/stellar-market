@@ -63,7 +63,7 @@
                   "map": [
                     {
                       "key": {
-                        "symbol": "last_updated_ledger"
+                        "symbol": "last_updated_ts"
                       },
                       "val": {
                         "u32": 0
@@ -352,7 +352,7 @@
               "map": [
                 {
                   "key": {
-                    "symbol": "last_updated_ledger"
+                    "symbol": "last_updated_ts"
                   },
                   "val": {
                     "u32": 0
@@ -442,7 +442,7 @@
               "map": [
                 {
                   "key": {
-                    "symbol": "last_updated_ledger"
+                    "symbol": "last_updated_ts"
                   },
                   "val": {
                     "u32": 31536000
@@ -532,7 +532,7 @@
               "map": [
                 {
                   "key": {
-                    "symbol": "last_updated_ledger"
+                    "symbol": "last_updated_ts"
                   },
                   "val": {
                     "u32": 157680000
@@ -622,7 +622,7 @@
               "map": [
                 {
                   "key": {
-                    "symbol": "last_updated_ledger"
+                    "symbol": "last_updated_ts"
                   },
                   "val": {
                     "u32": 315360000
@@ -712,7 +712,7 @@
               "map": [
                 {
                   "key": {
-                    "symbol": "last_updated_ledger"
+                    "symbol": "last_updated_ts"
                   },
                   "val": {
                     "u32": 473040000
@@ -802,7 +802,7 @@
               "map": [
                 {
                   "key": {
-                    "symbol": "last_updated_ledger"
+                    "symbol": "last_updated_ts"
                   },
                   "val": {
                     "u32": 946080000
@@ -892,7 +892,7 @@
               "map": [
                 {
                   "key": {
-                    "symbol": "last_updated_ledger"
+                    "symbol": "last_updated_ts"
                   },
                   "val": {
                     "u32": 1892160000

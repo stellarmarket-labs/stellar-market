@@ -1,9 +1,9 @@
-import { Notification, PrismaClient, NotificationType } from "@prisma/client";
+import { PrismaClient, Prisma, NotificationType } from "@prisma/client";
 import { getIo } from "../socket";
 import { EmailService } from "./email.service";
 import { config } from "../config";
 import { logger } from "../lib/logger";
-import webpush from "web-push";
+import webpush, { WebPushError } from "web-push";
 import {
   notificationQueue,
   getNotificationPriority,
@@ -16,7 +16,7 @@ interface BatchedNotification {
   type: NotificationType;
   title: string;
   message: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
   timestamp: number;
 }
 
@@ -31,6 +31,16 @@ export class NotificationService {
   private static batches = new Map<string, NotificationBatch>();
   private static readonly BATCH_WINDOW_MS = 5000; // 5 seconds
   private static readonly MAX_BATCH_SIZE = 10;
+  private static readonly PUSH_ENABLED_TYPES: NotificationType[] = [
+    "JOB_APPLIED",
+    "APPLICATION_ACCEPTED",
+    "APPLICATION_REJECTED",
+    "MILESTONE_SUBMITTED",
+    "MILESTONE_APPROVED",
+    "DISPUTE_RAISED",
+    "DISPUTE_RESOLVED",
+    "NEW_MESSAGE",
+  ];
 
   /**
    * Creates a notification in the database and sends it in real-time via Socket.IO.
@@ -40,7 +50,7 @@ export class NotificationService {
     type: NotificationType;
     title: string;
     message: string;
-    metadata?: any;
+    metadata?: Record<string, unknown>;
     skipBatching?: boolean; // Allow bypassing batching for urgent notifications
   }) {
     const {
@@ -95,7 +105,7 @@ export class NotificationService {
     type: NotificationType;
     title: string;
     message: string;
-    metadata?: any;
+    metadata?: Record<string, unknown>;
   }) {
     const { userId, type, title, message, metadata } = params;
 
@@ -106,7 +116,7 @@ export class NotificationService {
           type,
           title,
           message,
-          metadata: metadata || {},
+          metadata: (metadata || {}) as Prisma.InputJsonValue,
         },
       });
     });
@@ -127,6 +137,17 @@ export class NotificationService {
     );
 
     logger.info({ userId, type, title, notificationId: notification.id }, "Notification enqueued");
+
+    if (this.PUSH_ENABLED_TYPES.includes(type)) {
+      await this.sendPushNotification(userId, {
+        title,
+        body: message,
+        icon: "/icon-192.png",
+        badge: "/favicon.svg",
+        data: { notificationId: notification.id, type, metadata },
+      });
+    }
+
     return notification;
   }
 
@@ -222,7 +243,7 @@ export class NotificationService {
   private static createBatchedNotification(
     type: NotificationType,
     notifications: BatchedNotification[],
-  ): { title: string; message: string; metadata: any } {
+  ): { title: string; message: string; metadata: Record<string, unknown> } {
     const count = notifications.length;
 
     switch (type) {
@@ -293,7 +314,7 @@ export class NotificationService {
     type: NotificationType;
     title: string;
     message: string;
-    metadata: any;
+    metadata: Record<string, unknown>;
   }): Promise<void> {
     const { userId, type, title, message, metadata } = params;
 
@@ -363,7 +384,7 @@ export class NotificationService {
       event,
       title,
       message,
-      outcome: metadata?.outcome,
+      outcome: typeof metadata?.outcome === "string" ? metadata.outcome : undefined,
       actionUrl,
       unsubscribeUrl,
     });
@@ -547,7 +568,7 @@ export class NotificationService {
       body: string;
       icon?: string;
       badge?: string;
-      data?: any;
+      data?: Record<string, unknown>;
     },
   ) {
     try {
@@ -586,9 +607,9 @@ export class NotificationService {
               },
               JSON.stringify(payload),
             );
-          } catch (error: any) {
+          } catch (error) {
             // Remove invalid subscriptions
-            if (error.statusCode === 410 || error.statusCode === 404) {
+            if (error instanceof WebPushError && (error.statusCode === 410 || error.statusCode === 404)) {
               await prisma.pushSubscription.delete({
                 where: { id: sub.id },
               });
@@ -610,45 +631,5 @@ export class NotificationService {
     }
   }
 
-  /**
-   * Enhanced sendImmediateNotification to include push notifications
-   */
-  private static async sendImmediateNotificationWithPush(params: {
-    userId: string;
-    type: NotificationType;
-    title: string;
-    message: string;
-    metadata?: any;
-  }) {
-    const notification = await this.sendImmediateNotification(params);
-
-    // Send push notification for specific types
-    const pushEnabledTypes: NotificationType[] = [
-      "JOB_APPLIED",
-      "APPLICATION_ACCEPTED",
-      "APPLICATION_REJECTED",
-      "MILESTONE_SUBMITTED",
-      "MILESTONE_APPROVED",
-      "DISPUTE_RAISED",
-      "DISPUTE_RESOLVED",
-      "NEW_MESSAGE",
-    ];
-
-    if (pushEnabledTypes.includes(params.type)) {
-      await this.sendPushNotification(params.userId, {
-        title: params.title,
-        body: params.message,
-        icon: "/icon-192.png",
-        badge: "/favicon.svg",
-        data: {
-          notificationId: notification?.id,
-          type: params.type,
-          metadata: params.metadata,
-        },
-      });
-    }
-
-    return notification;
-  }
 }
 

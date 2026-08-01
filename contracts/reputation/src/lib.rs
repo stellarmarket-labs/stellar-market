@@ -31,12 +31,21 @@ mod escrow {
 
     #[contracttype]
     #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct TokenBalance {
+        pub token: Address,
+        pub total_amount: i128,
+        pub funded_amount: i128,
+    }
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct Milestone {
         pub id: u32,
         pub description: String,
         pub amount: i128,
         pub status: MilestoneStatus,
         pub deadline: u64,
+        pub token: Option<Address>,
     }
 
     #[contracttype]
@@ -52,6 +61,7 @@ mod escrow {
         pub milestones: Vec<Milestone>,
         pub status: JobStatus,
         pub token: Address,
+        pub token_balances: Vec<TokenBalance>,
         pub total_amount: i128,
     }
 
@@ -103,6 +113,13 @@ pub enum ReputationError {
     /// A zero-stake review carries vote weight of 1 even though the reviewer has
     /// no economic skin in the game; the minimum stake weight floor prevents this.
     StakeTooLow = 26,
+    /// Rejected when `endorse` is called with `endorser == target`. Without this
+    /// guard, a user with an established rating could add themselves as their
+    /// own skill endorser and inflate their own `get_skill_score` (issue #987).
+    SelfEndorsement = 27,
+    /// Rejected when `claim_stake` finds a positive `StakeBalance` but no
+    /// recorded `StakeToken` for the reviewer (stake predates token tracking).
+    StakeTokenNotFound = 28,
 }
 
 #[contracttype]
@@ -124,7 +141,10 @@ pub struct UserReputation {
     pub total_score: u64,
     pub total_weight: u64,
     pub review_count: u32,
-    pub last_updated_ledger: u32,
+    /// Unix **timestamp** (seconds) of the last score-changing event, from
+    /// `env.ledger().timestamp()` — NOT a ledger sequence number. Renamed from
+    /// `last_updated_ledger` to match what it actually holds (issue #899 review).
+    pub last_updated_ts: u32,
 }
 
 #[contracttype]
@@ -276,6 +296,9 @@ enum DataKey {
     MultiSigProposalCount,
     Leaderboard,
     StakeBalance(Address),
+    /// The token address a reviewer's current `StakeBalance` is denominated in,
+    /// so it can be transferred back correctly on `claim_stake`.
+    StakeToken(Address),
     ReviewAppeal(Address, Address, u64),
     DisputeContract,
     Endorsement(Address, String, Address),
@@ -284,6 +307,9 @@ enum DataKey {
     /// Admin-configurable minimum stake weight. Reviews with stake_weight below
     /// this value are rejected even when the economic min_stake allows zero stakes.
     MinStakeWeight,
+    /// Marks a user as banned by an admin. Banned users are excluded from
+    /// leaderboard queries.
+    BannedUser(Address),
 }
 
 fn require_not_paused(env: &Env) -> Result<(), ReputationError> {
@@ -340,6 +366,10 @@ const MAX_DECAY_RATE_HARD_CEILING: u32 = 50;
 const MIN_TTL_THRESHOLD: u32 = 50_000_000;
 const MIN_TTL_EXTEND_TO: u32 = 50_000_000;
 const APPEAL_GRACE_WINDOW_SECONDS: u64 = 72 * 60 * 60;
+// Bounds how many endorsers `get_skill_score` sums over. Without a cap, the
+// `SkillEndorsers` list (and therefore the loop's cost and the returned
+// score) could grow without limit (issue #987).
+const MAX_ENDORSERS_COUNTED: u32 = 30;
 
 fn bump_reputation_ttl(env: &Env, user: &Address) {
     env.storage().persistent().extend_ttl(
@@ -381,6 +411,19 @@ fn bump_review_appeal_ttl(env: &Env, reviewer: &Address, reviewee: &Address, job
     );
 }
 
+fn bump_endorsement_ttl(env: &Env, target: &Address, skill: &String, endorser: &Address) {
+    env.storage().persistent().extend_ttl(
+        &DataKey::Endorsement(target.clone(), skill.clone(), endorser.clone()),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
+    env.storage().persistent().extend_ttl(
+        &DataKey::SkillEndorsers(target.clone(), skill.clone()),
+        MIN_TTL_THRESHOLD,
+        MIN_TTL_EXTEND_TO,
+    );
+}
+
 fn bump_instance_ttl(env: &Env) {
     env.storage()
         .instance()
@@ -399,11 +442,11 @@ pub fn apply_lazy_decay(env: &Env, rep: &mut UserReputation) {
 
     let current_ts = env.ledger().timestamp() as u32;
     if decay_rate == 0 || decay_rate >= 100 {
-        rep.last_updated_ledger = current_ts;
+        rep.last_updated_ts = current_ts;
         return;
     }
 
-    let last_ts = rep.last_updated_ledger as u64;
+    let last_ts = rep.last_updated_ts as u64;
     let now_ts = current_ts as u64;
     if now_ts <= last_ts {
         return;
@@ -418,7 +461,14 @@ pub fn apply_lazy_decay(env: &Env, rep: &mut UserReputation) {
 
     rep.total_score  = (rep.total_score  * retained_pct) / 100;
     rep.total_weight = (rep.total_weight * retained_pct) / 100;
-    rep.last_updated_ledger = current_ts;
+    rep.last_updated_ts = current_ts;
+}
+
+/// Applies a 0-100 decay `factor` (percent) to `value` as `value * factor / 100`
+/// using a u128 intermediate so large `value`s (already saturated to u64::MAX)
+/// don't overflow before the division brings the result back under u64::MAX.
+fn scale_by_factor_pct(value: u64, factor: u64) -> u64 {
+    ((value as u128) * (factor as u128) / 100) as u64
 }
 
 fn get_decay_factor(decay_rate: u32, current_time: u64, recorded_at: u64) -> u64 {
@@ -574,8 +624,18 @@ impl ReputationContract {
             .persistent()
             .extend_ttl(&balance_key, MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
 
+        // Record which token this stake is denominated in so claim_stake can
+        // transfer the correct asset back.
+        let stake_token_key = DataKey::StakeToken(reviewer.clone());
+        env.storage().persistent().set(&stake_token_key, &job.token);
+        env.storage()
+            .persistent()
+            .extend_ttl(&stake_token_key, MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+
+        // Saturate stake_weight to u64::MAX instead of truncating to prevent
+        // large i128 stakes from wrapping to arbitrary values (issue #982).
         let weight = if stake_weight > 0 {
-            stake_weight as u64
+            i128::min(stake_weight, u64::MAX as i128) as u64
         } else {
             1u64
         };
@@ -597,15 +657,17 @@ impl ReputationContract {
                     total_score: 0,
                     total_weight: 0,
                     review_count: 0,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 });
 
         apply_lazy_decay(&env, &mut reputation);
 
-        reputation.total_score += (rating as u64) * weight;
-        reputation.total_weight += weight;
+        reputation.total_score = reputation
+            .total_score
+            .saturating_add((rating as u64).saturating_mul(weight));
+        reputation.total_weight = reputation.total_weight.saturating_add(weight);
         reputation.review_count += 1;
-        reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+        reputation.last_updated_ts = env.ledger().timestamp() as u32;
 
         env.storage().persistent().set(&rep_key, &reputation);
         bump_reputation_ttl(&env, &reviewee);
@@ -842,14 +904,14 @@ impl ReputationContract {
                     total_score: 0,
                     total_weight: 0,
                     review_count: 0,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 });
 
             apply_lazy_decay(env, &mut reputation);
 
             reputation.total_score += earned_score;
             reputation.total_weight += weight;
-            reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+            reputation.last_updated_ts = env.ledger().timestamp() as u32;
 
             env.storage().persistent().set(&rep_key, &reputation);
             bump_reputation_ttl(env, &referrer);
@@ -884,9 +946,14 @@ impl ReputationContract {
     }
 
     /// Set configuration for the referral bonus (multi-sig only)
-    pub fn set_referral_bonus(env: Env, bonus: u64) -> Result<(), ReputationError> {
-        if env.current_contract_address() != env.current_contract_address() {
-            return Err(ReputationError::Unauthorized);
+    pub fn set_referral_bonus(
+        env: Env,
+        signer: Address,
+        bonus: u64,
+    ) -> Result<(), ReputationError> {
+        signer.require_auth();
+        if !is_signer(&env, &signer) {
+            return Err(ReputationError::NotAdmin);
         }
         env.storage()
             .instance()
@@ -956,12 +1023,12 @@ impl ReputationContract {
                 total_score: 0,
                 total_weight: 0,
                 review_count: 0,
-                last_updated_ledger: env.ledger().timestamp() as u32,
+                last_updated_ts: env.ledger().timestamp() as u32,
             });
         apply_lazy_decay(&env, &mut reputation);
         reputation.total_score = reputation.total_score.saturating_add(amount);
         reputation.total_weight = reputation.total_weight.saturating_add(weight);
-        reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+        reputation.last_updated_ts = env.ledger().timestamp() as u32;
         env.storage().persistent().set(&rep_key, &reputation);
         bump_reputation_ttl(&env, &user);
 
@@ -1055,8 +1122,47 @@ impl ReputationContract {
             total_score,
             total_weight,
             review_count,
-            last_updated_ledger: env.ledger().timestamp() as u32,
+            last_updated_ts: env.ledger().timestamp() as u32,
         })
+    }
+
+    /// Governance weight snapshot helper (issue #899).
+    ///
+    /// Returns `(score, last_change_ts)` where:
+    /// - `score` is the user's current decayed, stake-weighted reputation total
+    ///   (`total_score` from [`get_decayed_totals`]) — used as raw voting weight
+    ///   by the reputation-weighted governance path in the escrow contract.
+    /// - `last_change_ts` is the ledger timestamp of the user's most recent
+    ///   *score-changing* event (review, slash, dispute outcome, referral bonus,
+    ///   appeal resolution). It is read from the stored [`UserReputation`], whose
+    ///   `last_updated_ts` is bumped by every such mutation and is **not**
+    ///   moved by pure reads.
+    ///
+    /// # Snapshot safety
+    ///
+    /// Governance compares `last_change_ts` against a proposal's snapshot
+    /// timestamp and only accepts a vote when `last_change_ts <= snapshot_ts`.
+    /// This makes reputation acquired *after* a proposal opens ineligible to vote
+    /// on it, defeating the classic "pump reputation to swing an in-flight vote"
+    /// attack. Because the returned score is the decayed value read at call time
+    /// and decay is monotonically non-increasing, the weight can only be *lower*
+    /// than it was at snapshot time — never inflated — so the check is safe.
+    ///
+    /// Unknown users return `(0, 0)`: zero weight, and a `last_change_ts` of `0`
+    /// that is `<=` any snapshot (they simply have no weight to cast).
+    pub fn get_gov_weight(env: Env, user: Address) -> (u64, u64) {
+        bump_instance_ttl(&env);
+        let stored: Option<UserReputation> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Reputation(user.clone()));
+        let last_change_ts = match stored {
+            Some(rep) => rep.last_updated_ts as u64,
+            // No reputation record: no weight, and a snapshot-safe timestamp of 0.
+            None => return (0, 0),
+        };
+        let (total_score, _total_weight, _review_count) = Self::get_decayed_totals(&env, user);
+        (total_score, last_change_ts)
     }
 
     /// Get reputation together with the registered referrer (if any).
@@ -1176,13 +1282,13 @@ impl ReputationContract {
                     total_score: 0,
                     total_weight: 0,
                     review_count: 0,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 });
 
         apply_lazy_decay(&env, &mut reputation);
 
         reputation.total_score = reputation.total_score.saturating_sub(amount);
-        reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+        reputation.last_updated_ts = env.ledger().timestamp() as u32;
         env.storage().persistent().set(&rep_key, &reputation);
         bump_reputation_ttl(&env, &user);
 
@@ -1232,8 +1338,10 @@ impl ReputationContract {
                 total_score: 0,
                 total_weight: 0,
                 review_count: 0,
-                last_updated_ledger: 0,
+                last_updated_ts: env.ledger().timestamp() as u32,
             });
+
+        apply_lazy_decay(&env, &mut reputation);
 
         if score_change > 0 {
             reputation.total_score = reputation.total_score.saturating_add(score_change as u64);
@@ -1241,6 +1349,7 @@ impl ReputationContract {
             reputation.total_score = reputation.total_score.saturating_sub((-score_change) as u64);
         }
 
+        reputation.last_updated_ts = env.ledger().timestamp() as u32;
         env.storage().persistent().set(&rep_key, &reputation);
         bump_reputation_ttl(&env, &user);
 
@@ -1298,6 +1407,44 @@ impl ReputationContract {
         env.events().publish(
             (symbol_short!("reput"), Symbol::new(&env, "min_wt_set")),
             (admin, weight),
+        );
+
+        Ok(())
+    }
+
+    /// Ban a user, excluding them from all leaderboard queries (admin/signer only).
+    pub fn ban_user(env: Env, admin: Address, user: Address) -> Result<(), ReputationError> {
+        admin.require_auth();
+        if !is_signer(&env, &admin) {
+            return Err(ReputationError::NotAdmin);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::BannedUser(user.clone()), &true);
+        bump_instance_ttl(&env);
+
+        env.events().publish(
+            (symbol_short!("reput"), Symbol::new(&env, "banned")),
+            (user, admin),
+        );
+
+        Ok(())
+    }
+
+    /// Unban a user, restoring their visibility on the leaderboard (admin/signer only).
+    pub fn unban_user(env: Env, admin: Address, user: Address) -> Result<(), ReputationError> {
+        admin.require_auth();
+        if !is_signer(&env, &admin) {
+            return Err(ReputationError::NotAdmin);
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKey::BannedUser(user.clone()));
+        bump_instance_ttl(&env);
+
+        env.events().publish(
+            (symbol_short!("reput"), Symbol::new(&env, "unbanned")),
+            (user, admin),
         );
 
         Ok(())
@@ -1475,6 +1622,8 @@ impl ReputationContract {
                     env.storage()
                         .instance()
                         .set(&DataKey::MultiSigSigners, &signers);
+                } else {
+                    return Err(ReputationError::NotAdmin);
                 }
             }
             AdminAction::ChangeThreshold(new_threshold) => {
@@ -1525,13 +1674,13 @@ impl ReputationContract {
                         total_score: 0,
                         total_weight: 0,
                         review_count: 0,
-                        last_updated_ledger: env.ledger().timestamp() as u32,
+                        last_updated_ts: env.ledger().timestamp() as u32,
                     });
 
                 apply_lazy_decay(&env, &mut reputation);
 
                 reputation.total_score = reputation.total_score.saturating_sub(amount);
-                reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+                reputation.last_updated_ts = env.ledger().timestamp() as u32;
                 env.storage().persistent().set(&rep_key, &reputation);
                 bump_reputation_ttl(env, &loser);
 
@@ -1616,9 +1765,12 @@ impl ReputationContract {
 
         for review in reviews.iter() {
             let factor = get_decay_factor(decay_rate, current_ts, review.timestamp);
-            let decayed_weight = (review.stake_weight as u64 * factor) / 100;
-            total_score += (review.rating as u64) * decayed_weight;
-            total_weight += decayed_weight;
+            // Saturate stake_weight to u64::MAX to prevent truncation (issue #982)
+            let clamped_weight = i128::min(review.stake_weight, u64::MAX as i128) as u64;
+            let decayed_weight = scale_by_factor_pct(clamped_weight, factor);
+            total_score = total_score
+                .saturating_add((review.rating as u64).saturating_mul(decayed_weight));
+            total_weight = total_weight.saturating_add(decayed_weight);
         }
 
         // Include referral bonuses (stored as ReferralBonusRecord with individual timestamps).
@@ -1631,8 +1783,9 @@ impl ReputationContract {
             for bonus in bonuses.iter() {
                 let factor = get_decay_factor(decay_rate, current_ts, bonus.timestamp);
                 // bonus.amount = bonus_rating * bonus.weight; apply same decay factor.
-                total_score += bonus.amount * factor / 100;
-                total_weight += bonus.weight * factor / 100;
+                total_score = total_score.saturating_add(scale_by_factor_pct(bonus.amount, factor));
+                total_weight =
+                    total_weight.saturating_add(scale_by_factor_pct(bonus.weight, factor));
             }
         }
 
@@ -1647,6 +1800,10 @@ impl ReputationContract {
     ) -> Result<(), ReputationError> {
         endorser.require_auth();
         require_not_paused(&env)?;
+
+        if endorser == target {
+            return Err(ReputationError::SelfEndorsement);
+        }
 
         let key = DataKey::Endorsement(target.clone(), skill.clone(), endorser.clone());
         if env.storage().persistent().has(&key) {
@@ -1663,10 +1820,20 @@ impl ReputationContract {
             .unwrap_or(Vec::new(&env));
         endorsers.push_back(endorser.clone());
         env.storage().persistent().set(&list_key, &endorsers);
+        bump_endorsement_ttl(&env, &target, &skill, &endorser);
 
         Ok(())
     }
 
+    /// Compute a user's skill score as the sum, over everyone who has
+    /// endorsed them for `skill`, of each endorser's weight — their
+    /// `get_average_rating() / 100`, or `1` if they have no rating yet.
+    ///
+    /// Security (issue #987): `endorse` rejects `endorser == target`, so a
+    /// user cannot inflate this score by endorsing themselves. The number of
+    /// endorsers summed is additionally capped at `MAX_ENDORSERS_COUNTED` so
+    /// that neither this function's cost nor the score it returns can grow
+    /// without bound as a skill accumulates endorsers.
     pub fn get_skill_score(env: Env, user: Address, skill: String) -> u32 {
         let list_key = DataKey::SkillEndorsers(user.clone(), skill.clone());
         let endorsers: Vec<Address> = env
@@ -1676,7 +1843,7 @@ impl ReputationContract {
             .unwrap_or(Vec::new(&env));
 
         let mut score = 0;
-        for endorser in endorsers.iter() {
+        for endorser in endorsers.iter().take(MAX_ENDORSERS_COUNTED as usize) {
             let avg_rating = Self::get_average_rating(env.clone(), endorser.clone()).unwrap_or(0);
             let weight = if avg_rating > 0 { avg_rating / 100 } else { 1 };
             score += weight as u32;
@@ -1695,6 +1862,13 @@ impl ReputationContract {
             return Err(ReputationError::NotAdmin);
         }
         env.storage().instance().set(&DataKey::StakeTiers, &tiers);
+        bump_instance_ttl(&env);
+
+        env.events().publish(
+            (symbol_short!("reput"), Symbol::new(&env, "tiers_set")),
+            (admin, tiers.clone()),
+        );
+
         Ok(())
     }
 
@@ -1717,6 +1891,15 @@ impl ReputationContract {
         multiplier
     }
 
+    /// Returns the raw staked token balance currently held for a reviewer.
+    /// Returns 0 if the reviewer has no active stake.
+    pub fn get_stake_balance(env: Env, user: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::StakeBalance(user))
+            .unwrap_or(0)
+    }
+
     pub fn get_average_rating(env: Env, user: Address) -> Result<u64, ReputationError> {
         let multiplier = Self::get_stake_multiplier(env.clone(), user.clone());
 
@@ -1726,8 +1909,8 @@ impl ReputationContract {
             return Ok(0); // If completely decayed, acts as no rep
         }
 
-        let base_score = (total_score * 100) / total_weight;
-        let weighted = (base_score * (multiplier as u64)) / 100;
+        let base_score = ((total_score as u128) * 100 / (total_weight as u128)) as u64;
+        let weighted = scale_by_factor_pct(base_score, multiplier as u64);
         Ok(weighted.min(10_000))
     }
 
@@ -1797,9 +1980,9 @@ impl ReputationContract {
         let reputation: Option<UserReputation> = env.storage().persistent().get(&rep_key);
         
         match reputation {
-            Some(rep) => {
+            Some(_rep) => {
                 bump_reputation_ttl(&env, &user);
-                let score = rep.total_score;
+                let (score, _total_weight, _review_count) = Self::get_decayed_totals(&env, user);
                 if score >= 2000 {
                     Some(Badge::Gold)
                 } else if score >= 500 {
@@ -1835,9 +2018,20 @@ impl ReputationContract {
             env.storage().persistent().remove(&balance_key);
         }
 
-        // Transfer tokens back to reviewer
-        let token_client = token::Client::new(&env, &env.current_contract_address());
+        // Transfer tokens back to reviewer, using the token the stake was
+        // actually deposited in (not the reputation contract's own address).
+        let stake_token_key = DataKey::StakeToken(reviewer.clone());
+        let stake_token: Address = env
+            .storage()
+            .persistent()
+            .get(&stake_token_key)
+            .ok_or(ReputationError::StakeTokenNotFound)?;
+        let token_client = token::Client::new(&env, &stake_token);
         token_client.transfer(&env.current_contract_address(), &reviewer, &amount);
+
+        if new_balance <= 0 {
+            env.storage().persistent().remove(&stake_token_key);
+        }
 
         env.events().publish(
             (symbol_short!("reput"), symbol_short!("claim")),
@@ -1917,6 +2111,19 @@ impl ReputationContract {
             }
             None => return Vec::new(&env),
         };
+
+        let mut filtered = Vec::new(&env);
+        for entry in list.iter() {
+            let is_banned: bool = env
+                .storage()
+                .instance()
+                .get(&DataKey::BannedUser(entry.0.clone()))
+                .unwrap_or(false);
+            if !is_banned {
+                filtered.push_back(entry);
+            }
+        }
+        let list = filtered;
 
         let total = list.len();
         if offset >= total {
@@ -2086,7 +2293,7 @@ impl ReputationContract {
                     total_score: 0,
                     total_weight: 0,
                     review_count: 0,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 });
 
             apply_lazy_decay(&env, &mut reputation);
@@ -2094,7 +2301,7 @@ impl ReputationContract {
             reputation.total_score = reputation.total_score.saturating_sub(removed_score);
             reputation.total_weight = reputation.total_weight.saturating_sub(removed_weight);
             reputation.review_count = reputation.review_count.saturating_sub(1);
-            reputation.last_updated_ledger = env.ledger().timestamp() as u32;
+            reputation.last_updated_ts = env.ledger().timestamp() as u32;
             env.storage().persistent().set(&rep_key, &reputation);
             bump_reputation_ttl(&env, &reviewee);
 
@@ -2109,6 +2316,75 @@ impl ReputationContract {
         env.events().publish(
             (symbol_short!("reput"), symbol_short!("ap_reslv")),
             (admin, reviewer, reviewee, job_id, remove),
+        );
+
+        Ok(())
+    }
+
+    /// Admin: remove a review by index from a user's stored reviews.
+    /// - Requires admin auth (registered signer).
+    /// - Removes the review at `review_index` from `DataKey::Reviews(user)`.
+    /// - Does NOT recompute the aggregate; totals are recomputed lazily on read.
+    /// - Emits an event for audit: ("reput", "review_removed") -> (user, review_index, removed_by)
+    pub fn admin_remove_review(
+        env: Env,
+        admin: Address,
+        user: Address,
+        review_index: u32,
+    ) -> Result<(), ReputationError> {
+        admin.require_auth();
+        require_not_paused(&env)?;
+        if !is_signer(&env, &admin) {
+            return Err(ReputationError::NotAdmin);
+        }
+
+        let reviews_key = DataKey::Reviews(user.clone());
+        let mut reviews: Vec<Review> = env
+            .storage()
+            .persistent()
+            .get(&reviews_key)
+            .unwrap_or(Vec::new(&env));
+
+        if review_index >= reviews.len() {
+            return Err(ReputationError::ReviewNotFound);
+        }
+
+        let removed = reviews.get(review_index).unwrap();
+        let reviewer = removed.reviewer.clone();
+        let job_id = removed.job_id;
+
+        reviews.remove(review_index);
+        env.storage().persistent().set(&reviews_key, &reviews);
+        bump_reviews_ttl(&env, &user);
+
+        let review_exists_key = DataKey::ReviewExists(reviewer.clone(), user.clone(), job_id);
+        if env.storage().persistent().has(&review_exists_key) {
+            env.storage().persistent().remove(&review_exists_key);
+        }
+
+        // Resolve any pending appeal on the removed review so both removal
+        // paths (admin_remove_review and admin_resolve_appeal) leave
+        // consistent appeal state (#981).
+        let appeal_key = DataKey::ReviewAppeal(reviewer.clone(), user.clone(), job_id);
+        if let Some(mut appeal) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, ReviewAppeal>(&appeal_key)
+        {
+            if appeal.status == AppealStatus::Pending {
+                appeal.status = AppealStatus::ReviewRemoved;
+                env.storage().persistent().set(&appeal_key, &appeal);
+                bump_review_appeal_ttl(&env, &reviewer, &user, job_id);
+            }
+        }
+
+        // Do NOT update legacy accumulators here; recomputation is lazy on next read.
+
+        // NOTE: Soroban symbol literals have a hard 9-character limit.
+        // Keep event topic symbols <= 9 chars.
+        env.events().publish(
+            (symbol_short!("reput"), symbol_short!("rev_rm")),
+            (user, review_index, admin),
         );
 
         Ok(())
@@ -2176,7 +2452,7 @@ mod tests {
                     total_score: (rating as u64) * (MIN_REVIEW_STAKE_DEFAULT as u64),
                     total_weight: MIN_REVIEW_STAKE_DEFAULT as u64,
                     review_count: 1,
-                    last_updated_ledger: env.ledger().timestamp() as u32,
+                    last_updated_ts: env.ledger().timestamp() as u32,
                 },
             );
         });
@@ -2241,6 +2517,46 @@ mod tests {
         );
     }
 
+    // Seeds both the `Reputation` accumulator and a matching `Reviews` entry so
+    // that `get_decayed_totals` (used by `get_badge`) reports the same score as
+    // the raw `total_score` when no decay has elapsed (issue #976).
+    fn seed_reputation_with_review(
+        env: &Env,
+        contract_id: &Address,
+        user: &Address,
+        total_score: u64,
+        total_weight: u64,
+        review_count: u32,
+    ) {
+        env.as_contract(contract_id, || {
+            env.storage().persistent().set(
+                &DataKey::Reputation(user.clone()),
+                &UserReputation {
+                    user: user.clone(),
+                    total_score,
+                    total_weight,
+                    review_count,
+                    last_updated_ts: 0,
+                },
+            );
+            env.storage().persistent().set(
+                &DataKey::Reviews(user.clone()),
+                &Vec::from_array(
+                    env,
+                    [Review {
+                        reviewer: user.clone(),
+                        reviewee: user.clone(),
+                        job_id: 0,
+                        rating: total_score as u32,
+                        comment: String::from_str(env, ""),
+                        stake_weight: 1,
+                        timestamp: 0,
+                    }],
+                ),
+            );
+        });
+    }
+
     #[test]
     fn test_get_badge() {
         let env = Env::default();
@@ -2253,64 +2569,47 @@ mod tests {
         assert_eq!(client.get_badge(&user), None);
 
         // Test Bronze badge (score >= 100)
-        env.as_contract(&contract_id, || {
-            env.storage().persistent().set(
-                &DataKey::Reputation(user.clone()),
-                &UserReputation {
-                    user: user.clone(),
-                    total_score: 100,
-                    total_weight: 10,
-                    review_count: 1,
-                    last_updated_ledger: 0,
-                },
-            );
-        });
+        seed_reputation_with_review(&env, &contract_id, &user, 100, 10, 1);
         assert_eq!(client.get_badge(&user), Some(Badge::Bronze));
 
         // Test Silver badge (score >= 500)
-        env.as_contract(&contract_id, || {
-            env.storage().persistent().set(
-                &DataKey::Reputation(user.clone()),
-                &UserReputation {
-                    user: user.clone(),
-                    total_score: 500,
-                    total_weight: 50,
-                    review_count: 5,
-                    last_updated_ledger: 0,
-                },
-            );
-        });
+        seed_reputation_with_review(&env, &contract_id, &user, 500, 50, 5);
         assert_eq!(client.get_badge(&user), Some(Badge::Silver));
 
         // Test Gold badge (score >= 2000)
-        env.as_contract(&contract_id, || {
-            env.storage().persistent().set(
-                &DataKey::Reputation(user.clone()),
-                &UserReputation {
-                    user: user.clone(),
-                    total_score: 2000,
-                    total_weight: 200,
-                    review_count: 20,
-                    last_updated_ledger: 0,
-                },
-            );
-        });
+        seed_reputation_with_review(&env, &contract_id, &user, 2000, 200, 20);
         assert_eq!(client.get_badge(&user), Some(Badge::Gold));
 
         // Test no badge for score < 100
-        env.as_contract(&contract_id, || {
-            env.storage().persistent().set(
-                &DataKey::Reputation(user.clone()),
-                &UserReputation {
-                    user: user.clone(),
-                    total_score: 99,
-                    total_weight: 10,
-                    review_count: 1,
-                    last_updated_ledger: 0,
-                },
-            );
-        });
+        seed_reputation_with_review(&env, &contract_id, &user, 99, 10, 1);
         assert_eq!(client.get_badge(&user), None);
+    }
+
+    #[test]
+    fn test_get_badge_matches_get_tier_after_full_decay() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, ReputationContract);
+        let client = ReputationContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        // 100% decay rate per year so the score fully decays after one year.
+        client.initialize(&vec![&env, admin.clone()], &1, &100);
+
+        let user = Address::generate(&env);
+        env.ledger().with_mut(|l| l.timestamp = 0);
+        seed_reputation_with_review(&env, &contract_id, &user, 2000, 200, 20);
+
+        // Freshly earned: both views agree the user has standing.
+        assert_eq!(client.get_badge(&user), Some(Badge::Gold));
+        assert_ne!(client.get_tier(&user), ReputationTier::None);
+
+        // Advance a full year so the review fully decays.
+        env.ledger()
+            .with_mut(|l| l.timestamp = ONE_YEAR_IN_SECONDS);
+
+        assert_eq!(client.get_badge(&user), None);
+        assert_eq!(client.get_tier(&user), ReputationTier::None);
     }
 
     #[test]
@@ -2338,7 +2637,7 @@ mod tests {
                     total_score: 500,
                     total_weight: 50,
                     review_count: 5,
-                    last_updated_ledger: 0,
+                    last_updated_ts: 0,
                 },
             );
         });
@@ -2382,7 +2681,7 @@ mod tests {
                     total_score: 100,
                     total_weight: 10,
                     review_count: 1,
-                    last_updated_ledger: 0,
+                    last_updated_ts: 0,
                 },
             );
         });
@@ -2435,5 +2734,168 @@ mod tests {
 
         // Try to call without dispute contract set
         client.apply_dispute_outcome(&user, &DisputeOutcome::Won);
+    }
+
+    #[test]
+    fn test_admin_remove_review_by_index() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, ReputationContract);
+        let client = ReputationContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.initialize(&vec![&env, admin.clone()], &1, &0);
+
+        let reviewee = Address::generate(&env);
+        let reviewer1 = Address::generate(&env);
+        let reviewer2 = Address::generate(&env);
+        let reviewer3 = Address::generate(&env);
+
+        // Create three reviews: ratings 5,3,4 each with MIN_REVIEW_STAKE_DEFAULT weight
+        let r1 = Review {
+            reviewer: reviewer1.clone(),
+            reviewee: reviewee.clone(),
+            job_id: 1,
+            rating: 5,
+            comment: String::from_str(&env, "r1"),
+            stake_weight: MIN_REVIEW_STAKE_DEFAULT,
+            timestamp: env.ledger().timestamp(),
+        };
+        let r2 = Review {
+            reviewer: reviewer2.clone(),
+            reviewee: reviewee.clone(),
+            job_id: 2,
+            rating: 3,
+            comment: String::from_str(&env, "r2"),
+            stake_weight: MIN_REVIEW_STAKE_DEFAULT,
+            timestamp: env.ledger().timestamp(),
+        };
+        let r3 = Review {
+            reviewer: reviewer3.clone(),
+            reviewee: reviewee.clone(),
+            job_id: 3,
+            rating: 4,
+            comment: String::from_str(&env, "r3"),
+            stake_weight: MIN_REVIEW_STAKE_DEFAULT,
+            timestamp: env.ledger().timestamp(),
+        };
+
+        let reviews = vec![&env, r1, r2, r3];
+        // Set persisted reviews and review_exists flags and a legacy reputation record
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&DataKey::Reviews(reviewee.clone()), &reviews);
+
+            env.storage().persistent().set(
+                &DataKey::ReviewExists(reviewer1.clone(), reviewee.clone(), 1),
+                &true,
+            );
+            env.storage().persistent().set(
+                &DataKey::ReviewExists(reviewer2.clone(), reviewee.clone(), 2),
+                &true,
+            );
+            env.storage().persistent().set(
+                &DataKey::ReviewExists(reviewer3.clone(), reviewee.clone(), 3),
+                &true,
+            );
+
+            // Legacy accumulator: sum ratings * weight
+            let total_score = (5u64 + 3u64 + 4u64) * (MIN_REVIEW_STAKE_DEFAULT as u64);
+            let total_weight = 3u64 * (MIN_REVIEW_STAKE_DEFAULT as u64);
+            env.storage().persistent().set(
+                &DataKey::Reputation(reviewee.clone()),
+                &UserReputation {
+                    user: reviewee.clone(),
+                    total_score,
+                    total_weight,
+                    review_count: 3,
+                    last_updated_ts: env.ledger().timestamp() as u32,
+                },
+            );
+        });
+
+        // Sanity check: average rating should be 400 ( (12/3)*100 )
+        let before = client.get_average_rating(&reviewee);
+        assert_eq!(before, 400);
+
+        // Admin removes index 1 (the middle review with rating 3)
+        client.admin_remove_review(&admin, &reviewee, &1);
+
+        // Reviews length should be 2 now
+        assert_eq!(client.get_reviews(&reviewee).len(), 2);
+
+        // New average should be ((5+4)/2)*100 = 450
+        let after = client.get_average_rating(&reviewee);
+        assert_eq!(after, 450);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #14)")]
+    fn test_admin_remove_review_unauthorized_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, ReputationContract);
+        let client = ReputationContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.initialize(&vec![&env, admin.clone()], &1, &0);
+
+        let non_admin = Address::generate(&env);
+        let reviewee = Address::generate(&env);
+
+        // Call without being a registered signer — should panic with NotAdmin
+        client.admin_remove_review(&non_admin, &reviewee, &0);
+    }
+
+    #[test]
+    fn test_dispute_outcome_decay_behavior() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, ReputationContract);
+        let client = ReputationContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        // Initialize with default decay rate of 10% (10u32)
+        client.initialize(&vec![&env, admin.clone()], &1, &10);
+
+        let dispute_contract = Address::generate(&env);
+        client.set_dispute_contract(&admin, &dispute_contract);
+
+        let user = Address::generate(&env);
+
+        // 1. New user has their first reputation event via dispute outcome.
+        // Timestamp is 500,000.
+        env.ledger().with_mut(|l| l.timestamp = 500_000);
+        client.apply_dispute_outcome(&user, &DisputeOutcome::Won);
+
+        // Verify the user's reputation was created, total_score = 50, and last_updated_ts is 500,000.
+        let rep_before: UserReputation = env.as_contract(&contract_id, || {
+            env.storage().persistent()
+                .get(&DataKey::Reputation(user.clone()))
+                .unwrap()
+        });
+        assert_eq!(rep_before.total_score, 50);
+        assert_eq!(rep_before.last_updated_ts, 500_000);
+
+        // 2. Advance time by 1 year (31,536,000 seconds) so that 10% decay applies.
+        env.ledger().with_mut(|l| l.timestamp = 500_000 + 31_536_000);
+
+        // Perform an unrelated action or a second dispute outcome to trigger lazy decay.
+        // We will call apply_dispute_outcome with Won (+50) again.
+        // With 10% decay, the original 50 score should decay to 45.
+        // Then +50 is added, resulting in 95.
+        client.apply_dispute_outcome(&user, &DisputeOutcome::Won);
+
+        let rep_after: UserReputation = env.as_contract(&contract_id, || {
+            env.storage().persistent()
+                .get(&DataKey::Reputation(user.clone()))
+                .unwrap()
+        });
+        assert_eq!(rep_after.total_score, 95);
+        assert_eq!(rep_after.last_updated_ts, 500_000 + 31_536_000);
     }
 }

@@ -1,5 +1,6 @@
 import { AuthRequest, authenticate } from "../middleware/auth";
 import { Response, Router } from "express";
+import { z } from "zod";
 import { cache, generateUserCacheKey, invalidateCacheKey } from "../lib/cache";
 import {
   getUserByIdParamSchema,
@@ -9,11 +10,11 @@ import {
   updateUserProfileSchema,
 } from "../schemas";
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { asyncHandler } from "../middleware/error";
 import { avatarUpload } from "../config/upload";
 import { validate } from "../middleware/validation";
-import { ReputationService } from "../services/reputation.service";
+import { ReputationCacheService } from "../services/reputation-cache.service";
 import { normalizeSkills } from "../services/skill.service";
 import { logger } from "../lib/logger";
 import sharp from "sharp";
@@ -51,9 +52,9 @@ router.get("/me", authenticate, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { password: _password, ...safeUser } = user;
     res.json({
-      ...safeUser,
+      ...user,
+      password: undefined, // never serialized — JSON.stringify drops undefined-valued keys
       authMethods: {
         email: Boolean(user.email && user.password),
         wallet: Boolean(user.walletAddress),
@@ -299,7 +300,7 @@ router.get(
       prisma.review.count({ where }),
     ]);
 
-    const data = reviews.map((r: any) => {
+    const data = reviews.map((r) => {
       const targetUser = type === "given" ? r.reviewee : r.reviewer;
       return {
         id: r.id,
@@ -316,7 +317,13 @@ router.get(
       };
     });
 
-    const meta: any = {
+    const meta: {
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+      averageRating?: number;
+    } = {
       total,
       page,
       limit,
@@ -474,18 +481,22 @@ router.get(
           throw new Error("User not found");
         }
 
+        const result: typeof user & {
+          reputation?: { totalScore: string; totalWeight: string; reviewCount: number };
+        } = user;
+
         if (user.role === "FREELANCER" && user.walletAddress) {
-          const reputation = await ReputationService.getReputation(user.walletAddress);
+          const reputation = await ReputationCacheService.getCachedReputation(user.walletAddress);
           if (reputation) {
-            (user as any).reputation = {
-              totalScore: reputation.total_score.toString(),
-              totalWeight: reputation.total_weight.toString(),
-              reviewCount: reputation.review_count,
+            result.reputation = {
+              totalScore: reputation.score.toString(),
+              totalWeight: reputation.endorsementWeight.toString(),
+              reviewCount: 0,
             };
           }
         }
 
-        return user;
+        return result;
       });
 
       res.set("X-Cache-Hit", hit.toString());
@@ -504,11 +515,13 @@ router.get(
   "/",
   validate({ query: getUsersQuerySchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { page, limit, search, skill, role } = req.query as any;
+    const { page, limit, search, skill, role } = req.query as unknown as z.infer<
+      typeof getUsersQuerySchema
+    >;
 
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: Prisma.UserWhereInput = {};
 
     if (role) {
       where.role = role;
@@ -551,15 +564,15 @@ router.get(
     ]);
 
     const usersWithReputation = await Promise.all(
-      users.map(async (user: any) => {
+      users.map(async (user) => {
         if (user.role === "FREELANCER" && user.walletAddress) {
-          const reputation = await ReputationService.getReputation(user.walletAddress);
+          const reputation = await ReputationCacheService.getCachedReputation(user.walletAddress);
           return {
             ...user,
             reputation: reputation ? {
-              totalScore: reputation.total_score.toString(),
-              totalWeight: reputation.total_weight.toString(),
-              reviewCount: reputation.review_count,
+              totalScore: reputation.score.toString(),
+              totalWeight: reputation.endorsementWeight.toString(),
+              reviewCount: 0,
             } : null,
           };
         }
@@ -614,7 +627,22 @@ router.put(
 
     const body = updateData as Record<string, unknown>;
     const data: Record<string, unknown> = {};
-    if (body.email !== undefined) data.email = body.email;
+    if (body.email !== undefined) {
+      data.email = body.email;
+      
+      // Check email uniqueness if being updated
+      if (body.email) {
+        const existingUser = await prisma.user.findFirst({
+          where: {
+            email: body.email as string,
+            NOT: { id },
+          },
+        });
+        if (existingUser) {
+          return res.status(409).json({ error: "Email is already taken." });
+        }
+      }
+    }
     if (body.bio !== undefined) data.bio = body.bio;
     if (body.skills !== undefined) data.skills = body.skills;
     if (body.availability !== undefined) data.availability = body.availability;

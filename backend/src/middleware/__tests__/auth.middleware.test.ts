@@ -12,8 +12,14 @@ jest.mock("../../lib/token-version", () => ({
 
 const getCurrentTokenVersionMock = getCurrentTokenVersion as jest.Mock;
 
+type MockPrismaClient = {
+  user: {
+    findUnique: jest.Mock;
+  };
+};
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma = {
+  const mockPrisma: MockPrismaClient = {
     user: {
       findUnique: jest.fn(),
     },
@@ -31,12 +37,13 @@ jest.mock("@prisma/client", () => {
 
 // Import mocked Prisma types and instance
 import { PrismaClient, UserRole } from "@prisma/client";
-const prismaMock = new PrismaClient() as any;
+import type { Response } from "express";
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 
 describe("authenticate middleware", () => {
   const json = jest.fn();
   const status = jest.fn(() => ({ json }));
-  const res = { status } as any;
+  const res = { status } as unknown as Response;
   const next = jest.fn();
 
   beforeEach(() => {

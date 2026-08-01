@@ -1,5 +1,6 @@
-import { PrismaClient, EscrowEvent, EscrowEventType, JobStatus, EscrowStatus } from "@prisma/client";
+import { PrismaClient, Prisma, EscrowEvent, EscrowEventType, JobStatus, EscrowStatus } from "@prisma/client";
 import { NotificationService } from "./notification.service";
+import { FraudDetectionService } from "./fraud-detection.service";
 import { logger } from "../lib/logger";
 
 const prisma = new PrismaClient();
@@ -40,7 +41,7 @@ export function applyEvent(state: EscrowProjection, event: EscrowEvent): EscrowP
         status: "DISPUTED",
       };
     case EscrowEventType.DISPUTE_RESOLVED: {
-      const payload = event.payload as Record<string, any>;
+      const payload = event.payload as Record<string, unknown>;
       const rawStatus = payload?.rawStatus;
       let jobStatus = state.status;
       let escrowStatus = state.escrowStatus;
@@ -93,7 +94,7 @@ export interface HandleEscrowEventInput {
   eventType: EscrowEventType;
   ledgerSeq: number;
   txHash: string;
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
 }
 
 export async function handleEscrowEvent(eventData: HandleEscrowEventInput): Promise<void> {
@@ -108,12 +109,16 @@ export async function handleEscrowEvent(eventData: HandleEscrowEventInput): Prom
         eventType,
         ledgerSeq,
         txHash,
-        payload: payload ?? {},
+        payload: (payload ?? {}) as Prisma.InputJsonValue,
       },
     });
-  } catch (error: any) {
-    // Check for unique constraint violation (idempotency key match)
-    if (error.code === "P2002") {
+  } catch (error) {
+    // Check for unique constraint violation (idempotency key match). Duck-typed
+    // rather than `instanceof Prisma.PrismaClientKnownRequestError` so this also
+    // recognizes equivalent error shapes from test doubles/other DB drivers.
+    const isUniqueConstraintViolation =
+      typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
+    if (isUniqueConstraintViolation) {
       logger.info(
         { contractJobId, eventType, ledgerSeq },
         "[EscrowProjectionService] Duplicate event ignored"
@@ -164,11 +169,18 @@ export async function handleEscrowEvent(eventData: HandleEscrowEventInput): Prom
             })
           )
         );
+
+        // Near-real-time fraud/anomaly scoring (issue #900). Fire-and-forget:
+        // scoring an escrow release must never block or fail projection.
+        FraudDetectionService.onEscrowReleased(
+          jobId,
+          [job.clientId, job.freelancerId].filter(Boolean) as string[],
+        );
       }
     }
   } else if (eventType === EscrowEventType.DISPUTE_OPENED) {
     const onChainDisputeId = payload?.onChainDisputeId;
-    if (onChainDisputeId) {
+    if (typeof onChainDisputeId === "string") {
       const job = await prisma.job.findUnique({
         where: { id: jobId },
         select: { clientId: true, freelancerId: true, contractJobId: true },
@@ -207,9 +219,9 @@ export async function handleEscrowEvent(eventData: HandleEscrowEventInput): Prom
   } else if (eventType === EscrowEventType.DISPUTE_RESOLVED) {
     const onChainDisputeId = payload?.onChainDisputeId;
     const rawStatus = payload?.rawStatus;
-    if (onChainDisputeId && rawStatus) {
+    if (typeof onChainDisputeId === "string" && typeof rawStatus === "string") {
       let dbDisputeStatus: "OPEN" | "IN_PROGRESS" | "RESOLVED" = "RESOLVED";
-      let outcome = rawStatus;
+      let outcome: string = rawStatus;
 
       if (rawStatus === "ResolvedForClient") {
         outcome = "CLIENT_WINS";

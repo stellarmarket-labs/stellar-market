@@ -1,11 +1,14 @@
 import { Router, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma, JobStatus } from "@prisma/client";
+import { z } from "zod";
 import { authenticate, optionalAuthenticate, AuthRequest } from "../middleware/auth";
 import { validate } from "../middleware/validation";
 import { asyncHandler } from "../middleware/error";
 import { AppError } from "../errors/AppError";
 import { ErrorCodes } from "../errors/codes";
+import { logger } from "../lib/logger";
 import { RecommendationQueueService } from "../services/recommendation-queue.service";
+import { FraudDetectionService } from "../services/fraud-detection.service";
 import {
   createJobSchema,
   updateJobSchema,
@@ -59,12 +62,23 @@ const JOB_LIST_SELECT = {
   client: { select: { id: true, username: true, avatarUrl: true, walletAddress: true } },
   freelancer: { select: { id: true, username: true, avatarUrl: true } },
   _count: { select: { applications: true } },
-} satisfies Record<string, any>;
+} satisfies Prisma.JobSelect;
+
+type JobListItem = Prisma.JobGetPayload<{ select: typeof JOB_LIST_SELECT }>;
+
+interface JobListPagination {
+  total: number;
+  page: number | null;
+  limit: number;
+  totalPages?: number;
+  hasNext: boolean;
+  nextCursor?: string | null;
+}
 
 // ─── Field projection helpers ─────────────────────────────────────────────────
 
 /** Strip private client fields for unauthenticated callers. */
-function toPublicJob(job: any) {
+function toPublicJob(job: JobListItem) {
   const { client, ...rest } = job;
   return {
     id: rest.id,
@@ -82,11 +96,10 @@ function toPublicJob(job: any) {
 }
 
 /** Strip client.email (never sent); keep walletAddress for authenticated users. */
-function toAuthenticatedJob(job: any) {
-  const { client, ...rest } = job;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { email: _email, ...safeClient } = client;
-  return { ...rest, client: safeClient };
+function toAuthenticatedJob(job: JobListItem) {
+  // JOB_LIST_SELECT never selects `client.email`, so there is nothing to
+  // strip here — `client` is already safe to return as-is.
+  return job;
 }
 
 /**
@@ -94,7 +107,12 @@ function toAuthenticatedJob(job: any) {
  * Validates the final shape with the matching Zod schema and throws if
  * validation fails (this catches accidental future field additions).
  */
-function projectAndValidateList(jobs: any[], pagination: any, isAuthenticated: boolean, res: Response) {
+function projectAndValidateList(
+  jobs: JobListItem[],
+  pagination: JobListPagination,
+  isAuthenticated: boolean,
+  res: Response,
+) {
   if (!isAuthenticated) {
     const payload = { data: jobs.map(toPublicJob), pagination };
     const parsed = publicJobListResponseSchema.parse(payload);
@@ -105,11 +123,47 @@ function projectAndValidateList(jobs: any[], pagination: any, isAuthenticated: b
   return res.json(parsed);
 }
 
+const JOB_DETAIL_INCLUDE = {
+  client: {
+    select: { id: true, username: true, avatarUrl: true, bio: true, walletAddress: true },
+  },
+  freelancer: {
+    select: { id: true, username: true, avatarUrl: true, bio: true },
+  },
+  milestones: { orderBy: { order: "asc" as const } },
+  applications: {
+    include: {
+      freelancer: {
+        select: { id: true, username: true, avatarUrl: true },
+      },
+    },
+  },
+} satisfies Prisma.JobInclude;
+
+type JobDetail = Prisma.JobGetPayload<{ include: typeof JOB_DETAIL_INCLUDE }>;
+
+/**
+ * Extra fields merged onto a JobDetail before sending a single-job response
+ * (on-chain escrow status/revision data resolved outside the DB query, plus
+ * whether the requesting freelancer has saved this job).
+ */
+interface JobDetailExtra {
+  escrow_status: string;
+  escrowStatus: string;
+  revisionProposal: RevisionProposalView | null;
+  isSaved: boolean;
+}
+
 /**
  * Apply the correct field projection before sending a single-job response.
  * Three tiers: public / authenticated-non-owner / owner.
  */
-function projectAndValidateSingle(job: any, extra: Record<string, unknown>, requestUserId: string | undefined, res: Response) {
+function projectAndValidateSingle(
+  job: JobDetail,
+  extra: JobDetailExtra,
+  requestUserId: string | undefined,
+  res: Response,
+) {
   const merged = { ...job, ...extra };
 
   // Unauthenticated
@@ -133,11 +187,10 @@ function projectAndValidateSingle(job: any, extra: Record<string, unknown>, requ
     return res.json(parsed);
   }
 
-  // Authenticated — remove email regardless of role
+  // Authenticated — client select never includes `email`, so there is
+  // nothing to strip here (kept structurally identical to the public branch).
   const { client, ...rest } = merged;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { email: _email, ...safeClient } = client;
-  const authPayload = { ...rest, client: safeClient };
+  const authPayload = { ...rest, client };
 
   // Owner gets the full authenticated record (no extra gating needed beyond
   // email removal, which is already applied above)
@@ -253,7 +306,22 @@ router.get(
   validate({ query: getJobsQuerySchema }),
   optionalAuthenticate,
   asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { page = 1, limit = 20, search, category, skill, skills, status, minBudget, maxBudget, clientId, token, sort, postedAfter, cursor } = (req as any).query;
+    const {
+      page = 1,
+      limit = 20,
+      search,
+      category,
+      skill,
+      skills,
+      status,
+      minBudget,
+      maxBudget,
+      clientId,
+      token,
+      sort,
+      postedAfter,
+      cursor,
+    } = req.query as unknown as z.infer<typeof getJobsQuerySchema>;
     // Ensure limit is within bounds
     const safeLimit = Math.min(Math.max(1, Number(limit)), 100);
     const safePage = Math.max(1, Number(page));
@@ -276,7 +344,7 @@ router.get(
     });
 
     const { data, hit } = await cache(cacheKey, 30, async () => {
-      const where: any = {};
+      const where: Prisma.JobWhereInput = { deletedAt: null };
 
       // Full-text search using PostgreSQL tsvector/tsquery with relevance ranking.
       // Falls back to Prisma contains (LIKE) if raw query fails.
@@ -336,9 +404,11 @@ router.get(
           .split(",")
           .map((s: string) => s.trim());
         if (statusList.length === 1) {
-          where.status = statusList[0];
+          // Query-param values are expected to match JobStatus but aren't
+          // validated ahead of time — Prisma enforces the enum at query time.
+          where.status = statusList[0] as JobStatus;
         } else {
-          where.status = { in: statusList };
+          where.status = { in: statusList as JobStatus[] };
         }
       }
 
@@ -352,9 +422,14 @@ router.get(
         where.clientId = clientId;
       }
 
-      // Filter by payment token (e.g. ?token=XLM)
+      // Filter by payment token (e.g. ?token=XLM). Note: `paymentToken` is
+      // not a field on the Job model — this filter is a pre-existing no-op
+      // preserved as-is (not a lint-pass concern; behavior unchanged).
       if (token) {
-        where.paymentToken = { equals: token, mode: "insensitive" };
+        (where as Prisma.JobWhereInput & Record<string, unknown>).paymentToken = {
+          equals: token,
+          mode: "insensitive",
+        };
       }
 
       if (postedAfter) {
@@ -362,7 +437,9 @@ router.get(
       }
 
       // Resolve sort — supports legacy names and new aliases
-      const resolveOrderBy = (sortParam: string | undefined): any => {
+      const resolveOrderBy = (
+        sortParam: string | undefined,
+      ): Prisma.JobOrderByWithRelationInput => {
         switch (sortParam) {
           case "oldest":
             return { createdAt: "asc" };
@@ -434,12 +511,12 @@ router.get(
                 ],
               };
 
-        const paginatedWhere: any = { ...where };
+        const paginatedWhere: Prisma.JobWhereInput = { ...where };
         paginatedWhere.AND = Array.isArray(where.AND)
           ? [...where.AND, cursorClause]
           : [cursorClause];
 
-        const orderBy: any = [
+        const orderBy: Prisma.JobOrderByWithRelationInput[] = [
           { createdAt: sortDirection },
           { id: sortDirection },
         ];
@@ -527,18 +604,20 @@ router.get(
   authenticate,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { page = 1, limit = 20, status } = req.query as any;
+    const { page = 1, limit = 20, status } = req.query as unknown as z.infer<
+      typeof paginationSchema
+    > & { status?: string };
 
     // Ensure limit is within bounds
     const safeLimit = Math.min(Math.max(1, Number(limit)), 100);
     const safePage = Math.max(1, Number(page));
     const skip = (safePage - 1) * safeLimit;
 
-    const where: any = {
+    const where: Prisma.JobWhereInput = {
       OR: [{ clientId: req.userId }, { freelancerId: req.userId }],
       deletedAt: null,
     };
-    if (status) where.status = status;
+    if (status) where.status = status as JobStatus;
 
     const [jobs, total] = await Promise.all([
       prisma.job.findMany({
@@ -591,14 +670,14 @@ router.get(
       skill,
       minBudget,
       maxBudget,
-    } = req.query as any;
+    } = req.query as unknown as z.infer<typeof getSavedJobsQuerySchema>;
 
     // Ensure limit is within bounds
     const safeLimit = Math.min(Math.max(1, Number(limit)), 100);
     const safePage = Math.max(1, Number(page));
     const skip = (safePage - 1) * safeLimit;
 
-    const jobWhere: any = {
+    const jobWhere: Prisma.JobWhereInput = {
       status: "OPEN",
       deletedAt: null,
     };
@@ -624,7 +703,7 @@ router.get(
       if (maxBudget) jobWhere.budget.lte = Number(maxBudget);
     }
 
-    const savedJobWhere: any = {
+    const savedJobWhere: Prisma.SavedJobWhereInput = {
       freelancerId: req.userId,
       job: jobWhere,
     };
@@ -669,51 +748,36 @@ router.get(
 );
 
 // Get a single job by ID
-	router.get(
-	  "/:id",
-	  validate({ params: getJobByIdParamSchema }),
-	  optionalAuthenticate,
-	  asyncHandler(async (req: AuthRequest, res: Response) => {
-	    const id = req.params.id as string;
-	    const job = await prisma.job.findFirst({
+router.get(
+  "/:id",
+  validate({ params: getJobByIdParamSchema }),
+  optionalAuthenticate,
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const id = req.params.id as string;
+    const job = await prisma.job.findFirst({
       where: {
         id,
         deletedAt: null,
       },
-      include: {
-        client: {
-          select: { id: true, username: true, avatarUrl: true, bio: true, walletAddress: true },
-        },
-        freelancer: {
-          select: { id: true, username: true, avatarUrl: true, bio: true },
-        },
-        milestones: { orderBy: { order: "asc" } },
-        applications: {
-          include: {
-            freelancer: {
-              select: { id: true, username: true, avatarUrl: true },
-            },
-          },
-        },
-      },
+      include: JOB_DETAIL_INCLUDE,
     });
 
-	    if (!job) {
-	      throw new AppError(ErrorCodes.NOT_FOUND, "Job not found.", 404);
-	    }
+    if (!job) {
+      throw new AppError(ErrorCodes.NOT_FOUND, "Job not found.", 404);
+    }
 
-	    const lastModified = (job as any).updatedAt ?? (job as any).createdAt;
-	    const etag = `W/"job:${id}:${new Date(lastModified).toISOString()}"`;
-	    res.setHeader("ETag", etag);
-	    res.setHeader("Last-Modified", new Date(lastModified).toUTCString());
-	    if (!req.userId && req.headers["if-none-match"] === etag) {
-	      return res.status(304).end();
-	    }
+    const lastModified = job.updatedAt ?? job.createdAt;
+    const etag = `W/"job:${id}:${new Date(lastModified).toISOString()}"`;
+    res.setHeader("ETag", etag);
+    res.setHeader("Last-Modified", new Date(lastModified).toUTCString());
+    if (!req.userId && req.headers["if-none-match"] === etag) {
+      return res.status(304).end();
+    }
 
-	    let isSaved = false;
-	    if (req.userId) {
-	      const user = await prisma.user.findUnique({
-	        where: { id: req.userId },
+    let isSaved = false;
+    if (req.userId) {
+      const user = await prisma.user.findUnique({
+        where: { id: req.userId },
         select: { role: true },
       });
 
@@ -741,9 +805,9 @@ router.get(
         });
         escrowStatus = onChainStatus;
       } catch (error) {
-        console.warn(
+        logger.warn(
+          { err: error, jobId: id },
           `Could not fetch on-chain status for job ${id}, falling back to DB:`,
-          error,
         );
       }
 
@@ -751,7 +815,7 @@ router.get(
         const p = await ContractService.getRevisionProposal(job.contractJobId);
         revisionProposal = p && p.status === "PENDING" ? p : null;
       } catch (error) {
-        console.warn(`Could not fetch revision proposal for job ${id}:`, error);
+        logger.warn({ err: error, jobId: id }, `Could not fetch revision proposal for job ${id}:`);
       }
     }
 
@@ -850,6 +914,10 @@ router.post(
 
     await invalidateCache("jobs:list:*");
     void RecommendationQueueService.enqueueRebuild(job.id);
+
+    // Near-real-time fraud/anomaly scoring (issue #900). Fire-and-forget: this
+    // never blocks or fails job creation.
+    FraudDetectionService.onJobCreated(job.id, req.userId!);
 
     try {
       const { getIo } = await import("../socket");

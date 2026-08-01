@@ -49,8 +49,10 @@ jest.mock("@stellar/stellar-sdk", () => {
   };
 });
 
-import { rpc } from "@stellar/stellar-sdk";
+import { rpc, xdr } from "@stellar/stellar-sdk";
 import { ContractService, ContractSimulationError } from "../contract.service";
+
+const fakeOperation = {} as unknown as xdr.Operation;
 
 describe("ContractService simulation failure logging", () => {
   let mockSimulateTransaction: jest.Mock;
@@ -80,7 +82,7 @@ describe("ContractService simulation failure logging", () => {
     (rpc.Api.isSimulationError as unknown as jest.Mock).mockReturnValue(true);
     mockSimulateTransaction.mockResolvedValue(fakeSimulation);
 
-    await expect(ContractService.simulateContractRead({} as any)).rejects.toThrow(
+    await expect(ContractService.simulateContractRead(fakeOperation)).rejects.toThrow(
       ContractSimulationError,
     );
 
@@ -102,7 +104,7 @@ describe("ContractService simulation failure logging", () => {
     (rpc.Api.isSimulationSuccess as unknown as jest.Mock).mockReturnValue(false);
     mockSimulateTransaction.mockResolvedValue(fakeSimulation);
 
-    await expect(ContractService.simulateContractRead({} as any)).rejects.toThrow(
+    await expect(ContractService.simulateContractRead(fakeOperation)).rejects.toThrow(
       ContractSimulationError,
     );
 
@@ -122,7 +124,7 @@ describe("ContractService simulation failure logging", () => {
     (rpc.Api.isSimulationSuccess as unknown as jest.Mock).mockReturnValue(true);
     mockSimulateTransaction.mockResolvedValue(fakeSimulation);
 
-    await ContractService.simulateContractRead({} as any);
+    await ContractService.simulateContractRead(fakeOperation);
 
     expect(logger.error).not.toHaveBeenCalled();
   });

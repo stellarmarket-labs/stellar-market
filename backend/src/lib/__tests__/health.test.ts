@@ -5,6 +5,10 @@ const pingMock = jest.fn();
 const isRedisConnectedMock = jest.fn();
 const getHealthMock = jest.fn();
 
+jest.mock("../../services/horizon-listener.service", () => ({
+  getHorizonListenerHealth: jest.fn().mockReturnValue("ok"),
+}));
+
 jest.mock("../redis", () => ({
   __esModule: true,
   default: {
@@ -19,16 +23,6 @@ jest.mock("../../config", () => ({
     version: "1.0.0",
     stellar: {
       rpcUrl: "https://soroban-testnet.stellar.org",
-      escrowContractId: "",
-      disputeContractId: "",
-      reputationContractId: "",
-    },
-    smtp: {
-      host: "smtp.test",
-      port: 587,
-      user: "",
-      pass: "",
-      from: "noreply@test.io",
     },
   },
 }));
@@ -54,22 +48,29 @@ describe("getHealthStatus", () => {
       $queryRawUnsafe: jest.fn().mockResolvedValue([{ "?column?": 1 }]),
     };
 
-    const result = await getHealthStatus(prisma as any);
+    const result = await getHealthStatus(prisma);
 
     expect(result.status).toBe("ok");
     expect(result.version).toBe("1.0.0");
     expect(result.uptime).toBeGreaterThanOrEqual(0);
+    expect(result.checks).toEqual({
+      database: "ok",
+      redis: "ok",
+      horizonListener: "ok",
+      sorobanRpc: "ok",
+    });
+
     expect(result).toEqual({
       status: "ok",
       service: "stellarmarket-api",
-      version: "1.0.0",
       uptime: expect.any(Number),
       checks: {
         database: "ok",
         redis: "ok",
-        sorobanRpc: "ok",
-        horizonListener: "connected",
+        horizonListener: "ok",
+        sorobanRpc: "ok"
       },
+      version: "1.0.0"
     });
   });
 
@@ -81,7 +82,7 @@ describe("getHealthStatus", () => {
       $queryRawUnsafe: jest.fn().mockRejectedValue(new Error("db down")),
     };
 
-    const result = await getHealthStatus(prisma as any);
+    const result = await getHealthStatus(prisma);
 
     expect(result.status).toBe("degraded");
     expect(result.checks.database).toBe("error");
@@ -97,7 +98,7 @@ describe("getHealthStatus", () => {
       $queryRawUnsafe: jest.fn().mockResolvedValue([{ "?column?": 1 }]),
     };
 
-    const result = await getHealthStatus(prisma as any);
+    const result = await getHealthStatus(prisma);
 
     expect(result.status).toBe("ok");
     expect(result.checks.database).toBe("ok");
@@ -113,7 +114,7 @@ describe("getHealthStatus", () => {
       $queryRawUnsafe: jest.fn().mockResolvedValue([{ "?column?": 1 }]),
     };
 
-    const result = await getHealthStatus(prisma as any);
+    const result = await getHealthStatus(prisma);
 
     expect(result).toHaveProperty("version");
     expect(result).toHaveProperty("uptime");

@@ -194,7 +194,7 @@
                             "symbol": "deadline"
                           },
                           "val": {
-                            "u64": 1000000
+                            "u64": 999999
                           }
                         },
                         {
@@ -224,6 +224,12 @@
                               }
                             ]
                           }
+                        },
+                        {
+                          "key": {
+                            "symbol": "token"
+                          },
+                          "val": "void"
                         }
                       ]
                     },
@@ -275,6 +281,12 @@
                               }
                             ]
                           }
+                        },
+                        {
+                          "key": {
+                            "symbol": "token"
+                          },
+                          "val": "void"
                         }
                       ]
                     }
@@ -503,7 +515,7 @@
                                   "symbol": "deadline"
                                 },
                                 "val": {
-                                  "u64": 1000000
+                                  "u64": 999999
                                 }
                               },
                               {
@@ -533,6 +545,12 @@
                                     }
                                   ]
                                 }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "token"
+                                },
+                                "val": "void"
                               }
                             ]
                           },
@@ -584,6 +602,12 @@
                                     }
                                   ]
                                 }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "token"
+                                },
+                                "val": "void"
                               }
                             ]
                           }
@@ -608,6 +632,14 @@
                       },
                       "val": {
                         "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "token_balances"
+                      },
+                      "val": {
+                        "vec": []
                       }
                     },
                     {
@@ -723,6 +755,12 @@
                                         }
                                       ]
                                     }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "token"
+                                    },
+                                    "val": "void"
                                   }
                                 ]
                               }
@@ -844,7 +882,7 @@
                                   "symbol": "deadline"
                                 },
                                 "val": {
-                                  "u64": 1000000
+                                  "u64": 999999
                                 }
                               },
                               {
@@ -874,6 +912,12 @@
                                     }
                                   ]
                                 }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "token"
+                                },
+                                "val": "void"
                               }
                             ]
                           },
@@ -925,6 +969,12 @@
                                     }
                                   ]
                                 }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "token"
+                                },
+                                "val": "void"
                               }
                             ]
                           }
@@ -2244,7 +2294,7 @@
                             "symbol": "deadline"
                           },
                           "val": {
-                            "u64": 1000000
+                            "u64": 999999
                           }
                         },
                         {
@@ -2274,6 +2324,12 @@
                               }
                             ]
                           }
+                        },
+                        {
+                          "key": {
+                            "symbol": "token"
+                          },
+                          "val": "void"
                         }
                       ]
                     },
@@ -2325,6 +2381,12 @@
                               }
                             ]
                           }
+                        },
+                        {
+                          "key": {
+                            "symbol": "token"
+                          },
+                          "val": "void"
                         }
                       ]
                     }
@@ -2622,7 +2684,7 @@
                               "symbol": "deadline"
                             },
                             "val": {
-                              "u64": 1000000
+                              "u64": 999999
                             }
                           },
                           {
@@ -2652,6 +2714,12 @@
                                 }
                               ]
                             }
+                          },
+                          {
+                            "key": {
+                              "symbol": "token"
+                            },
+                            "val": "void"
                           }
                         ]
                       },
@@ -2703,6 +2771,12 @@
                                 }
                               ]
                             }
+                          },
+                          {
+                            "key": {
+                              "symbol": "token"
+                            },
+                            "val": "void"
                           }
                         ]
                       }
@@ -2727,6 +2801,14 @@
                   },
                   "val": {
                     "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "token_balances"
+                  },
+                  "val": {
+                    "vec": []
                   }
                 },
                 {

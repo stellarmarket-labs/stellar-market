@@ -161,7 +161,7 @@
                   "map": [
                     {
                       "key": {
-                        "symbol": "last_updated_ledger"
+                        "symbol": "last_updated_ts"
                       },
                       "val": {
                         "u32": 1000
@@ -602,7 +602,7 @@
               "map": [
                 {
                   "key": {
-                    "symbol": "last_updated_ledger"
+                    "symbol": "last_updated_ts"
                   },
                   "val": {
                     "u32": 1000

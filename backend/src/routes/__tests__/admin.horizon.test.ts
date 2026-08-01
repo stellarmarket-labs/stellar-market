@@ -1,5 +1,7 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import request from "supertest";
+
+type RequestWithAuth = Request & { userId?: string; userRole?: string };
 
 const mockGetHorizonStatus = jest.fn();
 const mockOverrideHorizonCursor = jest.fn();
@@ -12,7 +14,7 @@ jest.mock("@prisma/client", () => ({
 }));
 
 jest.mock("../../middleware/auth", () => ({
-  requireAdmin: jest.fn((req: any, _res: any, next: any) => {
+  requireAdmin: jest.fn((req: RequestWithAuth, _res: Response, next: NextFunction) => {
     req.userId = "admin-1";
     req.userRole = "ADMIN";
     next();

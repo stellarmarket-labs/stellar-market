@@ -1,19 +1,22 @@
 import {
+  Account,
   Address,
   Contract,
   rpc,
   scValToNative,
+  StrKey,
   TransactionBuilder,
   xdr,
   nativeToScVal,
   BASE_FEE,
 } from "@stellar/stellar-sdk";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, Prisma } from "@prisma/client";
 import { MilestoneStatus } from "@prisma/client";
 import { config } from "../config";
 import { getRequestId } from "../lib/request-context";
 import { logger } from "../lib/logger";
 import { CircuitBreaker } from "../lib/circuit-breaker";
+import type { ApiError } from "../middleware/error";
 
 const networkPassphrase = config.stellar.networkPassphrase;
 const contractId = config.stellar.escrowContractId;
@@ -37,7 +40,7 @@ function getRpcServer(): rpc.Server {
     get(target, prop, receiver) {
       const origValue = Reflect.get(target, prop, receiver);
       if (typeof origValue === "function") {
-        return async (...args: any[]) => {
+        return async (...args: unknown[]) => {
           const isPrimaryAllowed = contractCB.allowRequest();
           if (isPrimaryAllowed) {
             try {
@@ -53,7 +56,7 @@ function getRpcServer(): rpc.Server {
                   return await secondaryMethod.apply(secondary, args);
                 } catch (secErr) {
                   logger.error({ err: secErr }, "Secondary RPC fallback failed.");
-                  const apiErr = new Error("Stellar RPC services unavailable") as any;
+                  const apiErr = new Error("Stellar RPC services unavailable") as ApiError;
                   apiErr.statusCode = 503;
                   throw apiErr;
                 }
@@ -66,7 +69,7 @@ function getRpcServer(): rpc.Server {
               return await secondaryMethod.apply(secondary, args);
             } catch (secErr) {
               logger.error({ err: secErr }, "Secondary RPC failed while circuit is open.");
-              const apiErr = new Error("Stellar RPC services unavailable") as any;
+              const apiErr = new Error("Stellar RPC services unavailable") as ApiError;
               apiErr.statusCode = 503;
               throw apiErr;
             }
@@ -136,7 +139,6 @@ export class ContractService {
   ) {
     const server = getRpcServer();
     const contract = new Contract(contractId);
-    const sourceAccount = await server.getLatestLedger(); // Dummy to get ledger, we need account seq
     // Note: To build a tx, we need the account's current sequence number.
     // The frontend can do this, but if the backend does it, it needs the public key.
     
@@ -384,15 +386,93 @@ export class ContractService {
 
   /**
    * Verification function to check transaction status on-chain.
+   * @deprecated Use verifyTransactionEffects for security-sensitive paths.
    */
   static async verifyTransaction(hash: string) {
     const server = getRpcServer();
     const response = await server.getTransaction(hash);
     if (response.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-        // Extract results if needed
         return { success: true, result: response.resultXdr };
     }
     return { success: false, error: response.status };
+  }
+
+  /**
+   * Verifies a transaction succeeded on-chain AND decodes what it actually did:
+   * which contract was called, which function, with what arguments, and from
+   * which source account. Used by confirm-tx to reject spoofed hash submissions.
+   */
+  static async verifyTransactionEffects(hash: string): Promise<{
+    success: boolean;
+    error?: string;
+    contractId?: string;
+    functionName?: string;
+    args?: unknown[];
+    sourceAccount?: string;
+  }> {
+    const server = getRpcServer();
+    const response = await server.getTransaction(hash);
+
+    if (response.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+      return { success: false, error: String(response.status) };
+    }
+
+    try {
+      const envelope = (response as rpc.Api.GetSuccessfulTransactionResponse).envelopeXdr;
+      const txBody = envelope.v1().tx();
+
+      // Decode source account (handles both ed25519 and muxed)
+      let sourceAccount: string | undefined;
+      try {
+        const src = txBody.sourceAccount();
+        const switchName = src.switch().name;
+        if (switchName === "keyTypeEd25519") {
+          sourceAccount = StrKey.encodeEd25519PublicKey(src.ed25519());
+        } else if (switchName === "keyTypeMuxedEd25519") {
+          sourceAccount = StrKey.encodeEd25519PublicKey(src.med25519().ed25519());
+        }
+      } catch {
+        // ignore — sourceAccount stays undefined
+      }
+
+      // Find the first invokeHostFunction operation.
+      // The stellar-base XDR bindings type union arm accessors as static factories,
+      // so we cast to access the instance getter.
+      for (const op of txBody.operations()) {
+        const body = op.body();
+        if (body.switch().name !== "invokeHostFunction") continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const hostFn = (body as any).invokeHostFunction().hostFunction();
+        if (hostFn.switch().name !== "hostFunctionTypeInvokeContract") continue;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const invokeArgs = (hostFn as any).invokeContract();
+        let contractId: string | undefined;
+        try {
+          contractId = Address.fromScAddress(invokeArgs.contractAddress()).toString();
+        } catch {
+          contractId = undefined;
+        }
+        const functionName = invokeArgs.functionName().toString();
+        const args: unknown[] = invokeArgs.args().map((a: xdr.ScVal) => {
+          try { return scValToNative(a); } catch { return undefined; }
+        });
+
+        return { success: true, contractId, functionName, args, sourceAccount };
+      }
+
+      // Transaction succeeded but contains no Soroban contract invocation
+      return {
+        success: false,
+        error: "Transaction contains no contract invocation — cannot verify escrow effects",
+      };
+    } catch (err) {
+      logger.warn({ err, hash }, "[ContractService] Failed to decode transaction envelope");
+      return {
+        success: false,
+        error: "Could not decode transaction envelope",
+      };
+    }
   }
 
   /**
@@ -446,10 +526,6 @@ export class ContractService {
 
     // Soroban enums are typically represented as symbols or integers depending on the SDK mapping
     // Here we'll map 0 -> 'Client', 1 -> 'Freelancer' for the VoteChoice enum
-    const choiceScVal = xdr.ScVal.scvVec([
-        xdr.ScVal.scvSymbol(choice === 0 ? "Client" : "Freelancer")
-    ]);
-
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
       networkPassphrase,
@@ -537,7 +613,7 @@ export class ContractService {
         accountId: () => READONLY_SOURCE,
         sequenceNumber: () => "0",
         incrementSequenceNumber: () => {},
-      } as any;
+      } as unknown as Account;
     });
     return new TransactionBuilder(sourceAccount, {
       fee: BASE_FEE,
@@ -558,7 +634,7 @@ export class ContractService {
       logger.error({
         traceId,
         xdr: txXdr,
-        events: (simulation as any).events ?? [],
+        events: (simulation as unknown as { events?: unknown[] }).events ?? [],
         error: simulation.error,
       }, "Soroban simulation failed");
       if (process.env.NODE_ENV !== "production") {
@@ -572,7 +648,7 @@ export class ContractService {
       logger.error({
         traceId,
         xdr: txXdr,
-        events: (simulation as any).events ?? [],
+        events: (simulation as unknown as { events?: unknown[] }).events ?? [],
         error: "Simulation did not succeed — state restore may be required",
       }, "Soroban simulation did not succeed");
       if (process.env.NODE_ENV !== "production") {
@@ -860,7 +936,7 @@ export class ContractService {
         : BigInt(Math.floor(Number(job.total_amount)));
     const budgetXlm = Number(totalStroops) / Number(STROOPS_PER_XLM);
 
-    await prisma.$transaction(async (tx: any) => {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.milestone.deleteMany({ where: { jobId } });
       const list = job.milestones ?? [];
       for (let i = 0; i < list.length; i++) {
@@ -974,7 +1050,7 @@ export class ContractService {
         )
       );
       if (Array.isArray(native)) {
-        return native.map((addr: any) => String(addr));
+        return native.map((addr: unknown) => String(addr));
       }
       return [];
     } catch (error) {

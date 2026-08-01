@@ -14,7 +14,13 @@ export interface SkillSuggestion {
  */
 export async function searchSkills(query: string, limit = 10): Promise<SkillSuggestion[]> {
   const trimmed = query.trim();
-  if (!trimmed) return [];
+  if (!trimmed) {
+    return prisma.skill.findMany({
+      orderBy: { name: "asc" },
+      take: 100,
+      select: { id: true, name: true, category: true },
+    });
+  }
 
   return prisma.skill.findMany({
     where: { name: { contains: trimmed, mode: "insensitive" } },

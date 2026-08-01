@@ -1,3 +1,6 @@
+import Image from "next/image";
+import Avatar from "@/components/Avatar.server";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
 
 type Props = { userPromise: Promise<any> };
@@ -6,14 +9,14 @@ export default async function ProfileHeader({ userPromise }: Props) {
   const user = await userPromise;
   return (
     <header className="flex flex-col sm:flex-row gap-6 items-start mb-10">
-      <div className="w-28 h-28 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex-shrink-0 flex items-center justify-center overflow-hidden border-4 border-theme-card">
-        {user.avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={user.avatarUrl} alt={user.username} width={112} height={112} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-white/50">U</div>
-        )}
-      </div>
+      <Avatar
+        src={user.avatarUrl}
+        alt={user.username}
+        size={112}
+        priority
+        unoptimized
+        className="flex-shrink-0 border-4 border-theme-card"
+      />
 
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-3 mb-3">

@@ -11,6 +11,7 @@ import {
   getMessagesQuerySchema,
   getMessageByIdParamSchema,
   markMessageAsReadSchema,
+  paginationSchema,
 } from "../schemas";
 
 const router = Router();
@@ -74,6 +75,23 @@ router.post(
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const { receiverId, jobId, content } = req.body;
 
+    // Verify receiver exists
+    const receiver = await prisma.user.findUnique({ where: { id: receiverId } });
+    if (!receiver) {
+      return res.status(404).json({ error: "Receiver not found." });
+    }
+
+    // If jobId is provided, verify sender is participant
+    if (jobId) {
+      const job = await prisma.job.findUnique({ where: { id: jobId } });
+      if (!job) {
+        return res.status(404).json({ error: "Job not found." });
+      }
+      if (job.clientId !== req.userId && job.freelancerId !== req.userId) {
+        return res.status(403).json({ error: "Not authorized to send messages for this job." });
+      }
+    }
+
     const message = await prisma.message.create({
       data: {
         senderId: req.userId!,
@@ -118,83 +136,124 @@ router.get("/unread-count", authenticate, async (req: AuthRequest, res: Response
 });
 
 // Get list of conversations for the current user (distinct partners) — used by Socket-based chat UI
-router.get("/conversations", authenticate, async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.userId!;
+router.get(
+  "/conversations",
+  authenticate,
+  validate({ query: paginationSchema }),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const page = Number(req.query.page) || 1;
+      const limit = Number(req.query.limit) || 10;
+      const skip = (page - 1) * limit;
 
-    const messages = await prisma.message.findMany({
-      where: {
-        OR: [{ senderId: userId }, { receiverId: userId }],
-      },
-      include: {
-        sender: { select: { id: true, username: true, avatarUrl: true } },
-        receiver: { select: { id: true, username: true, avatarUrl: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+      const messages = await prisma.message.findMany({
+        where: {
+          OR: [{ senderId: userId }, { receiverId: userId }],
+        },
+        include: {
+          sender: { select: { id: true, username: true, avatarUrl: true } },
+          receiver: { select: { id: true, username: true, avatarUrl: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      });
 
-    const conversationMap = new Map<
-      string,
-      {
-        partner: { id: string; username: string; avatarUrl: string | null };
-        lastMessage: (typeof messages)[number];
-        unreadCount: number;
+      const conversationMap = new Map<
+        string,
+        {
+          partner: { id: string; username: string; avatarUrl: string | null };
+          lastMessage: (typeof messages)[number];
+          unreadCount: number;
+        }
+      >();
+
+      for (const msg of messages) {
+        const partner = msg.senderId === userId ? msg.receiver : msg.sender;
+        const partnerId = partner.id;
+
+        if (!conversationMap.has(partnerId)) {
+          conversationMap.set(partnerId, {
+            partner,
+            lastMessage: msg,
+            unreadCount: 0,
+          });
+        }
+
+        if (msg.senderId === partnerId && !msg.read) {
+          const convo = conversationMap.get(partnerId)!;
+          convo.unreadCount += 1;
+        }
       }
-    >();
 
-    for (const msg of messages) {
-      const partner = msg.senderId === userId ? msg.receiver : msg.sender;
-      const partnerId = partner.id;
+      const allConversations = Array.from(conversationMap.values());
+      const total = allConversations.length;
+      const conversations = allConversations.slice(skip, skip + limit);
+      const hasNext = skip + limit < total;
 
-      if (!conversationMap.has(partnerId)) {
-        conversationMap.set(partnerId, {
-          partner,
-          lastMessage: msg,
-          unreadCount: 0,
-        });
-      }
-
-      if (msg.senderId === partnerId && !msg.read) {
-        const convo = conversationMap.get(partnerId)!;
-        convo.unreadCount += 1;
-      }
+      res.json({
+        data: conversations,
+        pagination: {
+          page,
+          limit,
+          total,
+          hasNext,
+        },
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Conversations error");
+      res.status(500).json({ error: "Internal server error." });
     }
-
-    const conversations = Array.from(conversationMap.values());
-    res.json(conversations);
-  } catch (error) {
-    logger.error({ err: error }, "Conversations error");
-    res.status(500).json({ error: "Internal server error." });
   }
-});
+);
 
 // Get conversation list OR conversation history (if jobId and participantId are provided)
 router.get("/",
   authenticate,
-  validate({ query: getMessagesQuerySchema }),
+  validate({ query: getMessagesQuerySchema.merge(paginationSchema) }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const jobId = req.query.jobId as string | undefined;
     const participantId = req.query.participantId as string | undefined;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
     if (participantId) {
-      const messages = await prisma.message.findMany({
-        where: {
-          AND: [
-            jobId ? { jobId: jobId as string } : {},
-            {
-              OR: [
-                { senderId: req.userId!, receiverId: participantId as string },
-                { senderId: participantId as string, receiverId: req.userId! },
-              ],
-            },
-          ],
+      const where = {
+        AND: [
+          jobId ? { jobId: jobId as string } : {},
+          {
+            OR: [
+              { senderId: req.userId!, receiverId: participantId as string },
+              { senderId: participantId as string, receiverId: req.userId! },
+            ],
+          },
+        ],
+      };
+
+      const [messages, total] = await Promise.all([
+        prisma.message.findMany({
+          where,
+          include: {
+            sender: { select: { id: true, username: true, avatarUrl: true } },
+          },
+          orderBy: { createdAt: "asc" },
+          skip,
+          take: limit,
+        }),
+        prisma.message.count({ where }),
+      ]);
+
+      const hasNext = skip + limit < total;
+
+      res.json({
+        data: messages,
+        pagination: {
+          page,
+          limit,
+          total,
+          hasNext,
         },
-        include: {
-          sender: { select: { id: true, username: true, avatarUrl: true } },
-        },
-        orderBy: { createdAt: "asc" },
       });
-      res.json(messages);
       return;
     }
 
@@ -213,7 +272,7 @@ router.get("/",
 
     const conversationsMap = new Map();
 
-    allMessages.forEach((msg: any) => {
+    allMessages.forEach((msg) => {
       const otherUser = msg.senderId === req.userId ? msg.receiver : msg.sender;
       const key = `${otherUser.id}-${msg.jobId || "no-job"}`;
 
@@ -232,7 +291,20 @@ router.get("/",
       }
     });
 
-    res.json(Array.from(conversationsMap.values()));
+    const allConversations = Array.from(conversationsMap.values());
+    const total = allConversations.length;
+    const conversations = allConversations.slice(skip, skip + limit);
+    const hasNext = skip + limit < total;
+
+    res.json({
+      data: conversations,
+      pagination: {
+        page,
+        limit,
+        total,
+        hasNext,
+      },
+    });
   })
 );
 
@@ -257,29 +329,39 @@ router.get(
   authenticate,
   validate({
     params: getMessageByIdParamSchema,
-    query: getMessagesQuerySchema.pick({ jobId: true })
+    query: getMessagesQuerySchema.pick({ jobId: true }).merge(paginationSchema)
   }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const otherUserId = req.params.id as string;
     const jobId = req.query.jobId as string | undefined;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    const messages = await prisma.message.findMany({
-      where: {
-        AND: [
-          jobId ? { jobId: jobId as string } : {},
-          {
-            OR: [
-              { senderId: req.userId!, receiverId: otherUserId },
-              { senderId: otherUserId, receiverId: req.userId! },
-            ],
-          },
-        ],
-      },
-      include: {
-        sender: { select: { id: true, username: true, avatarUrl: true } },
-      },
-      orderBy: { createdAt: "asc" },
-    });
+    const where = {
+      AND: [
+        jobId ? { jobId: jobId as string } : {},
+        {
+          OR: [
+            { senderId: req.userId!, receiverId: otherUserId },
+            { senderId: otherUserId, receiverId: req.userId! },
+          ],
+        },
+      ],
+    };
+
+    const [messages, total] = await Promise.all([
+      prisma.message.findMany({
+        where,
+        include: {
+          sender: { select: { id: true, username: true, avatarUrl: true } },
+        },
+        orderBy: { createdAt: "asc" },
+        skip,
+        take: limit,
+      }),
+      prisma.message.count({ where }),
+    ]);
 
     // Mark messages as read
     await prisma.message.updateMany({
@@ -292,7 +374,17 @@ router.get(
       data: { read: true },
     });
 
-    res.json(messages);
+    const hasNext = skip + limit < total;
+
+    res.json({
+      data: messages,
+      pagination: {
+        page,
+        limit,
+        total,
+        hasNext,
+      },
+    });
   }),
 );
 
