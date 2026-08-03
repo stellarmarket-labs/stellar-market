@@ -921,7 +921,7 @@ impl DisputeContract {
             refund_split_sum: 0,
             votes_for_malicious: 0,
             votes_for_split_award: 0,
-            min_votes: if min_votes < AUTO_RESOLVE_VOTE_THRESHOLD { AUTO_RESOLVE_VOTE_THRESHOLD } else { min_votes },
+            min_votes: if min_votes < AUTO_RESOLVE_VOTE_THRESHOLD { AUTO_RESOLVE_VOTE_THRESHOLD } else if min_votes > MAX_ARBITRATORS { MAX_ARBITRATORS } else { min_votes },
             tie_break_method: tie_break_method.unwrap_or(TieBreakMethod::RefundBoth),
             created_at: env.ledger().timestamp(),
             voting_deadline: env.ledger().timestamp().saturating_add(VOTING_PERIOD_SECS),
