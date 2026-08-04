@@ -58,7 +58,7 @@
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
-    "eslint": "^8.57.0",
+    "eslint": "^10.8.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/compression": "^1.8.1",
     "@types/cookie-parser": "^1.4.8",
