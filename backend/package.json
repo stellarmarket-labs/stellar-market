@@ -37,7 +37,7 @@
     "file-type": "^16.5.4",
     "handlebars": "^4.7.9",
     "helmet": "^8.0.0",
-    "ioredis": "^5.9.3",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.2.0",
     "nodemailer": "^9.0.3",
