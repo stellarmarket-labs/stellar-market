@@ -221,7 +221,7 @@ describe("Dispute Management System", () => {
         attachments: [],
       };
       prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
-      prismaMock.disputeVote.findMany.mockResolvedValueOnce([]);
+      (prismaMock.disputeVote as any).findMany.mockResolvedValueOnce([]);
 
       const dispute = await DisputeService.getDisputeById(disputeId);
 
@@ -248,9 +248,9 @@ describe("Dispute Management System", () => {
         attachments: [],
       };
       prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
-      prismaMock.disputeVote.findMany.mockResolvedValueOnce([]);
+      (prismaMock.disputeVote as any).findMany.mockResolvedValueOnce([]);
       (ContractService.getOnChainAssignedArbitrators as jest.Mock).mockResolvedValueOnce(["GARBITRATOR123"]);
-      prismaMock.user.findMany.mockResolvedValueOnce([{
+      (prismaMock.user as any).findMany.mockResolvedValueOnce([{
         username: "arb_user",
         avatarUrl: "http://example.com/avatar.png",
         walletAddress: "GARBITRATOR123",
@@ -275,9 +275,9 @@ describe("Dispute Management System", () => {
         attachments: [],
       };
       prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
-      prismaMock.disputeVote.findMany.mockResolvedValueOnce([]);
+      (prismaMock.disputeVote as any).findMany.mockResolvedValueOnce([]);
       (ContractService.getOnChainAssignedArbitrators as jest.Mock).mockResolvedValueOnce(["GARBITRATOR123"]);
-      prismaMock.user.findMany.mockResolvedValueOnce([]);
+      (prismaMock.user as any).findMany.mockResolvedValueOnce([]);
 
       const dispute = await DisputeService.getDisputeById(disputeId);
 
@@ -298,18 +298,18 @@ describe("Dispute Management System", () => {
         attachments: [],
       };
       prismaMock.dispute.findUnique.mockResolvedValueOnce(fullDispute);
-      prismaMock.disputeVote.findMany.mockResolvedValueOnce([]);
+      (prismaMock.disputeVote as any).findMany.mockResolvedValueOnce([]);
       (ContractService.getOnChainAssignedArbitrators as jest.Mock).mockResolvedValueOnce(["GARB1", "GARB2", "GARB3"]);
-      prismaMock.user.findMany.mockResolvedValueOnce([
+      (prismaMock.user as any).findMany.mockResolvedValueOnce([
         { username: "arb_1", avatarUrl: null, walletAddress: "GARB1" },
         { username: "arb_3", avatarUrl: null, walletAddress: "GARB3" }
       ]);
-      prismaMock.user.findMany.mockClear();
+      (prismaMock.user as any).findMany.mockClear();
 
       const dispute = await DisputeService.getDisputeById(disputeId);
 
-      expect(prismaMock.user.findMany).toHaveBeenCalledTimes(1);
-      expect(prismaMock.user.findMany).toHaveBeenCalledWith({
+      expect((prismaMock.user as any).findMany).toHaveBeenCalledTimes(1);
+      expect((prismaMock.user as any).findMany).toHaveBeenCalledWith({
         where: { walletAddress: { in: ["GARB1", "GARB2", "GARB3"] } },
         select: { username: true, avatarUrl: true, walletAddress: true },
       });
@@ -323,7 +323,7 @@ describe("Dispute Management System", () => {
 
   describe("getDisputes", () => {
     it("should return paginated disputes", async () => {
-      prismaMock.dispute.findMany.mockResolvedValueOnce([mockDispute]);
+      (prismaMock.dispute as any).findMany.mockResolvedValueOnce([mockDispute]);
       prismaMock.dispute.count.mockResolvedValueOnce(1);
 
       const result = await DisputeService.getDisputes(
@@ -340,7 +340,7 @@ describe("Dispute Management System", () => {
     });
 
     it("should filter disputes by status", async () => {
-      prismaMock.dispute.findMany.mockResolvedValueOnce([mockDispute]);
+      (prismaMock.dispute as any).findMany.mockResolvedValueOnce([mockDispute]);
       prismaMock.dispute.count.mockResolvedValueOnce(1);
 
       await DisputeService.getDisputes(
@@ -348,7 +348,7 @@ describe("Dispute Management System", () => {
         { page: 1, limit: 10 },
       );
 
-      expect(prismaMock.dispute.findMany).toHaveBeenCalledWith(
+      expect((prismaMock.dispute as any).findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { status: DisputeStatus.OPEN },
         }),
@@ -436,7 +436,7 @@ describe("Dispute Management System", () => {
 
   describe("getVoteStats", () => {
     it("should return accurate vote statistics", async () => {
-      prismaMock.disputeVote.findMany.mockResolvedValueOnce([
+      (prismaMock.disputeVote as any).findMany.mockResolvedValueOnce([
         { choice: "CLIENT" },
         { choice: "CLIENT" },
         { choice: "FREELANCER" },

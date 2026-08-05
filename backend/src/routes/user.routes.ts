@@ -478,9 +478,9 @@ router.get(
           const reputation = await ReputationCacheService.getCachedReputation(user.walletAddress);
           if (reputation) {
             (user as any).reputation = {
-              totalScore: reputation.total_score.toString(),
-              totalWeight: reputation.total_weight.toString(),
-              reviewCount: reputation.review_count,
+              totalScore: reputation.score.toString(),
+              totalWeight: reputation.endorsementWeight.toString(),
+              reviewCount: 0,
             };
           }
         }
@@ -557,9 +557,9 @@ router.get(
           return {
             ...user,
             reputation: reputation ? {
-              totalScore: reputation.total_score.toString(),
-              totalWeight: reputation.total_weight.toString(),
-              reviewCount: reputation.review_count,
+              totalScore: reputation.score.toString(),
+              totalWeight: reputation.endorsementWeight.toString(),
+              reviewCount: 0,
             } : null,
           };
         }
