@@ -13,9 +13,9 @@ const CANONICAL_CATEGORIES = [
   "DevOps",
 ];
 
-function categoryToSlug(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, "-");
-}
+// function categoryToSlug(name: string): string {
+//   return name.toLowerCase().replace(/\s+/g, "-");
+// }
 
 function slugToCanonical(slug: string): string {
   const fromSlug = CANONICAL_CATEGORIES.find(
