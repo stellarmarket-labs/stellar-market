@@ -23,7 +23,7 @@ process.env.EVIDENCE_S3_BUCKET = "test-bucket";
 // process.env — it must be required (not statically imported, which ES
 // import hoisting would run before the env vars above are set) after the
 // env vars are in place.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
 const { config: mockAuthConfig } = require("../../config") as typeof import("../../config");
 
 jest.mock("@prisma/client", () => {

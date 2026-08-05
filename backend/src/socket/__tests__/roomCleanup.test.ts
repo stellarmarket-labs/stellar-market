@@ -11,7 +11,7 @@ jest.mock("../../lib/notification-queue", () => ({
 jest.mock("../../lib/redis", () => {
   // jest.mock factories are hoisted above imports and can't close over
   // module-scoped bindings, so this must stay a require().
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   const { FakeRedisBus, mockRedisModule } = require("../../lib/__tests__/testUtils/fakeRedis");
   return mockRedisModule(new FakeRedisBus());
 });

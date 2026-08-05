@@ -25,15 +25,19 @@ interface ScoringWeights {
   disputeLossRate: number;    // Penalty for dispute losses
   endorsementWeight: number;  // Stake-weighted endorsements
   responseTime: number;       // Average time to first message (future)
+  recency: number;            // How recently the job was posted
+  clientReputation: number;   // Client average rating (normalized)
 }
 
-const WEIGHTS: ScoringWeights = {
-  skillOverlap: 0.25,
-  completionRate: 0.20,
-  onChainTier: 0.25,
-  disputeLossRate: 0.15,
-  endorsementWeight: 0.10,
+export const WEIGHTS: ScoringWeights = {
+  skillOverlap: 0.20,
+  completionRate: 0.15,
+  onChainTier: 0.20,
+  disputeLossRate: 0.10,
+  endorsementWeight: 0.08,
   responseTime: 0.05,
+  recency: 0.12,
+  clientReputation: 0.10,
 };
 
 /** Max age in days for recency scoring — jobs older than this get 0 recency score */
@@ -195,7 +199,9 @@ export function computeRelevanceScore(params: {
     WEIGHTS.onChainTier * tierScore +
     WEIGHTS.disputeLossRate * disputeScore +
     WEIGHTS.endorsementWeight * endorsementScore +
-    WEIGHTS.responseTime * responseScore
+    WEIGHTS.responseTime * responseScore +
+    WEIGHTS.recency * recencyScore(params.jobCreatedAt, params.now ?? new Date()) +
+    WEIGHTS.clientReputation * reputationScore(params.clientAverageRating)
   );
 }
 

@@ -16,6 +16,7 @@ mod reputation {
         pub total_score: u64,
         pub total_weight: u64,
         pub review_count: u32,
+        pub last_updated_ts: u32,
     }
 }
 

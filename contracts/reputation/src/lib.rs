@@ -51,18 +51,18 @@ mod escrow {
     #[contracttype]
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct Job {
-        pub auto_refund_after: u64,
-        pub client: Address,
-        pub expiry_ledger: u32,
-        pub freelancer: Address,
-        pub funded_amount: i128,
         pub id: u64,
-        pub job_deadline: u64,
-        pub milestones: Vec<Milestone>,
-        pub status: JobStatus,
+        pub client: Address,
+        pub freelancer: Address,
         pub token: Address,
-        pub token_balances: Vec<TokenBalance>,
         pub total_amount: i128,
+        pub funded_amount: i128,
+        pub status: JobStatus,
+        pub milestones: Vec<Milestone>,
+        pub job_deadline: u64,
+        pub auto_refund_after: u64,
+        pub expiry_ledger: u32,
+        pub token_balances: Vec<TokenBalance>,
     }
 
     #[soroban_sdk::contractclient(name = "EscrowContractClient")]

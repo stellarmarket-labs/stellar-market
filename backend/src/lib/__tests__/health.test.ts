@@ -6,7 +6,7 @@ const isRedisConnectedMock = jest.fn();
 const getHealthMock = jest.fn();
 
 jest.mock("../../services/horizon-listener.service", () => ({
-  getHorizonListenerHealth: jest.fn().mockReturnValue("ok"),
+  getHorizonListenerHealth: jest.fn().mockReturnValue("connected"),
 }));
 
 jest.mock("../redis", () => ({
@@ -56,7 +56,7 @@ describe("getHealthStatus", () => {
     expect(result.checks).toEqual({
       database: "ok",
       redis: "ok",
-      horizonListener: "ok",
+      horizonListener: "connected",
       sorobanRpc: "ok",
     });
 
@@ -67,7 +67,7 @@ describe("getHealthStatus", () => {
       checks: {
         database: "ok",
         redis: "ok",
-        horizonListener: "ok",
+        horizonListener: "connected",
         sorobanRpc: "ok"
       },
       version: "1.0.0"

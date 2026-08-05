@@ -59,6 +59,7 @@ impl MockReputationContract {
             total_score: 500,
             total_weight: 10,
             review_count: 5,
+            last_updated_ts: 0,
         })
     }
 
