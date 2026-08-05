@@ -62,6 +62,12 @@ export class DeadlineExtensionService {
       throw createError("New deadline must be in the future", 400);
     }
 
+    // Validate new deadline is later than the current deadline
+    const currentDeadline = milestone.contractDeadline ?? milestone.dueDate ?? job.deadline;
+    if (currentDeadline && newDeadline <= currentDeadline) {
+      throw createError("New deadline must be later than the current deadline", 400);
+    }
+
     // Check for existing pending extension request
     const existingRequest = await prisma.deadlineExtensionRequest.findFirst({
       where: {

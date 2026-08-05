@@ -217,3 +217,73 @@ describe("computeRelevanceScore", () => {
     expect(withCategory).toBeGreaterThanOrEqual(withoutCategory);
   });
 });
+
+// ─── #947: Recency and Client Reputation Scoring ─────────────────────────────
+
+describe("recency integration in computeRelevanceScore (#947)", () => {
+  const now = new Date("2026-07-01T00:00:00Z");
+
+  it("more recent job scores higher", () => {
+    const base = {
+      freelancerSkills: ["React"],
+      jobSkills: ["React"],
+      jobCategory: "Development",
+      completedCategories: ["Development"],
+      clientAverageRating: 3,
+      onChainReputation: null,
+      completedJobsCount: 5,
+      totalJobsCount: 10,
+      now,
+    };
+
+    const recentScore = computeRelevanceScore({
+      ...base,
+      jobCreatedAt: now,
+    });
+
+    const oldScore = computeRelevanceScore({
+      ...base,
+      jobCreatedAt: new Date("2026-06-01T00:00:00Z"),
+    });
+
+    expect(recentScore).toBeGreaterThan(oldScore);
+  });
+});
+
+describe("client reputation integration in computeRelevanceScore (#947)", () => {
+  const now = new Date("2026-07-01T00:00:00Z");
+
+  it("higher-rated client job scores higher", () => {
+    const base = {
+      freelancerSkills: ["React"],
+      jobSkills: ["React"],
+      jobCategory: "Development",
+      completedCategories: ["Development"],
+      jobCreatedAt: now,
+      onChainReputation: null,
+      completedJobsCount: 5,
+      totalJobsCount: 10,
+      now,
+    };
+
+    const highRepScore = computeRelevanceScore({
+      ...base,
+      clientAverageRating: 5,
+    });
+
+    const lowRepScore = computeRelevanceScore({
+      ...base,
+      clientAverageRating: 1,
+    });
+
+    expect(highRepScore).toBeGreaterThan(lowRepScore);
+  });
+});
+
+describe("WEIGHTS sum to 1.0 (#947)", () => {
+  it("all weights sum to exactly 1.0", async () => {
+    const { WEIGHTS } = await import("../recommendation.service");
+    const sum = Object.values(WEIGHTS).reduce((a: number, b: number) => a + b, 0);
+    expect(sum).toBe(1.0);
+  });
+});

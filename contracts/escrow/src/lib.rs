@@ -4227,14 +4227,31 @@ impl EscrowContract {
         job.client.require_auth();
         job.freelancer.require_auth();
 
-        if new_deadline <= env.ledger().timestamp() {
-            return Err(EscrowError::InvalidDeadline);
-        }
+        // Reject calls on jobs that have already reached a terminal state
+        // (Completed, Cancelled, or Expired).  These are the same guard used by
+        // propose_revision and submit_milestone.
+        require_state_not_terminal(&job)?;
 
         let mut milestones = job.milestones.clone();
         let mut milestone = milestones
             .get(milestone_id)
             .ok_or(EscrowError::MilestoneNotFound)?;
+
+        if new_deadline <= env.ledger().timestamp() {
+            return Err(EscrowError::InvalidDeadline);
+        }
+
+        // A deadline extension must move the milestone forward in time rather than
+        // shrinking or no-oping it.
+        if new_deadline <= milestone.deadline {
+            return Err(EscrowError::InvalidDeadline);
+        }
+
+        // If the business rule requires it, this can be re-enabled to prevent
+        // milestone deadlines from moving beyond the job-level deadline.
+        // if new_deadline > job.job_deadline {
+        //     return Err(EscrowError::InvalidDeadline);
+        // }
 
         milestone.deadline = new_deadline;
         milestones.set(milestone_id, milestone);

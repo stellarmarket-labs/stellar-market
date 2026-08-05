@@ -34,7 +34,7 @@ globalThis.__CAPTURED_WORKERS__ = [];
 jest.mock("../../lib/redis", () => {
   // jest.mock factories are hoisted above imports and can't close over
   // module-scoped bindings, so this must stay a require().
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   const { createFakeRedisClient } = require("../../lib/__tests__/testUtils/fakeRedis");
   const client = createFakeRedisClient(globalThis.__MULTI_INSTANCE_REDIS_BUS__);
   return {
@@ -127,9 +127,9 @@ async function startInstance(): Promise<TestInstance> {
     // jest.isolateModules needs call-time require() to force a fresh module
     // registry per simulated instance; a static import would be cached once
     // and shared across instances, defeating the isolation.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     ({ initSocket, isUserOnline } = require("../index"));
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     const { PrismaClient } = require("@prisma/client");
     prismaMock = new PrismaClient();
   });

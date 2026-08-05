@@ -2,7 +2,11 @@ import "@testing-library/jest-dom";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import axios from "axios";
 
-jest.mock("axios", () => ({ get: jest.fn(), isAxiosError: jest.fn() }));
+jest.mock("axios", () => ({
+  get: jest.fn(),
+  isAxiosError: jest.fn(),
+  isCancel: jest.fn(),
+}));
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 jest.mock("@/context/AuthContext", () => ({
@@ -35,17 +39,40 @@ const emptyResponse = {
   },
 };
 
+const reconcileResponse = {
+  data: {
+    range: { from: null, to: null },
+    summary: {
+      onChainCount: 0,
+      dbCount: 0,
+      matchedCount: 0,
+      onChainOnlyCount: 0,
+      dbOnlyCount: 0,
+      allMatched: true,
+    },
+    onChainOnly: [],
+  },
+};
+
 const PRESET_STORAGE_KEY = "stellar_earnings_preset";
 
 beforeEach(() => {
   jest.clearAllMocks();
   localStorage.clear();
-  mockedAxios.get.mockResolvedValue(emptyResponse);
+  mockedAxios.isAxiosError.mockReturnValue(false);
+  mockedAxios.isCancel.mockReturnValue(false);
+  mockedAxios.get.mockImplementation((url: string) => {
+    if (url.includes("/earnings/reconcile")) {
+      return Promise.resolve(reconcileResponse);
+    }
+    return Promise.resolve(emptyResponse);
+  });
 });
 
 async function renderPage() {
   const { EarningsPage } = await import("../earnings-page");
   render(<EarningsPage />);
+  await waitFor(() => expect(mockedAxios.get).toHaveBeenCalled());
 }
 
 describe("Earnings page preset shortcuts", () => {
@@ -137,7 +164,10 @@ describe("Earnings page preset shortcuts", () => {
     // is a genuine state transition, exactly like a real user switching back.
     fireEvent.click(screen.getByTestId("preset-all_time"));
     await waitFor(() => {
-      const latest = mockedAxios.get.mock.calls.map((c) => c[0] as string).at(-1);
+      const latest = mockedAxios.get.mock.calls
+        .map((c) => c[0] as string)
+        .filter((u) => u.includes("/earnings?"))
+        .at(-1);
       expect(latest).toBeDefined();
       expect(latest).not.toMatch(/from=/);
     });
@@ -145,13 +175,19 @@ describe("Earnings page preset shortcuts", () => {
     mockedAxios.get.mockClear();
     fireEvent.click(screen.getByTestId("preset-last_30_days"));
 
-    await waitFor(() => expect(mockedAxios.get).toHaveBeenCalled());
+    await waitFor(() => {
+      const latest = mockedAxios.get.mock.calls
+        .map((c) => c[0] as string)
+        .filter((u) => u.includes("/earnings?"))
+        .at(-1);
+      expect(latest).toBeDefined();
+      expect(latest).toMatch(/from=/);
+    });
 
-    const url: string = mockedAxios.get.mock.calls
+    const url = mockedAxios.get.mock.calls
       .map((c) => c[0] as string)
-      .find((u) => u.includes("/earnings?"))!;
-    expect(url).toMatch(/from=/);
-
+      .filter((u) => u.includes("/earnings?"))
+      .at(-1)!;
     const fromMatch = url.match(/from=([^&]+)/);
     expect(fromMatch).not.toBeNull();
     const fromDate = new Date(decodeURIComponent(fromMatch![1]));

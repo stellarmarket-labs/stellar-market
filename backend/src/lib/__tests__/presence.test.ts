@@ -24,7 +24,7 @@ const {
   markSocketOffline,
   refreshSocketPresence,
   startPresenceHeartbeat,
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- deliberate deferred load, see comment above
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires -- deliberate deferred load, see comment above
 } = require("../presence") as typeof import("../presence");
 
 function wait(ms: number): Promise<void> {

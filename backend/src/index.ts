@@ -26,7 +26,10 @@ import { installRequestIdConsolePatch, logger } from "./lib/logger";
 import { connectWithRetry } from "./lib/db-connect";
 import { getHealthStatus } from "./lib/health";
 import { metricsHandler, requestDurationMiddleware } from "./lib/metrics";
-import { RecommendationQueueService } from "./services/recommendation-queue.service";
+import {
+  RecommendationQueueService,
+  getRecommendationRebuildQueue,
+} from "./services/recommendation-queue.service";
 import { AuditService } from "./services/audit.service";
 import { initializeVirusScanner } from "./utils/virusScanner";
 import { ReputationCacheService } from "./services/reputation-cache.service";
@@ -173,7 +176,10 @@ app.get("/health/db", async (_req, res) => {
 const bullBoardAdapter = new ExpressAdapter();
 bullBoardAdapter.setBasePath("/admin/queues");
 createBullBoard({
-  queues: [new BullMQAdapter(notificationQueue)],
+  queues: [
+    new BullMQAdapter(notificationQueue),
+    new BullMQAdapter(getRecommendationRebuildQueue()),
+  ],
   serverAdapter: bullBoardAdapter,
 });
 app.use("/admin/queues", requireAdmin, bullBoardAdapter.getRouter());
@@ -253,7 +259,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }, 30_000);
 
   stopHorizonListener();
-  RecommendationQueueService.stopWorker();
+  await RecommendationQueueService.stopWorker();
   ReputationCacheService.stopPeriodicRefresh();
   await stopNotificationWorker();
   await AuditService.stopWorker();

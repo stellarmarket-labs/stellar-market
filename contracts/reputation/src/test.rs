@@ -34,7 +34,6 @@ fn setup_completed_job(
         env,
         (String::from_str(env, "Task"), 100_i128, 9999999999u64),
     ];
-    let expiry = env.ledger().sequence() + 518_400;
     let job_id = escrow_client.create_job(
         client,
         freelancer,
@@ -42,7 +41,7 @@ fn setup_completed_job(
         &milestones,
         &9999999999u64,
         &86400u64,
-        &expiry,
+        &(env.ledger().sequence() + 518_400),
     );
 
     // Fund the job
@@ -69,7 +68,6 @@ fn setup_in_progress_job(
         env,
         (String::from_str(env, "Task"), 100_i128, 9999999999u64),
     ];
-    let expiry = env.ledger().sequence() + 518_400;
     let job_id = escrow_client.create_job(
         client,
         freelancer,
@@ -77,7 +75,7 @@ fn setup_in_progress_job(
         &milestones,
         &9999999999u64,
         &86400u64,
-        &expiry,
+        &(env.ledger().sequence() + 518_400),
     );
 
     // Fund the job to move it to Funded status
