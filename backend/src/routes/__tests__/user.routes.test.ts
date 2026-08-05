@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import request from "supertest";
 import userRouter from "../user.routes";
 import { ReputationCacheService } from "../../services/reputation-cache.service";
@@ -17,23 +17,36 @@ jest.mock("../../services/reputation.service", () => ({
   },
 }));
 
-const mockUser = {
-  findMany: jest.fn(),
-  count: jest.fn(),
-};
+jest.mock("@prisma/client", () => {
+  const mUser = {
+    findMany: jest.fn(),
+    count: jest.fn(),
+  };
+  return {
+    PrismaClient: jest.fn(() => ({
+      user: mUser,
+    })),
+    __mockUser: mUser,
+  };
+});
 
-jest.mock("@prisma/client", () => ({
-  PrismaClient: jest.fn(() => ({
-    user: mockUser,
-  })),
-}));
+interface MockUserModel {
+  findMany: jest.Mock;
+  count: jest.Mock;
+}
+
+const { __mockUser: mockUser } = jest.requireMock("@prisma/client") as unknown as {
+  __mockUser: MockUserModel;
+};
 
 jest.mock("../../middleware/auth", () => ({
   authenticate: jest.fn((req, res, next) => next()),
 }));
 
 jest.mock("../../middleware/validation", () => ({
-  validate: jest.fn(() => (req: any, res: any, next: any) => next()),
+  validate: jest.fn(
+    () => (req: Request, res: Response, next: NextFunction) => next(),
+  ),
 }));
 
 jest.mock("../../lib/logger", () => ({
@@ -76,9 +89,11 @@ describe("GET /users", () => {
     mockUser.count.mockResolvedValue(2);
 
     (ReputationCacheService.getCachedReputation as jest.Mock).mockResolvedValue({
-      total_score: 100,
-      total_weight: 50,
-      review_count: 10,
+      tier: "SILVER",
+      score: 100,
+      disputeLossRate: 0,
+      endorsementWeight: 50,
+      lastUpdated: 123456789,
     });
 
     const res = await request(app).get("/users?page=1&limit=10");

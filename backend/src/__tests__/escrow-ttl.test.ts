@@ -1,8 +1,8 @@
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 
-const mockJobFindMany = jest.fn() as jest.MockedFunction<any>;
-const mockNotificationFindMany = jest.fn() as jest.MockedFunction<any>;
-const mockNotificationCreate = jest.fn() as jest.MockedFunction<any>;
+const mockJobFindMany = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+const mockNotificationFindMany = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+const mockNotificationCreate = jest.fn<(...args: unknown[]) => Promise<unknown>>();
 
 jest.mock("@prisma/client", () => ({
   PrismaClient: jest.fn().mockImplementation(() => ({
@@ -14,9 +14,12 @@ jest.mock("@prisma/client", () => ({
       create: mockNotificationCreate,
     },
   })),
+  NotificationType: {
+    ESCROW_TTL_WARNING: "ESCROW_TTL_WARNING",
+  },
 }));
 
-const mockGetEscrowTtl = jest.fn() as jest.MockedFunction<any>;
+const mockGetEscrowTtl = jest.fn<(...args: unknown[]) => Promise<unknown>>();
 jest.mock("../lib/logger", () => ({
   logger: {
     info: jest.fn(),
@@ -32,15 +35,15 @@ jest.mock("../services/contract.service", () => ({
   },
 }));
 
-const mockSendNotification = jest.fn() as jest.MockedFunction<any>;
+const mockSendNotification = jest.fn<(...args: unknown[]) => Promise<unknown>>();
 jest.mock("../services/notification.service", () => ({
   NotificationService: {
     sendNotification: mockSendNotification,
   },
 }));
 
-const mockSendTransaction = jest.fn() as jest.MockedFunction<any>;
-const mockGetAccount = jest.fn() as jest.MockedFunction<any>;
+const mockSendTransaction = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+const mockGetAccount = jest.fn<(...args: unknown[]) => Promise<unknown>>();
 
 jest.mock("@stellar/stellar-sdk", () => {
   const mockKeypair = {

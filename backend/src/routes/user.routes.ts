@@ -1,5 +1,6 @@
 import { AuthRequest, authenticate } from "../middleware/auth";
 import { Response, Router } from "express";
+import { z } from "zod";
 import { cache, generateUserCacheKey, invalidateCacheKey } from "../lib/cache";
 import {
   getUserByIdParamSchema,
@@ -9,7 +10,7 @@ import {
   updateUserProfileSchema,
 } from "../schemas";
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { asyncHandler } from "../middleware/error";
 import { avatarUpload } from "../config/upload";
 import { validate } from "../middleware/validation";
@@ -51,9 +52,9 @@ router.get("/me", authenticate, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { password: _password, ...safeUser } = user;
     res.json({
-      ...safeUser,
+      ...user,
+      password: undefined, // never serialized — JSON.stringify drops undefined-valued keys
       authMethods: {
         email: Boolean(user.email && user.password),
         wallet: Boolean(user.walletAddress),
@@ -299,7 +300,7 @@ router.get(
       prisma.review.count({ where }),
     ]);
 
-    const data = reviews.map((r: any) => {
+    const data = reviews.map((r) => {
       const targetUser = type === "given" ? r.reviewee : r.reviewer;
       return {
         id: r.id,
@@ -316,7 +317,13 @@ router.get(
       };
     });
 
-    const meta: any = {
+    const meta: {
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+      averageRating?: number;
+    } = {
       total,
       page,
       limit,
@@ -474,10 +481,14 @@ router.get(
           throw new Error("User not found");
         }
 
+        const result: typeof user & {
+          reputation?: { totalScore: string; totalWeight: string; reviewCount: number };
+        } = user;
+
         if (user.role === "FREELANCER" && user.walletAddress) {
           const reputation = await ReputationCacheService.getCachedReputation(user.walletAddress);
           if (reputation) {
-            (user as any).reputation = {
+            result.reputation = {
               totalScore: reputation.score.toString(),
               totalWeight: reputation.endorsementWeight.toString(),
               reviewCount: 0,
@@ -485,7 +496,7 @@ router.get(
           }
         }
 
-        return user;
+        return result;
       });
 
       res.set("X-Cache-Hit", hit.toString());
@@ -504,11 +515,13 @@ router.get(
   "/",
   validate({ query: getUsersQuerySchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { page, limit, search, skill, role } = req.query as any;
+    const { page, limit, search, skill, role } = req.query as unknown as z.infer<
+      typeof getUsersQuerySchema
+    >;
 
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: Prisma.UserWhereInput = {};
 
     if (role) {
       where.role = role;
@@ -551,7 +564,7 @@ router.get(
     ]);
 
     const usersWithReputation = await Promise.all(
-      users.map(async (user: any) => {
+      users.map(async (user) => {
         if (user.role === "FREELANCER" && user.walletAddress) {
           const reputation = await ReputationCacheService.getCachedReputation(user.walletAddress);
           return {

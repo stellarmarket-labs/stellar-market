@@ -12,8 +12,27 @@
  */
 
 // ─── Prisma mock ──────────────────────────────────────────────────────────────
+type MockPrismaClient = {
+  job: {
+    findMany: jest.Mock;
+    count: jest.Mock;
+    findFirst: jest.Mock;
+    findUnique: jest.Mock;
+    create: jest.Mock;
+    update: jest.Mock;
+  };
+  user: {
+    findUnique: jest.Mock;
+  };
+  savedJob: {
+    findUnique: jest.Mock;
+  };
+  $queryRaw: jest.Mock;
+  $disconnect: jest.Mock;
+};
+
 jest.mock("@prisma/client", () => {
-  const mockPrisma = {
+  const mockPrisma: MockPrismaClient = {
     job: {
       findMany: jest.fn(),
       count: jest.fn(),
@@ -33,8 +52,8 @@ jest.mock("@prisma/client", () => {
   };
 
   return {
-    PrismaClient: jest.fn(() => mockPrisma) as any,
-    UserRole: { CLIENT: "CLIENT", FREELANCER: "FREELANCER", ADMIN: "ADMIN" } as any,
+    PrismaClient: jest.fn(() => mockPrisma),
+    UserRole: { CLIENT: "CLIENT", FREELANCER: "FREELANCER", ADMIN: "ADMIN" },
   };
 });
 
@@ -55,7 +74,9 @@ jest.mock("../config", () => ({
 
 // ─── Cache mock (bypass Redis for tests) ─────────────────────────────────────
 jest.mock("../lib/cache", () => ({
-  cache: jest.fn((_key: string, _ttl: number, fn: () => Promise<any>) => fn().then((data: any) => ({ data, hit: false }))),
+  cache: jest.fn((_key: string, _ttl: number, fn: () => Promise<unknown>) =>
+    fn().then((data: unknown) => ({ data, hit: false })),
+  ),
   invalidateCache: jest.fn().mockResolvedValue(undefined),
   invalidateCacheKey: jest.fn().mockResolvedValue(undefined),
   generateJobsCacheKey: jest.fn().mockReturnValue("jobs:list:test"),
@@ -84,7 +105,7 @@ import express from "express";
 import request from "supertest";
 import jobRouter from "../routes/job.routes";
 
-const prismaMock = new PrismaClient() as any;
+const prismaMock = new PrismaClient() as unknown as MockPrismaClient;
 const jwtVerify = jwt.verify as jest.Mock;
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────

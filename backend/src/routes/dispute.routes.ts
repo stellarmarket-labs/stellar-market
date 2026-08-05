@@ -126,6 +126,15 @@ async function verifyAnchorTxOnHorizon(txHash: string): Promise<boolean> {
 
 const router = Router();
 
+/** Shallow-omit a single key from an object without leaving an unused binding. */
+function omitWalletAddress<T extends { walletAddress: unknown }>(
+  obj: T,
+): Omit<T, "walletAddress"> {
+  const copy = { ...obj };
+  delete (copy as { walletAddress?: unknown }).walletAddress;
+  return copy;
+}
+
 /**
  * GET /api/disputes/history
  * Get user's dispute history (initiated or involved)
@@ -194,12 +203,10 @@ router.get(
       { page: query.page, limit: query.limit },
     );
 
-    const disputes = (result.disputes as any[]).map((dispute: any) => {
-      const { walletAddress: _clientWalletAddress, ...client } = dispute.client;
-      const { walletAddress: _freelancerWalletAddress, ...freelancer } =
-        dispute.freelancer;
-      const { walletAddress: _initiatorWalletAddress, ...initiator } =
-        dispute.initiator;
+    const disputes = result.disputes.map((dispute) => {
+      const client = omitWalletAddress(dispute.client);
+      const freelancer = omitWalletAddress(dispute.freelancer);
+      const initiator = omitWalletAddress(dispute.initiator);
 
       return {
         ...dispute,
@@ -286,7 +293,7 @@ router.get(
     const dispute = (await DisputeService.getDisputeById(
       req.params.id as string,
       isAdmin,
-    )) as any;
+    ))!;
 
     const userId = req.userId!;
     const isParticipant =

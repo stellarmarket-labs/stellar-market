@@ -25,15 +25,19 @@ interface ScoringWeights {
   disputeLossRate: number;    // Penalty for dispute losses
   endorsementWeight: number;  // Stake-weighted endorsements
   responseTime: number;       // Average time to first message (future)
+  recency: number;            // How recently the job was posted
+  clientReputation: number;   // Client average rating (normalized)
 }
 
-const WEIGHTS: ScoringWeights = {
-  skillOverlap: 0.25,
-  completionRate: 0.20,
-  onChainTier: 0.25,
-  disputeLossRate: 0.15,
-  endorsementWeight: 0.10,
+export const WEIGHTS: ScoringWeights = {
+  skillOverlap: 0.20,
+  completionRate: 0.15,
+  onChainTier: 0.20,
+  disputeLossRate: 0.10,
+  endorsementWeight: 0.08,
   responseTime: 0.05,
+  recency: 0.12,
+  clientReputation: 0.10,
 };
 
 /** Max age in days for recency scoring — jobs older than this get 0 recency score */
@@ -168,11 +172,6 @@ export function computeRelevanceScore(params: {
     params.freelancerSkills,
     params.jobSkills
   );
-  const categoryScore = categoryAffinityScore(
-    params.jobCategory,
-    params.completedCategories
-  );
-  
   // On-chain signals (with fallback to neutral when unavailable)
   const isFallback = params.isRpcFallback || !params.onChainReputation;
   const tierScore = badgeTierScore(
@@ -200,7 +199,9 @@ export function computeRelevanceScore(params: {
     WEIGHTS.onChainTier * tierScore +
     WEIGHTS.disputeLossRate * disputeScore +
     WEIGHTS.endorsementWeight * endorsementScore +
-    WEIGHTS.responseTime * responseScore
+    WEIGHTS.responseTime * responseScore +
+    WEIGHTS.recency * recencyScore(params.jobCreatedAt, params.now ?? new Date()) +
+    WEIGHTS.clientReputation * reputationScore(params.clientAverageRating)
   );
 }
 
@@ -216,7 +217,7 @@ export class RecommendationService {
   ) {
     const cacheKey = generateRecommendationsCacheKey(userId, page, limit);
 
-    const { data, hit } = await cache(cacheKey, 60, async () => {
+    const { data } = await cache(cacheKey, 60, async () => {
       // 1. Fetch freelancer's skills and wallet address
       const user = await prisma.user.findUnique({
         where: { id: userId },
@@ -287,7 +288,7 @@ export class RecommendationService {
 
       const uniqueAddresses = [...new Set(clientAddresses)];
       
-      let reputationMap: Map<string, OnChainReputation | null> = new Map();
+      const reputationMap: Map<string, OnChainReputation | null> = new Map();
       let isRpcFallback = false;
 
       try {
@@ -295,7 +296,7 @@ export class RecommendationService {
           try {
             const rep = await ReputationCacheService.getCachedReputation(address);
             return { address, rep };
-          } catch (error) {
+          } catch {
             logger.debug({ address }, "Failed to fetch reputation for client");
             return { address, rep: null };
           }
@@ -344,8 +345,9 @@ export class RecommendationService {
           now,
         });
 
-        // Strip reviewsReceived from client in the response
-        const { reviewsReceived, walletAddress, ...clientData } = job.client as any;
+        // Strip reviewsReceived/walletAddress from client in the response
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { reviewsReceived, walletAddress, ...clientData } = job.client;
 
         return {
           ...job,

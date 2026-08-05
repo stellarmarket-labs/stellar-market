@@ -28,9 +28,12 @@ export default function AuthForm({ type }: AuthFormProps) {
     username: "",
     email: "",
     password: "",
+    confirmPassword: "",
     role: "FREELANCER" as "CLIENT" | "FREELANCER",
     referralCode: "",
   });
+
+  const passwordsMatch = type !== "register" || formData.password === formData.confirmPassword;
 
   // Auto-fill referral code from ?ref= query param
   useEffect(() => {
@@ -99,6 +102,11 @@ export default function AuthForm({ type }: AuthFormProps) {
 
         login(data.token, data.user);
       } else {
+        if (formData.password !== formData.confirmPassword) {
+          setError("Passwords do not match");
+          setIsLoading(false);
+          return;
+        }
         const body: Record<string, string> = {
           name: formData.username,
           email: formData.email,
@@ -429,6 +437,33 @@ export default function AuthForm({ type }: AuthFormProps) {
           </div>
         </div>
 
+        {type === "register" && (
+          <div>
+            <label htmlFor="auth-confirm-password" className="block text-sm font-medium text-theme-text mb-1">
+              Confirm Password
+            </label>
+            <div className="relative">
+              <Lock
+                size={18}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-theme-text"
+              />
+              <input
+                id="auth-confirm-password"
+                type="password"
+                name="confirmPassword"
+                required
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                className="w-full pl-10 pr-4 py-2 bg-theme-bg border border-theme-border rounded-lg focus:ring-2 focus:ring-stellar-blue outline-none transition-all text-theme-text"
+                placeholder="••••••••"
+              />
+            </div>
+            {formData.confirmPassword && !passwordsMatch && (
+              <p className="text-xs text-theme-error mt-1">Passwords do not match</p>
+            )}
+          </div>
+        )}
+
         {error && (
           <div className="p-3 bg-theme-error/10 border border-theme-error/20 rounded-lg text-theme-error text-sm">
             {error}
@@ -437,7 +472,7 @@ export default function AuthForm({ type }: AuthFormProps) {
 
         <button
           type="submit"
-          disabled={isLoading}
+          disabled={isLoading || !passwordsMatch}
           className="w-full btn-primary py-3 flex items-center justify-center gap-2 font-semibold"
         >
           {isLoading ? (

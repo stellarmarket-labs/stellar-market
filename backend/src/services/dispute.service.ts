@@ -4,6 +4,7 @@
  */
 import {
   PrismaClient,
+  Prisma,
   DisputeStatus,
   JobStatus,
   EscrowStatus,
@@ -14,6 +15,7 @@ import { NotificationService } from "./notification.service";
 import { ContractService } from "./contract.service";
 import { logger } from "../lib/logger";
 import { recordDisputeEvent } from "./dispute-event.service";
+import { ReputationCacheService } from "./reputation-cache.service";
 
 const prisma = new PrismaClient();
 
@@ -378,6 +380,8 @@ export class DisputeService {
       }
     }
 
+    // Destructuring-to-omit: `votes`/`_count` are dropped from the response on purpose.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { votes: _votes, _count, ...rest } = dispute;
 
     return {
@@ -443,7 +447,7 @@ export class DisputeService {
     const skip = (page - 1) * limit;
 
     // Build where clause based on filter
-    let where: any = {
+    let where: Prisma.DisputeWhereInput = {
       OR: [
         { clientId: userId },
         { freelancerId: userId },
@@ -470,43 +474,40 @@ export class DisputeService {
         ? { createdAt: "desc" as const }
         : { createdAt: "asc" as const };
 
-    const [disputes, total] = await Promise.all([
-      prisma.dispute.findMany({
-        where,
-        include: {
-          job: { select: { id: true, title: true, budget: true } },
-          client: {
-            select: {
-              id: true,
-              username: true,
-              walletAddress: true,
-              avatarUrl: true,
-            },
+    const disputes = await prisma.dispute.findMany({
+      where,
+      include: {
+        job: { select: { id: true, title: true, budget: true } },
+        client: {
+          select: {
+            id: true,
+            username: true,
+            walletAddress: true,
+            avatarUrl: true,
           },
-          freelancer: {
-            select: {
-              id: true,
-              username: true,
-              walletAddress: true,
-              avatarUrl: true,
-            },
-          },
-          initiator: {
-            select: {
-              id: true,
-              username: true,
-              walletAddress: true,
-              avatarUrl: true,
-            },
-          },
-          _count: { select: { votes: true } },
         },
-        orderBy,
-        skip,
-        take: limit,
-      }),
-      prisma.dispute.count({ where }),
-    ]);
+        freelancer: {
+          select: {
+            id: true,
+            username: true,
+            walletAddress: true,
+            avatarUrl: true,
+          },
+        },
+        initiator: {
+          select: {
+            id: true,
+            username: true,
+            walletAddress: true,
+            avatarUrl: true,
+          },
+        },
+        _count: { select: { votes: true } },
+      },
+      orderBy,
+      skip,
+      take: limit,
+    });
 
     // Transform disputes to include jobTitle and otherPartyName
     const transformedDisputes = disputes.map((dispute) => {
@@ -767,6 +768,18 @@ export class DisputeService {
       outcome,
     });
 
+    // Invalidate reputation cache for both parties (dispute outcome affects reputation)
+    if (updatedDispute.client?.walletAddress) {
+      await ReputationCacheService.invalidateCache(
+        updatedDispute.client.walletAddress,
+      );
+    }
+    if (updatedDispute.freelancer?.walletAddress) {
+      await ReputationCacheService.invalidateCache(
+        updatedDispute.freelancer.walletAddress,
+      );
+    }
+
     return updatedDispute;
   }
 
@@ -781,13 +794,12 @@ export class DisputeService {
     voterId?: string;
     choice?: "CLIENT" | "FREELANCER";
     outcome?: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   }) {
     const {
       type,
       disputeId,
       onChainDisputeId,
-      jobId,
       voterId,
       choice,
       outcome,

@@ -13,6 +13,7 @@ import { useForm, Controller } from "react-hook-form";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import UnsavedChangesModal from "@/components/UnsavedChangesModal";
 import { resizeImage, createImagePreview } from "@/utils/image";
+import Avatar from "@/components/Avatar";
 import {
   User,
   Settings,
@@ -328,11 +329,16 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setAvatarFile(file);
-    setAvatarPreview(URL.createObjectURL(file));
-
     if (file.size > 5 * 1024 * 1024) {
       toast.error("Image must be less than 5MB");
+      setAvatarFile(null);
+      setAvatarPreview((prev) => {
+        if (prev.startsWith("blob:")) {
+          URL.revokeObjectURL(prev);
+        }
+        return "";
+      });
+      e.target.value = "";
       return;
     }
 
@@ -718,16 +724,11 @@ export default function SettingsPage() {
               )}
               {watch("avatarUrl") && !formErrors.avatarUrl && (
                 <div className="mt-3 flex items-center gap-3">
-                  <Image
+                  <Avatar
                     src={watch("avatarUrl")}
                     alt="Avatar preview"
-                    width={48}
-                    height={48}
-                    className="w-12 h-12 rounded-full object-cover border border-theme-border"
+                    size={48}
                     unoptimized
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).style.display = "none";
-                    }}
                   />
                   <span className="text-theme-text text-xs">Preview</span>
                 </div>
@@ -780,12 +781,10 @@ export default function SettingsPage() {
               </div>
               {avatarPreview && (
                 <div className="mt-3 flex items-center gap-3">
-                  <Image
+                  <Avatar
                     src={avatarPreview}
                     alt="Avatar preview"
-                    width={48}
-                    height={48}
-                    className="w-12 h-12 rounded-full object-cover border border-theme-border"
+                    size={48}
                     unoptimized
                   />
                   <span className="text-theme-text text-xs">Preview</span>

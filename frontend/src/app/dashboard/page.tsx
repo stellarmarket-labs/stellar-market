@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import {
   Briefcase,
   FileText,
@@ -21,15 +22,6 @@ import {
   ChevronRight,
 } from "lucide-react";
 import axios from "axios";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
 import StatusBadge from "@/components/StatusBadge";
 import OnboardingWizard from "@/components/OnboardingWizard";
 import { DashboardStatsSkeleton, DashboardTabContentSkeleton } from "@/components/skeletons/DashboardSkeleton";
@@ -40,6 +32,16 @@ import { useAuth } from "@/context/AuthContext";
 import { useSocket } from "@/context/SocketContext";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { Job, Application, PaginatedResponse } from "@/types";
+
+const EarningsChart = dynamic(() => import("@/components/EarningsChart"), {
+  ssr: false,
+  loading: () => <div className="h-56 bg-theme-border/20 rounded animate-pulse" />,
+});
+
+const SpendingChart = dynamic(() => import("@/components/SpendingChart"), {
+  ssr: false,
+  loading: () => <div className="h-56 bg-theme-border/20 rounded animate-pulse" />,
+});
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
 
@@ -525,17 +527,7 @@ export default function DashboardPage() {
             <div className="space-y-4">
               <div className="card">
                 <h3 className="font-semibold text-theme-heading mb-3">Milestone payout trend</h3>
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={earningsChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.15} />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="amount" fill="#5b8cff" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <EarningsChart data={earningsChartData} />
               </div>
               {milestones.length > 0 ? (
                 milestones.map((milestone) => (
@@ -586,17 +578,7 @@ export default function DashboardPage() {
             <div className="space-y-4">
               <div className="card">
                 <h3 className="font-semibold text-theme-heading mb-3">Milestone spending overview</h3>
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={spendingChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.15} />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="amount" fill="#9b6bff" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <SpendingChart data={spendingChartData} />
               </div>
               {postedJobs.length > 0 ? (
                 postedJobs.map((job) => (

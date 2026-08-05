@@ -6,7 +6,7 @@ import { logger } from "../lib/logger";
 
 export interface ApiError extends Error {
   statusCode?: number;
-  details?: any;
+  details?: unknown;
   code?: string;
 }
 
@@ -14,12 +14,12 @@ export const errorHandler = (
   err: ApiError,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ) => {
   let code: string = ErrorCodes.INTERNAL_ERROR;
   let statusCode = err.statusCode || 500;
   let message = err.message || 'Internal Server Error';
-  let details: any = err.details;
+  let details: unknown = err.details;
 
   if (err instanceof AppError) {
     code = err.code;
@@ -30,18 +30,18 @@ export const errorHandler = (
     code = ErrorCodes.VALIDATION_ERROR;
     statusCode = 400;
     message = 'Validation failed';
-    details = err.issues.map(error => ({
-      field: error.path.join('.'),
-      message: error.message,
-      code: error.code
+    details = err.issues.map(issue => ({
+      field: issue.path.join('.'),
+      message: issue.message,
     }));
   } else if (err.name === 'PrismaClientKnownRequestError') {
+    const prismaErr = err as unknown as { code?: string; meta?: { target?: unknown } };
     code = ErrorCodes.DATABASE_ERROR;
     statusCode = 400;
     message = 'Database operation failed';
     details = {
-      prismaCode: (err as any).code,
-      target: (err as any).meta?.target,
+      prismaCode: prismaErr.code,
+      target: prismaErr.meta?.target,
     };
   } else if (err.name === 'ContractSimulationError') {
     code = ErrorCodes.CONTRACT_SIMULATION_ERROR;
@@ -55,14 +55,14 @@ export const errorHandler = (
     code = ErrorCodes.TOKEN_EXPIRED;
     statusCode = 401;
     message = 'Token expired';
-  } else if ((err as any).type === 'entity.too.large') {
+  } else if ((err as unknown as { type?: string }).type === 'entity.too.large') {
     code = ErrorCodes.PAYLOAD_TOO_LARGE;
     statusCode = 413;
     message = 'Request body is too large. Maximum size is 1MB.';
   } else if (err.name === 'MulterError') {
     code = ErrorCodes.FILE_UPLOAD_FAILED;
     statusCode = 400;
-    const multerCode = (err as any).code;
+    const multerCode = (err as unknown as { code?: string }).code;
     if (multerCode === 'LIMIT_FILE_SIZE') {
       code = ErrorCodes.FILE_TOO_LARGE;
       message = 'File too large. Avatar must be at most 2MB.';
@@ -90,22 +90,38 @@ export const errorHandler = (
     res.setHeader("Retry-After", "30");
   }
 
+  // Validation errors surface the issues as a top-level `errors` array
+  // matching the {errors: [{field, message}]} contract expected by clients.
+  if (code === ErrorCodes.VALIDATION_ERROR && Array.isArray(details)) {
+    res.status(statusCode).json({
+      code,
+      message,
+      requestId: req.requestId,
+      errors: details,
+    });
+    return;
+  }
+
   res.status(statusCode).json({
     code,
     message,
     error: message,
     requestId: req.requestId,
-    ...(details && { details }),
+    ...(details ? { details } : {}),
   });
 };
 
-export const createError = (message: string, statusCode: number = 500, details?: any): ApiError => {
+export const createError = (message: string, statusCode: number = 500, details?: unknown): ApiError => {
   const error = new Error(message) as ApiError;
   error.statusCode = statusCode;
   error.details = details;
   return error;
 };
 
-export const asyncHandler = (fn: Function) => (req: Request, res: Response, next: NextFunction) => {
-  Promise.resolve(fn(req, res, next)).catch(next);
-};
+export const asyncHandler =
+  <Req extends Request = Request>(
+    fn: (req: Req, res: Response, next: NextFunction) => unknown,
+  ) =>
+  (req: Req, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };

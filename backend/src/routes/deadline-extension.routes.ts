@@ -15,10 +15,6 @@ const requestExtensionSchema = z.object({
   reason: z.string().min(10).max(500),
 });
 
-const approveExtensionSchema = z.object({
-  extensionRequestId: z.string().min(1),
-});
-
 const rejectExtensionSchema = z.object({
   extensionRequestId: z.string().min(1),
   rejectionReason: z.string().min(5).max(500),

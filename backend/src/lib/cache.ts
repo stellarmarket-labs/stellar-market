@@ -1,11 +1,6 @@
 import RedisClient from "./redis";
 import { logger } from "./logger";
 
-interface CacheOptions {
-  ttl?: number; // Time to live in seconds
-  keyPrefix?: string;
-}
-
 interface CacheResult<T> {
   data: T;
   hit: boolean; // true if cache hit, false if cache miss
@@ -110,7 +105,7 @@ export async function invalidateCacheKey(key: string): Promise<void> {
 /**
  * Generate cache key for job listings with query parameters
  */
-export function generateJobsCacheKey(params: Record<string, any>): string {
+export function generateJobsCacheKey(params: Record<string, unknown>): string {
   const sortedParams = Object.keys(params)
     .sort()
     .reduce((result, key) => {
@@ -118,7 +113,7 @@ export function generateJobsCacheKey(params: Record<string, any>): string {
         result[key] = params[key];
       }
       return result;
-    }, {} as Record<string, any>);
+    }, {} as Record<string, unknown>);
   
   const paramString = JSON.stringify(sortedParams);
   return `jobs:list:${Buffer.from(paramString).toString("base64")}`;
@@ -156,4 +151,18 @@ export function generateJobCacheKey(jobId: string): string {
  */
 export function generateJobOnChainStatusCacheKey(jobId: string): string {
   return `job:onchain-status:${jobId}`;
+}
+
+/**
+ * Generate cache key for a freelancer's Horizon on-chain payment window
+ * (issue #874). Shared across every backend instance via Redis so a payment
+ * fetched by one instance is visible to all others, rather than each process
+ * building its own independent, inconsistent view.
+ */
+export function generateOnChainPaymentsCacheKey(
+  walletAddress: string,
+  from: Date,
+  to: Date,
+): string {
+  return `earnings:onchain:${walletAddress}:${from.toISOString()}:${to.toISOString()}`;
 }

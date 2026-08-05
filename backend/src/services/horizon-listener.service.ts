@@ -436,9 +436,10 @@ async function poll(): Promise<void> {
     if (persistedCursor !== null) {
       // Resume from persisted paging cursor
       const result = await server.getEvents({
-        pagination: { cursor: persistedCursor, limit: MAX_EVENTS_PER_POLL },
+        cursor: persistedCursor,
+        limit: MAX_EVENTS_PER_POLL,
         filters: [{ type: "contract", contractIds }],
-      } as any);
+      });
       events = result.events;
       horizonCB.onSuccess();
     } else {
@@ -472,15 +473,15 @@ async function poll(): Promise<void> {
       events = result.events;
       horizonCB.onSuccess();
     }
-  } catch (err: any) {
-    const msg: string = err?.message ?? "";
+  } catch (err) {
+    const msg: string = err instanceof Error ? err.message : "";
     if (msg.includes("startLedger") || msg.includes("ledger") || msg.includes("cursor")) {
       logger.warn("[HorizonListener] Cursor/ledger out of retention window, resetting");
       try {
         const latest = await server.getLatestLedger();
         await setLastIndexedLedger(latest.sequence);
         horizonCB.onSuccess();
-      } catch (_) {
+      } catch {
         horizonCB.onFailure();
       }
     } else {

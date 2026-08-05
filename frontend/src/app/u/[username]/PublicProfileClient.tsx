@@ -15,6 +15,7 @@ import {
 import { useRef, useState } from "react";
 import ShareMenu from "@/components/ShareMenu";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import Avatar from "@/components/Avatar";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
 const BASE_URL = API_URL.replace(/\/api\/?$/, "");
@@ -82,20 +83,13 @@ export default function PublicProfileClient({ profile }: { profile: PublicProfil
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row gap-6 items-start mb-10">
-        <div className="w-28 h-28 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex-shrink-0 flex items-center justify-center overflow-hidden border-4 border-theme-card shadow-xl">
-          {profile.avatarUrl ? (
-            <Image
-              src={profile.avatarUrl}
-              alt={profile.username}
-              width={112}
-              height={112}
-              className="w-full h-full object-cover"
-              unoptimized
-            />
-          ) : (
-            <User size={56} className="text-white/50" />
-          )}
-        </div>
+        <Avatar
+          src={profile.avatarUrl}
+          alt={profile.username}
+          size={112}
+          unoptimized
+          className="flex-shrink-0 border-4 border-theme-card shadow-xl"
+        />
 
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-3 mb-3">
@@ -207,7 +201,11 @@ export default function PublicProfileClient({ profile }: { profile: PublicProfil
                   <div key={r.id} className="card">
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-stellar-blue to-stellar-purple flex-shrink-0" />
+                        <Avatar
+                          src={r.reviewer.avatarUrl}
+                          alt={r.reviewer.username}
+                          size={28}
+                        />
                         <div>
                           <span className="font-medium text-theme-heading text-sm">
                             {r.reviewer.username}

@@ -6,6 +6,20 @@ export const MAX_FILES = 5;
 export const MAX_FILE_SIZE_MB = 10;
 export const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
+// Evidence MIME types the flow supports — matches what EvidenceViewer, EvidenceRecorder,
+// and the backend evidence upload handler know how to process.
+export const ACCEPTED_EVIDENCE_MIME_TYPES: readonly string[] = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/ogg",
+];
+
 export type FileStatus =
   | "pending"
   | "hashing"

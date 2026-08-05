@@ -156,52 +156,52 @@ model User {
   reviewCount            Int       @default(0)
   completedOnboarding    Boolean   @default(false)
 
-  clientJobs         Job[]          @relation("ClientJobs")
-  freelancerJobs     Job[]          @relation("FreelancerJobs")
-  services           Service[]      @relation("FreelancerServices")
-  applications       Application[]
-  invitationsReceived Invitation[]  @relation("InvitationsReceived")
-  invitationsSent     Invitation[]  @relation("InvitationsSent")
-  sentMessages       Message[]      @relation("SentMessages")
-  receivedMessages   Message[]      @relation("ReceivedMessages")
-  reviewsGiven       Review[]       @relation("ReviewsGiven")
-  reviewsReceived    Review[]       @relation("ReviewsReceived")
-  skills             String[]
-  transactionsFrom   Transaction[]  @relation("TransactionsFrom")
-  transactionsTo     Transaction[]  @relation("TransactionsTo")
-  attachments        Attachment[]
-  notifications        Notification[]
-  pendingNotifications PendingNotification[]
-  initiatedDisputes  Dispute[]      @relation("DisputeInitiated")
-  clientDisputes     Dispute[]      @relation("DisputeClient")
-  freelancerDisputes Dispute[]      @relation("DisputeFreelancer")
-  votesCast          DisputeVote[]  @relation("VotesCast")
-  savedJobs          SavedJob[]     @relation("SavedJobs")
-  reportsGiven       Report[]       @relation("ReportsGiven")
-  badges             Badge[]
+  clientJobs             Job[]                   @relation("ClientJobs")
+  freelancerJobs         Job[]                   @relation("FreelancerJobs")
+  services               Service[]               @relation("FreelancerServices")
+  applications           Application[]
+  invitationsReceived    Invitation[]            @relation("InvitationsReceived")
+  invitationsSent        Invitation[]            @relation("InvitationsSent")
+  sentMessages           Message[]               @relation("SentMessages")
+  receivedMessages       Message[]               @relation("ReceivedMessages")
+  reviewsGiven           Review[]                @relation("ReviewsGiven")
+  reviewsReceived        Review[]                @relation("ReviewsReceived")
+  skills                 String[]
+  transactionsFrom       Transaction[]           @relation("TransactionsFrom")
+  transactionsTo         Transaction[]           @relation("TransactionsTo")
+  attachments            Attachment[]
+  notifications          Notification[]
+  pendingNotifications   PendingNotification[]
+  initiatedDisputes      Dispute[]               @relation("DisputeInitiated")
+  clientDisputes         Dispute[]               @relation("DisputeClient")
+  freelancerDisputes     Dispute[]               @relation("DisputeFreelancer")
+  votesCast              DisputeVote[]           @relation("VotesCast")
+  savedJobs              SavedJob[]              @relation("SavedJobs")
+  reportsGiven           Report[]                @relation("ReportsGiven")
+  badges                 Badge[]
   notificationPreference NotificationPreference?
-  portfolioItems     PortfolioItem[]
-  webhooks           Webhook[]
-  pushSubscriptions  PushSubscription[] @relation("UserPushSubscriptions")
+  portfolioItems         PortfolioItem[]
+  webhooks               Webhook[]
+  pushSubscriptions      PushSubscription[]      @relation("UserPushSubscriptions")
 
-  referralCode       String?   @unique
-  referredById       String?
-  referredBy         User?     @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
-  referrals          User[]    @relation("UserReferrals")
-  referralBonusEarned Float    @default(0)
-  refreshTokens      RefreshToken[]
-  deadlineExtensionRequests DeadlineExtensionRequest[] @relation("ExtensionRequests")
+  referralCode                String?                    @unique
+  referredById                String?
+  referredBy                  User?                      @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals                   User[]                     @relation("UserReferrals")
+  referralBonusEarned         Float                      @default(0)
+  refreshTokens               RefreshToken[]
+  deadlineExtensionRequests   DeadlineExtensionRequest[] @relation("ExtensionRequests")
   deadlineExtensionRejections DeadlineExtensionRequest[] @relation("ExtensionRejections")
 }
 
 model NotificationPreference {
-  userId                 String   @id
-  emailEnabled           Boolean  @default(true)
-  emailDisputeOpened     Boolean  @default(true)
-  emailMilestoneApproved Boolean  @default(true)
-  emailPaymentReleased   Boolean  @default(true)
+  userId                   String  @id
+  emailEnabled             Boolean @default(true)
+  emailDisputeOpened       Boolean @default(true)
+  emailMilestoneApproved   Boolean @default(true)
+  emailPaymentReleased     Boolean @default(true)
   emailApplicationAccepted Boolean @default(true)
-  marketingEmails        Boolean  @default(true)
+  marketingEmails          Boolean @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -227,23 +227,28 @@ model Job {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
-  client       User          @relation("ClientJobs", fields: [clientId], references: [id])
-  freelancer   User?         @relation("FreelancerJobs", fields: [freelancerId], references: [id])
-  milestones   Milestone[]
-  applications Application[]
-  invitations  Invitation[]
-  messages     Message[]
-  reviews      Review[]
-  transactions Transaction[]
-  attachments  Attachment[]
-  dispute      Dispute?
-  savedBy      SavedJob[]    @relation("SavedByFreelancers")
+  client                    User                       @relation("ClientJobs", fields: [clientId], references: [id])
+  freelancer                User?                      @relation("FreelancerJobs", fields: [freelancerId], references: [id])
+  milestones                Milestone[]
+  applications              Application[]
+  invitations               Invitation[]
+  messages                  Message[]
+  reviews                   Review[]
+  transactions              Transaction[]
+  attachments               Attachment[]
+  dispute                   Dispute?
+  savedBy                   SavedJob[]                 @relation("SavedByFreelancers")
   deadlineExtensionRequests DeadlineExtensionRequest[] @relation("DeadlineExtensions")
-  escrowEvents EscrowEvent[]
+  escrowEvents              EscrowEvent[]
 
-  contractPaused  Boolean  @default(false)
+  contractPaused Boolean @default(false)
+  paymentToken   String?
 
   @@index([deletedAt])
+  @@index([clientId])
+  @@index([freelancerId])
+  @@index([paymentToken])
+  @@index([status, createdAt(sort: Desc)])
 }
 
 model Milestone {
@@ -259,32 +264,32 @@ model Milestone {
   dueDate          DateTime?
   createdAt        DateTime        @default(now())
 
-  job                      Job                        @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  transactions             Transaction[]
-  attachments              Attachment[]
+  job                       Job                        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  transactions              Transaction[]
+  attachments               Attachment[]
   deadlineExtensionRequests DeadlineExtensionRequest[] @relation("MilestoneExtensions")
 }
 
 model DeadlineExtensionRequest {
-  id                String                      @id @default(cuid())
-  milestoneId       String
-  jobId             String
-  requestedById     String
-  newDeadline       DateTime
-  reason            String
-  status            DeadlineExtensionStatus     @default(PENDING)
-  clientApprovedAt  DateTime?
+  id                   String                  @id @default(cuid())
+  milestoneId          String
+  jobId                String
+  requestedById        String
+  newDeadline          DateTime
+  reason               String
+  status               DeadlineExtensionStatus @default(PENDING)
+  clientApprovedAt     DateTime?
   freelancerApprovedAt DateTime?
-  rejectedBy        String?
-  rejectionReason   String?
-  onChainTxHash     String?
-  createdAt         DateTime                    @default(now())
-  updatedAt         DateTime                    @updatedAt
+  rejectedBy           String?
+  rejectionReason      String?
+  onChainTxHash        String?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
 
-  milestone   Milestone @relation("MilestoneExtensions", fields: [milestoneId], references: [id], onDelete: Cascade)
-  job         Job       @relation("DeadlineExtensions", fields: [jobId], references: [id], onDelete: Cascade)
-  requestedBy User      @relation("ExtensionRequests", fields: [requestedById], references: [id])
-  rejectedByUser User?  @relation("ExtensionRejections", fields: [rejectedBy], references: [id])
+  milestone      Milestone @relation("MilestoneExtensions", fields: [milestoneId], references: [id], onDelete: Cascade)
+  job            Job       @relation("DeadlineExtensions", fields: [jobId], references: [id], onDelete: Cascade)
+  requestedBy    User      @relation("ExtensionRequests", fields: [requestedById], references: [id])
+  rejectedByUser User?     @relation("ExtensionRejections", fields: [rejectedBy], references: [id])
 
   @@index([milestoneId])
   @@index([jobId])
@@ -357,20 +362,20 @@ model Review {
 }
 
 model Transaction {
-  id               String            @id @default(cuid())
-  jobId            String?
-  milestoneId      String?
-  fromAddress      String?
-  toAddress        String?
-  amount           Float?
-  tokenAddress     String?
-  txHash           String            @unique
-  type             TransactionType
-  status           TransactionStatus @default(PENDING)
-  maxLedger        Int?
-  confirmedLedger  Int?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id              String            @id @default(cuid())
+  jobId           String?
+  milestoneId     String?
+  fromAddress     String?
+  toAddress       String?
+  amount          Float?
+  tokenAddress    String?
+  txHash          String            @unique
+  type            TransactionType
+  status          TransactionStatus @default(PENDING)
+  maxLedger       Int?
+  confirmedLedger Int?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   job       Job?       @relation(fields: [jobId], references: [id], onDelete: Cascade)
   milestone Milestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
@@ -387,7 +392,7 @@ model Transaction {
 }
 
 model Attachment {
-  id           String    @id @default(cuid())
+  id           String   @id @default(cuid())
   uploaderId   String
   jobId        String?
   disputeId    String?
@@ -399,7 +404,7 @@ model Attachment {
   url          String
   sha256       String?
   anchorTxHash String?
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime @default(now())
 
   uploader  User       @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
   job       Job?       @relation(fields: [jobId], references: [id], onDelete: Cascade)
@@ -414,30 +419,30 @@ model Attachment {
 }
 
 model Notification {
-  id        String           @id @default(cuid())
-  userId    String
-  type      NotificationType
-  title     String
-  message   String
-  read      Boolean          @default(false)
-  status    String           @default("pending") // "pending" | "sent" | "failed"
+  id          String           @id @default(cuid())
+  userId      String
+  type        NotificationType
+  title       String
+  message     String
+  read        Boolean          @default(false)
+  status      String           @default("pending") // "pending" | "sent" | "failed"
   deliveredAt DateTime?
-  metadata  Json?
-  createdAt DateTime         @default(now())
+  metadata    Json?
+  createdAt   DateTime         @default(now())
 
-  user                User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   pendingNotification PendingNotification?
 
   @@index([userId, createdAt(sort: Desc)])
 }
 
 model PendingNotification {
-  id             String       @id @default(cuid())
+  id             String    @id @default(cuid())
   userId         String
-  notificationId String       @unique
-  priority       Int          @default(3)
+  notificationId String    @unique
+  priority       Int       @default(3)
   deliveredAt    DateTime?
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime  @default(now())
 
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
@@ -499,10 +504,10 @@ model Dispute {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  job         Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  client      User          @relation("DisputeClient", fields: [clientId], references: [id])
-  freelancer  User          @relation("DisputeFreelancer", fields: [freelancerId], references: [id])
-  initiator   User          @relation("DisputeInitiated", fields: [initiatorId], references: [id])
+  job         Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  client      User           @relation("DisputeClient", fields: [clientId], references: [id])
+  freelancer  User           @relation("DisputeFreelancer", fields: [freelancerId], references: [id])
+  initiator   User           @relation("DisputeInitiated", fields: [initiatorId], references: [id])
   votes       DisputeVote[]
   attachments Attachment[]
   events      DisputeEvent[]
@@ -727,25 +732,24 @@ model EscrowEvent {
   payload       Json
   processedAt   DateTime        @default(now())
 
-  job           Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@unique([contractJobId, eventType, ledgerSeq])
   @@index([jobId, ledgerSeq])
 }
 
 model PushSubscription {
-  id         String   @id @default(cuid())
-  userId     String
-  endpoint   String   @unique
-  p256dh     String
-  auth       String
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
 
   user User @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
-
 
 model Skill {
   id        String   @id @default(cuid())
@@ -809,7 +813,7 @@ model RiskAssessment {
   trigger     RiskTrigger
   createdAt   DateTime        @default(now())
 
-  flag RiskFlag? @relation(fields: [flagId], references: [id], onDelete: SetNull)
+  flag   RiskFlag? @relation(fields: [flagId], references: [id], onDelete: SetNull)
   flagId String?
 
   @@index([subjectType, subjectId, createdAt])

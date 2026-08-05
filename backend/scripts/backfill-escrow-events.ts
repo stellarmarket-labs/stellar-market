@@ -1,9 +1,12 @@
 import { PrismaClient, EscrowEventType, JobStatus, EscrowStatus } from "@prisma/client";
 
+const { logger, installRequestIdConsolePatch } = require("../src/lib/logger");
+installRequestIdConsolePatch();
+
 const prisma = new PrismaClient();
 
 async function backfill() {
-  console.log("Starting backfill of escrow events...");
+  logger.info("Starting backfill of escrow events...");
 
   const jobs = await prisma.job.findMany({
     include: {
@@ -12,13 +15,13 @@ async function backfill() {
     },
   });
 
-  console.log(`Found ${jobs.length} jobs to process.`);
+  logger.info({ count: jobs.length }, `Found ${jobs.length} jobs to process.`);
 
   let createdEventsCount = 0;
 
   for (const job of jobs) {
     if (job.escrowEvents.length > 0) {
-      console.log(`Job ${job.id} already has events. Skipping.`);
+      logger.info({ jobId: job.id }, `Job ${job.id} already has events. Skipping.`);
       continue;
     }
 
@@ -116,10 +119,10 @@ async function backfill() {
       createdEventsCount++;
     }
 
-    console.log(`Job ${job.id}: Synthesized ${eventsToCreate.length} events.`);
+    logger.info({ jobId: job.id, synthesized: eventsToCreate.length }, `Job ${job.id}: Synthesized ${eventsToCreate.length} events.`);
   }
 
-  console.log(`Backfill complete. Synthesized ${createdEventsCount} events.`);
+  logger.info({ createdEventsCount }, `Backfill complete. Synthesized ${createdEventsCount} events.`);
 }
 
 backfill()

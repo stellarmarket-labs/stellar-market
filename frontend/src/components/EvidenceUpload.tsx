@@ -22,6 +22,7 @@ import {
   MAX_FILES,
   MAX_FILE_SIZE_BYTES,
   MAX_FILE_SIZE_MB,
+  ACCEPTED_EVIDENCE_MIME_TYPES,
   FileUploadState,
 } from "@/lib/evidenceUpload";
 import { CHUNK_SIZE } from "@/lib/evidenceUpload";
@@ -130,6 +131,13 @@ export default function EvidenceUpload({
       if (file.size > MAX_FILE_SIZE_BYTES) {
         setFileError(
           `"${file.name}" exceeds the ${MAX_FILE_SIZE_MB} MB limit.`,
+        );
+        rejected = true;
+        continue;
+      }
+      if (!ACCEPTED_EVIDENCE_MIME_TYPES.includes(file.type)) {
+        setFileError(
+          `"${file.name}" is not a supported evidence type. Please attach images, PDFs, or videos.`,
         );
         rejected = true;
         continue;
@@ -325,6 +333,7 @@ export default function EvidenceUpload({
         ref={fileInputRef}
         type="file"
         multiple
+        accept={ACCEPTED_EVIDENCE_MIME_TYPES.join(",")}
         className="hidden"
         onChange={handleFileChange}
         disabled={disabled || isProcessing}

@@ -5,6 +5,15 @@ import jwt from "jsonwebtoken";
 import { config } from "../../config";
 import { FakeRedisBus } from "../../lib/__tests__/testUtils/fakeRedis";
 
+declare global {
+  // `var` is required here: TypeScript ambient global declarations don't
+  // support `let`/`const`.
+  // eslint-disable-next-line no-var
+  var __MULTI_INSTANCE_REDIS_BUS__: FakeRedisBus;
+  // eslint-disable-next-line no-var
+  var __CAPTURED_WORKERS__: Array<{ name: string; processor: (job: unknown) => Promise<void> }>;
+}
+
 /**
  * Presence TTL is short and the heartbeat is set far beyond this file's
  * runtime, so a connected socket's presence key only survives if something
@@ -19,12 +28,15 @@ process.env.PRESENCE_HEARTBEAT_MS = "60000";
 // One bus shared by every isolated module registry below == one physical
 // Redis server shared by every simulated backend instance.
 const redisBus = new FakeRedisBus();
-(globalThis as any).__MULTI_INSTANCE_REDIS_BUS__ = redisBus;
-(globalThis as any).__CAPTURED_WORKERS__ = [];
+globalThis.__MULTI_INSTANCE_REDIS_BUS__ = redisBus;
+globalThis.__CAPTURED_WORKERS__ = [];
 
 jest.mock("../../lib/redis", () => {
+  // jest.mock factories are hoisted above imports and can't close over
+  // module-scoped bindings, so this must stay a require().
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   const { createFakeRedisClient } = require("../../lib/__tests__/testUtils/fakeRedis");
-  const client = createFakeRedisClient((globalThis as any).__MULTI_INSTANCE_REDIS_BUS__);
+  const client = createFakeRedisClient(globalThis.__MULTI_INSTANCE_REDIS_BUS__);
   return {
     __esModule: true,
     default: {
@@ -54,8 +66,8 @@ jest.mock("bullmq", () => {
   class MockWorker {
     on = jest.fn();
     close = jest.fn().mockResolvedValue(undefined);
-    constructor(name: string, processor: (job: unknown) => unknown, _opts: unknown) {
-      const bucket = ((globalThis as any).__CAPTURED_WORKERS__ ??= []);
+    constructor(name: string, processor: (job: unknown) => Promise<void>, _opts: unknown) {
+      const bucket = (globalThis.__CAPTURED_WORKERS__ ??= []);
       bucket.push({ name, processor });
     }
   }
@@ -90,11 +102,15 @@ jest.mock("@prisma/client", () => {
   return { PrismaClient: jest.fn(() => mockPrisma) };
 });
 
+interface PrismaMock {
+  pendingNotification: { create: jest.Mock };
+}
+
 interface TestInstance {
   httpServer: HttpServer;
   port: number;
   isUserOnline: (userId: string) => Promise<boolean>;
-  prismaMock: any;
+  prismaMock: PrismaMock;
   workerProcessor: (job: { data: Record<string, unknown> }) => Promise<void>;
 }
 
@@ -105,16 +121,21 @@ const clients: ReturnType<typeof ioc>[] = [];
 async function startInstance(): Promise<TestInstance> {
   let initSocket: (server: HttpServer) => unknown;
   let isUserOnline: (userId: string) => Promise<boolean>;
-  let prismaMock: any;
+  let prismaMock: PrismaMock;
 
   jest.isolateModules(() => {
+    // jest.isolateModules needs call-time require() to force a fresh module
+    // registry per simulated instance; a static import would be cached once
+    // and shared across instances, defeating the isolation.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     ({ initSocket, isUserOnline } = require("../index"));
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     const { PrismaClient } = require("@prisma/client");
     prismaMock = new PrismaClient();
   });
 
   const capturedWorkers: Array<{ processor: (job: unknown) => Promise<void> }> =
-    (globalThis as any).__CAPTURED_WORKERS__;
+    globalThis.__CAPTURED_WORKERS__;
   const before = capturedWorkers.length;
 
   const httpServer = createServer();
@@ -129,7 +150,7 @@ async function startInstance(): Promise<TestInstance> {
     httpServer,
     port,
     isUserOnline: isUserOnline!,
-    prismaMock,
+    prismaMock: prismaMock!,
     workerProcessor: workerEntry.processor as (job: { data: Record<string, unknown> }) => Promise<void>,
   };
   instances.push(instance);

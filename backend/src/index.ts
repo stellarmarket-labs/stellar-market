@@ -17,6 +17,7 @@ import { initYjsServer } from "./socket/yjsServer";
 import { startExpiryJob } from "./jobs/expiry.job";
 import { startPendingTxJob } from "./jobs/pending-tx.job";
 import { startEscrowTtlJob } from "./jobs/escrow-ttl.job";
+import { startEvidenceSessionCleanupJob } from "./jobs/evidence-session-cleanup.job";
 import {
   startHorizonListener,
   stopHorizonListener,
@@ -25,7 +26,10 @@ import { installRequestIdConsolePatch, logger } from "./lib/logger";
 import { connectWithRetry } from "./lib/db-connect";
 import { getHealthStatus } from "./lib/health";
 import { metricsHandler, requestDurationMiddleware } from "./lib/metrics";
-import { RecommendationQueueService } from "./services/recommendation-queue.service";
+import {
+  RecommendationQueueService,
+  getRecommendationRebuildQueue,
+} from "./services/recommendation-queue.service";
 import { AuditService } from "./services/audit.service";
 import { initializeVirusScanner } from "./utils/virusScanner";
 import { ReputationCacheService } from "./services/reputation-cache.service";
@@ -73,8 +77,8 @@ prisma.$use(async (params, next) => {
   try {
     const result = await next(params);
     return result;
-  } catch (err: any) {
-    if (err?.code === "P2024") {
+  } catch (err) {
+    if ((err as { code?: string })?.code === "P2024") {
       poolMetrics.exhaustedCount += 1;
       logger.error(
         { err, model: params.model, action: params.action },
@@ -129,6 +133,7 @@ const corsOptions: cors.CorsOptions = {
 
 // Security middleware
 app.use(helmet());
+app.use(compression());
 
 // Swagger UI setup (disabled in production)
 if (process.env.NODE_ENV !== "production") {
@@ -152,19 +157,9 @@ app.get("/health", async (_req, res) => {
   res.status(health.status === "ok" ? 200 : 503).json(health);
 });
 
-app.get("/metrics", metricsHandler);
+app.get("/metrics", requireAdmin, metricsHandler);
 
 app.use(requestDurationMiddleware);
-// Metrics endpoint — exposes pool stats and process counters
-app.get("/metrics", (_req, res) => {
-  res.json({
-    db_pool_size: poolMetrics.active,
-    db_pool_waiting: poolMetrics.waiting,
-    db_pool_exhausted_total: poolMetrics.exhaustedCount,
-    process_uptime_seconds: Math.floor(process.uptime()),
-    process_memory_rss_bytes: process.memoryUsage().rss,
-  });
-});
 
 // Database-only health probe (used by some platforms/LB checks)
 app.get("/health/db", async (_req, res) => {
@@ -181,7 +176,10 @@ app.get("/health/db", async (_req, res) => {
 const bullBoardAdapter = new ExpressAdapter();
 bullBoardAdapter.setBasePath("/admin/queues");
 createBullBoard({
-  queues: [new BullMQAdapter(notificationQueue)],
+  queues: [
+    new BullMQAdapter(notificationQueue),
+    new BullMQAdapter(getRecommendationRebuildQueue()),
+  ],
   serverAdapter: bullBoardAdapter,
 });
 app.use("/admin/queues", requireAdmin, bullBoardAdapter.getRouter());
@@ -236,6 +234,7 @@ async function startServer(): Promise<void> {
     startExpiryJob();
     startPendingTxJob();
     startEscrowTtlJob();
+    startEvidenceSessionCleanupJob();
     startHorizonListener();
     RecommendationQueueService.startWorker();
     AuditService.startWorker();
@@ -260,7 +259,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }, 30_000);
 
   stopHorizonListener();
-  RecommendationQueueService.stopWorker();
+  await RecommendationQueueService.stopWorker();
   ReputationCacheService.stopPeriodicRefresh();
   await stopNotificationWorker();
   await AuditService.stopWorker();

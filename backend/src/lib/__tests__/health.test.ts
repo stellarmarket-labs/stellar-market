@@ -6,7 +6,7 @@ const isRedisConnectedMock = jest.fn();
 const getHealthMock = jest.fn();
 
 jest.mock("../../services/horizon-listener.service", () => ({
-  getHorizonListenerHealth: jest.fn().mockReturnValue("ok"),
+  getHorizonListenerHealth: jest.fn().mockReturnValue("connected"),
 }));
 
 jest.mock("../redis", () => ({
@@ -48,7 +48,7 @@ describe("getHealthStatus", () => {
       $queryRawUnsafe: jest.fn().mockResolvedValue([{ "?column?": 1 }]),
     };
 
-    const result = await getHealthStatus(prisma as any);
+    const result = await getHealthStatus(prisma);
 
     expect(result.status).toBe("ok");
     expect(result.version).toBe("1.0.0");
@@ -56,7 +56,7 @@ describe("getHealthStatus", () => {
     expect(result.checks).toEqual({
       database: "ok",
       redis: "ok",
-      horizonListener: "ok",
+      horizonListener: "connected",
       sorobanRpc: "ok",
     });
 
@@ -67,7 +67,7 @@ describe("getHealthStatus", () => {
       checks: {
         database: "ok",
         redis: "ok",
-        horizonListener: "ok",
+        horizonListener: "connected",
         sorobanRpc: "ok"
       },
       version: "1.0.0"
@@ -82,7 +82,7 @@ describe("getHealthStatus", () => {
       $queryRawUnsafe: jest.fn().mockRejectedValue(new Error("db down")),
     };
 
-    const result = await getHealthStatus(prisma as any);
+    const result = await getHealthStatus(prisma);
 
     expect(result.status).toBe("degraded");
     expect(result.checks.database).toBe("error");
@@ -98,7 +98,7 @@ describe("getHealthStatus", () => {
       $queryRawUnsafe: jest.fn().mockResolvedValue([{ "?column?": 1 }]),
     };
 
-    const result = await getHealthStatus(prisma as any);
+    const result = await getHealthStatus(prisma);
 
     expect(result.status).toBe("ok");
     expect(result.checks.database).toBe("ok");
@@ -114,7 +114,7 @@ describe("getHealthStatus", () => {
       $queryRawUnsafe: jest.fn().mockResolvedValue([{ "?column?": 1 }]),
     };
 
-    const result = await getHealthStatus(prisma as any);
+    const result = await getHealthStatus(prisma);
 
     expect(result).toHaveProperty("version");
     expect(result).toHaveProperty("uptime");

@@ -7,6 +7,7 @@ import path from "path";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validate } from "../middleware/validation";
 import { config } from "../config";
+import { logger } from "../lib/logger";
 import {
   upload,
   UPLOAD_DIR,
@@ -212,20 +213,20 @@ router.post(
         ...attachment,
         sizeFormatted: formatFileSize(attachment.size),
       });
-    } catch (error: any) {
+    } catch (error) {
       // Clean up file if it was uploaded
       if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
 
       // Handle multer errors
-      if (error.code === "LIMIT_FILE_SIZE") {
+      if ((error as { code?: string })?.code === "LIMIT_FILE_SIZE") {
         return res.status(400).json({
           error: `File too large. Maximum size is ${formatFileSize(MAX_FILE_SIZE)}`,
         });
       }
 
-      console.error("Error uploading file:", error);
+      logger.error({ err: error }, "Error uploading file:");
       res.status(500).json({ error: "Failed to upload file" });
     }
   },
@@ -309,7 +310,7 @@ router.get(
       const fileStream = fs.createReadStream(filePath);
       fileStream.pipe(res);
     } catch (error) {
-      console.error("Error downloading file:", error);
+      logger.error({ err: error }, "Error downloading file:");
       res.status(500).json({ error: "Failed to download file" });
     }
   },
@@ -363,7 +364,7 @@ router.get(
         fileName: attachment.originalName,
       });
     } catch (error) {
-      console.error("Error verifying file integrity:", error);
+      logger.error({ err: error }, "Error verifying file integrity:");
       res.status(500).json({ error: "Failed to verify file integrity" });
     }
   },
@@ -409,7 +410,7 @@ router.delete(
 
       res.json({ message: "File deleted successfully" });
     } catch (error) {
-      console.error("Error deleting file:", error);
+      logger.error({ err: error }, "Error deleting file:");
       res.status(500).json({ error: "Failed to delete file" });
     }
   },
@@ -460,13 +461,13 @@ router.get(
       });
 
       res.json({
-        attachments: attachments.map((att: any) => ({
+        attachments: attachments.map((att) => ({
           ...att,
           sizeFormatted: formatFileSize(att.size),
         })),
       });
     } catch (error) {
-      console.error("Error fetching job attachments:", error);
+      logger.error({ err: error }, "Error fetching job attachments:");
       res.status(500).json({ error: "Failed to fetch attachments" });
     }
   },
