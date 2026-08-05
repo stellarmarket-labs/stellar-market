@@ -75,6 +75,14 @@ router.get(
     >;
     const skip = (page - 1) * limit;
 
+    const where: any = {
+      job: {
+        OR: [
+          { clientId: req.userId },
+          { freelancerId: req.userId },
+        ],
+      },
+    };
     const where: Prisma.MilestoneWhereInput = {};
     if (jobId) where.jobId = jobId;
     if (status) where.status = status;
