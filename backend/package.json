@@ -40,7 +40,7 @@
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.2.0",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^9.0.5",
     "otplib": "^13.0.0",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",
