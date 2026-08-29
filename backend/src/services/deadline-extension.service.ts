@@ -409,7 +409,6 @@ export class DeadlineExtensionService {
     });
 
     // Notify both parties
-    const job = extensionRequest.job;
     const message = `Deadline for milestone "${extensionRequest.milestone.title}" has been extended to ${extensionRequest.newDeadline.toLocaleDateString()}.`;
 
     await NotificationService.sendNotification({

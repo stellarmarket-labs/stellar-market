@@ -244,7 +244,7 @@ describe("POST /api/deadline-extensions/:id/confirm-tx", () => {
     expect(res.body).toEqual({ id: EXTENSION_ID, onChainTxHash: "abc123" });
     expect(
       DeadlineExtensionService.confirmExtensionTransaction,
-    ).toHaveBeenCalledWith(EXTENSION_ID, "abc123");
+    ).toHaveBeenCalledWith(EXTENSION_ID, "abc123", USER_ID);
   });
 });
 

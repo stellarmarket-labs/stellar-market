@@ -1,25 +1,31 @@
 import { Router, Request, Response } from "express";
-import { renderEmailTemplate } from "../../utils/emailTemplateRenderer";
+import { requireAdmin } from "../../middleware/auth";
+import {
+  renderEmailTemplate,
+  isValidTemplateName,
+  getAvailableEmailTemplates,
+} from "../../utils/emailTemplateRenderer";
 
 const router = Router();
 
-/**
- * GET /admin/email-preview/:template
- * Preview email templates with sample data
- * Only available in non-production environments
- */
-router.get("/email-preview/:template", (req: Request, res: Response) => {
-  // Only available in non-production environments
-  if (process.env.NODE_ENV === "production") {
-    return res.status(404).json({ error: "Not found" });
-  }
+router.use(requireAdmin);
 
-  const template = Array.isArray(req.params.template)
+router.get("/:template", (req: Request, res: Response) => {
+  const rawTemplate = Array.isArray(req.params.template)
     ? req.params.template[0]
     : req.params.template;
+
+  if (!isValidTemplateName(rawTemplate)) {
+    return res.status(400).json({ error: "Invalid template name" });
+  }
+
+  const allowed = new Set(getAvailableEmailTemplates());
+  if (!allowed.has(rawTemplate)) {
+    return res.status(404).json({ error: "Template not found" });
+  }
+
   let vars: Record<string, unknown> = {};
 
-  // Parse vars from query string
   try {
     const rawVars = req.query.vars;
     if (rawVars && typeof rawVars === "string") {
@@ -29,9 +35,8 @@ router.get("/email-preview/:template", (req: Request, res: Response) => {
     return res.status(400).json({ error: "Invalid vars JSON" });
   }
 
-  // Render the template
   try {
-    const html = renderEmailTemplate(template, vars);
+    const html = renderEmailTemplate(rawTemplate, vars);
     res.setHeader("Content-Type", "text/html");
     return res.send(html);
   } catch (err) {
