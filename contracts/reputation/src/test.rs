@@ -4469,3 +4469,162 @@ fn test_legitimate_review_and_claim_unaffected() {
     reputation_client.claim_stake(&reviewer, &MIN_STAKE);
     assert_eq!(reputation_client.get_stake_balance(&reviewer), 0);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #1176 — slash / admin-remove must refresh the cached leaderboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_reputation_refreshes_leaderboard() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+    client.initialize(&vec![&env, admin.clone()], &1u32, &0u32);
+
+    let dispute_contract = Address::generate(&env);
+    client.set_dispute_contract(&admin, &dispute_contract);
+
+    let reviewer = Address::generate(&env);
+    let reviewee = Address::generate(&env);
+    setup_review_for(&env, &escrow_id, &client, 1, &reviewer, &reviewee, 5);
+
+    let live = client.get_average_rating(&reviewee);
+    let before = client.get_leaderboard();
+    assert_eq!(before.len(), 1);
+    assert_eq!(before.get(0).unwrap(), (reviewee.clone(), live));
+
+    // Simulate a stale cached rating that a slash used to leave behind.
+    env.as_contract(&reputation_id, || {
+        env.storage().instance().set(
+            &DataKey::Leaderboard,
+            &vec![&env, (reviewee.clone(), live + 100)],
+        );
+    });
+    assert_eq!(
+        client.get_leaderboard().get(0).unwrap(),
+        (reviewee.clone(), live + 100)
+    );
+
+    client.slash_reputation(
+        &reviewee,
+        &1u64,
+        &1u64,
+        &String::from_str(&env, "slash"),
+    );
+
+    // Leaderboard matches the live rating immediately — no extra review needed.
+    let after = client.get_leaderboard();
+    assert_eq!(after.len(), 1);
+    assert_eq!(
+        after.get(0).unwrap(),
+        (reviewee.clone(), client.get_average_rating(&reviewee))
+    );
+}
+
+#[test]
+fn test_admin_remove_review_refreshes_leaderboard() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+    client.initialize(&vec![&env, admin.clone()], &1u32, &0u32);
+
+    let reviewer1 = Address::generate(&env);
+    let reviewer2 = Address::generate(&env);
+    let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+    mint(&env, &token_addr, &token_admin, &reviewer1, 100_000_000);
+    mint(&env, &token_addr, &token_admin, &reviewer2, 100_000_000);
+
+    setup_completed_job(&env, &escrow_id, 1u64, &reviewer1, &reviewee, &token_addr);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
+
+    client.submit_review(
+        &escrow_id,
+        &reviewer1,
+        &reviewee,
+        &1u64,
+        &5u32,
+        &String::from_str(&env, "Excellent"),
+        &MIN_STAKE,
+    );
+    client.submit_review(
+        &escrow_id,
+        &reviewer2,
+        &reviewee,
+        &2u64,
+        &3u32,
+        &String::from_str(&env, "Average"),
+        &MIN_STAKE,
+    );
+
+    // (5*MIN + 3*MIN) * 100 / (MIN + MIN) = 400
+    let before = client.get_leaderboard();
+    assert_eq!(before.len(), 1);
+    assert_eq!(before.get(0).unwrap(), (reviewee.clone(), 400u64));
+
+    client.admin_remove_review(&admin, &reviewee, &0);
+
+    // Remaining 3-star review: 300. Cached without another submit_review.
+    assert_eq!(client.get_average_rating(&reviewee), 300);
+    let after = client.get_leaderboard();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after.get(0).unwrap(), (reviewee.clone(), 300u64));
+}
+
+#[test]
+fn test_admin_resolve_appeal_remove_refreshes_leaderboard() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let escrow_id = env.register_contract(None, EscrowContract);
+    let reputation_id = env.register_contract(None, ReputationContract);
+    let client = ReputationContractClient::new(&env, &reputation_id);
+    let admin = Address::generate(&env);
+    client.initialize(&vec![&env, admin.clone()], &1u32, &0u32);
+
+    let reviewer1 = Address::generate(&env);
+    let reviewer2 = Address::generate(&env);
+    let reviewee = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_addr = create_token(&env, &token_admin);
+
+    setup_review_and_appeal(
+        &env,
+        &escrow_id,
+        &client,
+        &reviewer1,
+        &reviewee,
+        &token_addr,
+        1u64,
+        5u32,
+    );
+
+    mint(&env, &token_addr, &token_admin, &reviewer2, 100_000_000);
+    setup_completed_job(&env, &escrow_id, 2u64, &reviewer2, &reviewee, &token_addr);
+    client.submit_review(
+        &escrow_id,
+        &reviewer2,
+        &reviewee,
+        &2u64,
+        &3u32,
+        &String::from_str(&env, "Average work"),
+        &MIN_STAKE,
+    );
+
+    let before = client.get_leaderboard();
+    assert_eq!(before.len(), 1);
+    assert_eq!(before.get(0).unwrap(), (reviewee.clone(), 400u64));
+
+    client.admin_resolve_appeal(&admin, &reviewer1, &reviewee, &1u64, &true);
+
+    assert_eq!(client.get_average_rating(&reviewee), 300);
+    let after = client.get_leaderboard();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after.get(0).unwrap(), (reviewee.clone(), 300u64));
+}

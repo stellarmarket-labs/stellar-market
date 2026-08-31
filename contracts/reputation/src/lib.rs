@@ -1409,6 +1409,9 @@ impl ReputationContract {
         env.storage().persistent().set(&rep_key, &reputation);
         bump_reputation_ttl(&env, &user);
 
+        // Update leaderboard with the user's new rating
+        Self::update_leaderboard(&env, &user);
+
         env.events().publish(
             (
                 symbol_short!("reput"),
@@ -2471,6 +2474,9 @@ impl ReputationContract {
             env.storage().persistent().set(&rep_key, &reputation);
             bump_reputation_ttl(&env, &reviewee);
 
+            // Update leaderboard with the user's new rating
+            Self::update_leaderboard(&env, &reviewee);
+
             appeal.status = AppealStatus::ReviewRemoved;
         } else {
             appeal.status = AppealStatus::Dismissed;
@@ -2545,6 +2551,8 @@ impl ReputationContract {
         }
 
         // Do NOT update legacy accumulators here; recomputation is lazy on next read.
+        // Update leaderboard with the user's new rating
+        Self::update_leaderboard(&env, &user);
 
         // NOTE: Soroban symbol literals have a hard 9-character limit.
         // Keep event topic symbols <= 9 chars.
