@@ -4640,11 +4640,7 @@ fn test_leaderboard_page_offset_applies_after_banned_users_are_filtered() {
 fn test_leaderboard_page_offset_and_limit_with_real_reviews() {
     let env = setup_high_ttl_env();
     env.mock_all_auths();
-    let escrow_id = env.register_contract(None, EscrowContract);
-    let reputation_id = env.register_contract(None, ReputationContract);
-    let client = ReputationContractClient::new(&env, &reputation_id);
-    let admin = Address::generate(&env);
-    client.initialize(&vec![&env, admin.clone()], &1u32, &0u32);
+
 
     // Three reviewees with distinct ratings, so leaderboard order is deterministic.
     let mut reviewees = soroban_sdk::Vec::new(&env);
