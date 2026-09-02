@@ -25,7 +25,7 @@ export class EmailService {
 
   static buildUnsubscribeUrl(userId: string): string {
     const token = this.generateUnsubscribeToken(userId);
-    return `${config.frontendUrl}/api/v1/unsubscribe?token=${token}`;
+    return `${config.frontendUrl}/unsubscribe?token=${token}`;
   }
 
   static async sendVerificationEmail(to: string, token: string): Promise<void> {

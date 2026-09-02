@@ -22,7 +22,7 @@ const prisma = new PrismaClient();
  *         description: Signed unsubscribe JWT
  *     responses:
  *       200:
- *         description: Confirmation page
+ *         description: Confirmation (HTML page or JSON depending on Accept header)
  *       400:
  *         description: Invalid or expired token
  */
@@ -30,8 +30,14 @@ router.get(
   "/",
   asyncHandler(async (req: Request, res: Response) => {
     const { token } = req.query as { token?: string };
+    const wantsJson =
+      req.accepts("json") === "json" ||
+      req.headers.accept?.includes("application/json");
 
     if (!token) {
+      if (wantsJson) {
+        return res.status(400).json({ error: "No unsubscribe token was provided." });
+      }
       return res.status(400).send(confirmationPage("Invalid link", "No unsubscribe token was provided."));
     }
 
@@ -40,19 +46,19 @@ router.get(
       payload = jwt.verify(token, config.jwtSecret) as typeof payload;
     } catch (err) {
       const expired = err instanceof jwt.TokenExpiredError;
-      return res
-        .status(400)
-        .send(
-          confirmationPage(
-            "Link expired",
-            expired
-              ? "This unsubscribe link has expired. Please request a new email to get a fresh link."
-              : "This unsubscribe link is invalid.",
-          ),
-        );
+      const message = expired
+        ? "This unsubscribe link has expired. Please request a new email to get a fresh link."
+        : "This unsubscribe link is invalid.";
+      if (wantsJson) {
+        return res.status(400).json({ error: message });
+      }
+      return res.status(400).send(confirmationPage("Link expired", message));
     }
 
     if (payload.type !== "unsubscribe") {
+      if (wantsJson) {
+        return res.status(400).json({ error: "This link cannot be used to unsubscribe." });
+      }
       return res.status(400).send(confirmationPage("Invalid link", "This link cannot be used to unsubscribe."));
     }
 
@@ -61,6 +67,12 @@ router.get(
       create: { userId: payload.userId, marketingEmails: false },
       update: { marketingEmails: false },
     });
+
+    if (wantsJson) {
+      return res.status(200).json({
+        message: "You have been unsubscribed from marketing emails. You will still receive important transactional notifications.",
+      });
+    }
 
     return res.status(200).send(confirmationPage("Unsubscribed", "You have been unsubscribed from marketing emails. You will still receive important transactional notifications."));
   }),
