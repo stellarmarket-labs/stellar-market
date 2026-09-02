@@ -3,7 +3,7 @@
 use super::*;
 use soroban_sdk::{
     contract, contractimpl,
-    testutils::{Address as _, BytesN as _, Events, Ledger},
+    testutils::{storage::Persistent, Address as _, BytesN as _, Events, Ledger},
     BytesN, Env, String,
 };
 
@@ -1470,6 +1470,66 @@ fn test_exclusion_requires_both_parties_and_replaces_arbitrator() {
     assert!(updated.excluded_voters.contains(&excluded));
     assert_eq!(updated.assigned_arbitrators.len(), 5);
     assert!(!updated.assigned_arbitrators.contains(&excluded));
+}
+
+// ── #1166: ExclusionProposal TTL ────────────────────────────────────────────
+
+#[test]
+fn test_exclusion_proposal_ttl_extended_on_write() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+    for _ in 0..6 {
+        client.add_arbitrator(&admin, &Address::generate(&env));
+    }
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let dispute_id = client.raise_dispute(
+        &1u64, &user_client, &freelancer, &user_client,
+        &String::from_str(&env, "Issue"), &5u32, &None,
+    );
+    let assigned = client.get_assigned_arbitrators(&dispute_id);
+    let voter = assigned.get(0).unwrap();
+
+    client.add_excluded_voter(&dispute_id, &user_client, &voter);
+
+    // Matches every other bump_*_ttl helper's contract: extend_ttl(key,
+    // MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO) leaves the key's remaining TTL
+    // at MIN_TTL_EXTEND_TO ledgers. Before #1166 this key was never
+    // extended at all, so its TTL would just be whatever the ledger's
+    // baseline persistent-entry TTL happened to be on write — not this.
+    env.as_contract(&dispute_contract_id, || {
+        let key = DataKey::ExclusionProposal(dispute_id, voter.clone());
+        let ttl = env.storage().persistent().get_ttl(&key);
+        assert_eq!(
+            ttl, MIN_TTL_EXTEND_TO,
+            "ExclusionProposal's TTL was not extended to MIN_TTL_EXTEND_TO on write"
+        );
+    });
+
+    // Advance well past the threshold at which an un-extended entry (using
+    // only the ledger's baseline TTL) would already have expired, but still
+    // short of MIN_TTL_EXTEND_TO — the proposal must still be readable and
+    // confirmable by the second party.
+    env.ledger()
+        .with_mut(|l| l.sequence_number += MIN_TTL_THRESHOLD + 500);
+
+    env.as_contract(&dispute_contract_id, || {
+        let key = DataKey::ExclusionProposal(dispute_id, voter.clone());
+        assert!(
+            env.storage().persistent().has(&key),
+            "exclusion proposal expired from storage before confirmation"
+        );
+    });
+
+    client.add_excluded_voter(&dispute_id, &freelancer, &voter);
+    let updated = client.get_dispute(&dispute_id);
+    assert!(updated.excluded_voters.contains(&voter));
 }
 
 #[test]
@@ -4240,4 +4300,100 @@ fn test_get_dispute_by_job_and_for_job_with_multiple_disputes() {
     let second = history.get(1).unwrap();
     assert_eq!(second.id, d2);
     assert_eq!(second.reason, String::from_str(&env, "Second dispute"));
+}
+
+/// Regression test for the dispute storage TTL sizing (issue #1163): a dispute
+/// that sits idle for a long stretch — plausible early in the 7-day voting
+/// window — must not have its storage archived by the ledger before it is
+/// resolved. The full worst-case lifecycle is ~16 days (7-day voting period,
+/// 48-hour appeal window, then a 7-day appeal voting period), so the previous
+/// ~10,000-ledger TTL (~14 hours) was far too short.
+#[test]
+fn test_dispute_storage_survives_long_idle_period_to_resolution() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000;
+        l.sequence_number = 1;
+    });
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+
+    // The dispute's storage must survive a long idle period. To also exercise
+    // end-to-end resolution *after* that idle period, keep the mock helper
+    // contracts' instance storage live so the ledger advance below does not
+    // archive them (they hold no per-dispute state; they are test plumbing).
+    env.as_contract(&reputation_contract_id, || {
+        env.storage().instance().extend_ttl(50_000_000, 50_000_000);
+    });
+    env.as_contract(&escrow_contract_id, || {
+        env.storage().instance().extend_ttl(50_000_000, 50_000_000);
+    });
+
+    let admin = Address::generate(&env);
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+
+    for _ in 0..5 {
+        let arb = Address::generate(&env);
+        client.add_arbitrator(&admin, &arb);
+    }
+
+    let dispute_id = client.raise_dispute(
+        &1u64,
+        &user_client,
+        &freelancer,
+        &user_client,
+        &String::from_str(&env, "Work not delivered"),
+        &3u32,
+        &None,
+    );
+
+    // Simulate a long-idle dispute: the full 7-day voting period elapses with
+    // no interaction (~120,960 ledgers at 5s/ledger). This is far beyond the
+    // old 10,000-ledger TTL but well inside the resized 21/30-day window, so
+    // the dispute's storage must still be live.
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000 + VOTING_PERIOD_SECS;
+        l.sequence_number = 1 + (VOTING_PERIOD_SECS / 5) as u32;
+    });
+
+    // The dispute storage must have survived the idle period (not archived).
+    let dispute = client.get_dispute(&dispute_id);
+    assert_eq!(dispute.status, DisputeStatus::Open);
+
+    // And it must still be fully resolvable end-to-end — the long-idle dispute
+    // is not silently broken; storage survives all the way to resolution.
+    let assigned = client.get_assigned_arbitrators(&dispute_id);
+    client.cast_vote(
+        &dispute_id,
+        &assigned.get(0).unwrap(),
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Work was delivered"),
+        &0,
+    );
+    client.cast_vote(
+        &dispute_id,
+        &assigned.get(1).unwrap(),
+        &VoteChoice::Freelancer,
+        &String::from_str(&env, "Agree with freelancer"),
+        &0,
+    );
+    client.cast_vote(
+        &dispute_id,
+        &assigned.get(2).unwrap(),
+        &VoteChoice::Client,
+        &String::from_str(&env, "Incomplete work"),
+        &0,
+    );
+
+    let result = client.resolve_dispute(&dispute_id);
+    assert_eq!(result, DisputeStatus::ResolvedForFreelancer);
 }

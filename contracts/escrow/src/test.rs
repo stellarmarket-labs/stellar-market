@@ -309,7 +309,7 @@ fn test_create_job_empty_milestones() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #48)")] // TooManyMilestones
+#[should_panic(expected = "HostError: Error(Contract, #34)")] // TooManyMilestones
 fn test_create_job_too_many_milestones() {
     let env = Env::default();
     env.mock_all_auths();
@@ -477,6 +477,44 @@ fn test_extend_deadline() {
 
     let job = client.get_job(&job_id);
     assert_eq!(job.milestones.get(0).unwrap().deadline, 4000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")] // InvalidStatus
+fn test_extend_deadline_fails_when_disputed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+
+    let job_id = client.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &3000_u64,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+
+    // Force the job into Disputed state
+    env.as_contract(&client.address, || {
+        let key = crate::DataKey::Job(job_id);
+        let mut job: crate::Job = env.storage().persistent().get(&key).unwrap();
+        job.status = JobStatus::Disputed;
+        env.storage().persistent().set(&key, &job);
+    });
+
+    // Must be rejected with InvalidStatus (#3)
+    client.extend_deadline(&job_id, &0, &4000_u64);
 }
 
 // ── Helpers for claim_refund tests ───────────────────────────────────────────
@@ -1343,7 +1381,7 @@ fn test_propose_revision_fails_when_pending_proposal_exists() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #48)")] // TooManyMilestones
+#[should_panic(expected = "HostError: Error(Contract, #34)")] // TooManyMilestones
 fn test_propose_revision_too_many_milestones() {
     let env = Env::default();
     env.mock_all_auths();
@@ -2068,6 +2106,115 @@ fn test_resolve_dispute_callback_refund_both() {
     let token_client = TokenClient::new(&env, &token);
     assert_eq!(token_client.balance(&client), each);
     assert_eq!(token_client.balance(&freelancer), each);
+}
+
+// ── #1178 — Escalate leaves the job parked in Disputed ────────────────────────
+//
+// These lock the behaviour now documented on `JobStatus` under "Escalated
+// disputes": Escalate is a self-loop that moves no funds, and the job leaves
+// Disputed only via a later resolution or via expire_job.
+
+/// Helper: create + fund a single-milestone job and drive it into Disputed
+/// through the registered dispute contract. Returns (job_id, amount).
+fn setup_disputed_job(
+    env: &Env,
+    escrow: &EscrowContractClient<'_>,
+    client: &Address,
+    freelancer: &Address,
+    token: &Address,
+    admin: &Address,
+) -> (u64, i128) {
+    let amount: i128 = 1000;
+    let milestones = vec![
+        env,
+        (String::from_str(env, "Task 1"), amount, JOB_DEADLINE),
+    ];
+    let job_id = escrow.create_job(
+        client,
+        freelancer,
+        token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+    escrow.fund_job(&job_id, client, &0, &0);
+
+    let dispute_contract = Address::generate(env);
+    escrow.set_dispute_contract(admin, &dispute_contract);
+    escrow.mark_job_disputed(&job_id, &1_u64);
+
+    (job_id, amount)
+}
+
+#[test]
+fn test_resolve_dispute_callback_escalate_keeps_job_disputed_and_funds_escrowed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client, freelancer, token, admin) = setup_test(&env);
+    let (job_id, amount) = setup_disputed_job(&env, &escrow, &client, &freelancer, &token, &admin);
+
+    let token_client = TokenClient::new(&env, &token);
+    let client_before = token_client.balance(&client);
+    let freelancer_before = token_client.balance(&freelancer);
+
+    escrow.resolve_dispute_callback(&job_id, &DisputeResolution::Escalate);
+
+    // Self-loop: status is untouched and the escrow still holds the full amount.
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Disputed);
+    assert_eq!(token_client.balance(&escrow.address), amount);
+    assert_eq!(token_client.balance(&client), client_before);
+    assert_eq!(token_client.balance(&freelancer), freelancer_before);
+}
+
+#[test]
+fn test_escalated_job_can_be_resolved_by_a_later_callback() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client, freelancer, token, admin) = setup_test(&env);
+    let (job_id, amount) = setup_disputed_job(&env, &escrow, &client, &freelancer, &token, &admin);
+
+    // Escalate twice — re-callable, still no settlement.
+    escrow.resolve_dispute_callback(&job_id, &DisputeResolution::Escalate);
+    escrow.resolve_dispute_callback(&job_id, &DisputeResolution::Escalate);
+    assert_eq!(escrow.get_job(&job_id).status, JobStatus::Disputed);
+
+    // The higher tier finally rules: the job settles with the escrow intact.
+    escrow.resolve_dispute_callback(&job_id, &DisputeResolution::FreelancerWins);
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Completed);
+
+    let token_client = TokenClient::new(&env, &token);
+    assert_eq!(token_client.balance(&freelancer), amount);
+}
+
+#[test]
+fn test_escalated_job_can_still_expire_after_deadline() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (escrow, client, freelancer, token, admin) = setup_test(&env);
+    let (job_id, amount) = setup_disputed_job(&env, &escrow, &client, &freelancer, &token, &admin);
+
+    let token_client = TokenClient::new(&env, &token);
+    let client_before = token_client.balance(&client);
+
+    escrow.resolve_dispute_callback(&job_id, &DisputeResolution::Escalate);
+
+    // Backstop path: nobody re-resolves, the deadline passes, anyone can expire it.
+    env.ledger().with_mut(|l| l.timestamp = JOB_DEADLINE + 1);
+    escrow.expire_job(&job_id);
+
+    let job = escrow.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Expired);
+    assert_eq!(token_client.balance(&client), client_before + amount);
 }
 
 // ── Pause mechanism tests ─────────────────────────────────────────────────────
@@ -8121,4 +8268,517 @@ fn test_accept_revision_sub_assign_unchanged_on_milestone_growth() {
 
     assert_eq!(tc.balance(&sub_freelancer) - sub_before, 400);
     assert_eq!(tc.balance(&freelancer) - fl_before, 2_000 - 400);
+}
+
+// ─── #1156: get_price_oracle coverage ─────────────────────────────────────────
+
+#[test]
+fn test_get_price_oracle_unset_returns_none() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, _client, _freelancer, _token, _admin) = setup_test(&env);
+
+    // Fresh contract — no oracle configured yet
+    assert!(contract.get_price_oracle().is_none());
+}
+
+#[test]
+fn test_get_price_oracle_returns_set_address() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, _client, _freelancer, _token, admin) = setup_test(&env);
+
+    let oracle = Address::generate(&env);
+    contract.set_price_oracle(&admin, &oracle);
+
+    assert_eq!(contract.get_price_oracle(), Some(oracle));
+}
+
+#[test]
+fn test_set_price_oracle_overwrites_previous_value() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, _client, _freelancer, _token, admin) = setup_test(&env);
+
+    let oracle_first = Address::generate(&env);
+    let oracle_second = Address::generate(&env);
+
+    contract.set_price_oracle(&admin, &oracle_first);
+    assert_eq!(contract.get_price_oracle(), Some(oracle_first));
+
+    contract.set_price_oracle(&admin, &oracle_second);
+    assert_eq!(contract.get_price_oracle(), Some(oracle_second));
+}
+
+// ============================================================
+// Multi-sig proposal storage lifecycle, validation and TTL bumps
+// Issues #1153, #1154, #1155, #1158
+// ============================================================
+
+use soroban_sdk::testutils::storage::{
+    Instance as _InstanceTestUtils, Persistent as _PersistentTestUtils,
+};
+
+/// Seconds after which a pending multi-sig proposal is no longer actionable.
+/// Mirrors `crate::PROPOSAL_TTL` (7 days), which is private to the contract.
+const MULTISIG_PROPOSAL_TTL: u64 = 7 * 24 * 60 * 60;
+const MULTISIG_TIME_LOCK: u64 = 48 * 60 * 60;
+
+fn instance_has_proposal(
+    env: &Env,
+    contract: &EscrowContractClient<'_>,
+    proposal_id: u64,
+) -> bool {
+    env.as_contract(&contract.address, || {
+        env.storage()
+            .instance()
+            .has(&crate::DataKey::MultiSigProposal(proposal_id))
+    })
+}
+
+fn archived_proposal(
+    env: &Env,
+    contract: &EscrowContractClient<'_>,
+    proposal_id: u64,
+) -> Option<crate::MultiSigProposal> {
+    env.as_contract(&contract.address, || {
+        env.storage()
+            .persistent()
+            .get(&crate::DataKey::MultiSigProposal(proposal_id))
+    })
+}
+
+fn instance_entry_count(env: &Env, contract: &EscrowContractClient<'_>) -> u32 {
+    env.as_contract(&contract.address, || env.storage().instance().all().len())
+}
+
+/// The contract exposes no signer/fee getters, so tests read the values the
+/// same way the rest of this suite reads contract state — straight from storage.
+fn current_signers(env: &Env, contract: &EscrowContractClient<'_>) -> Vec<Address> {
+    env.as_contract(&contract.address, || {
+        env.storage()
+            .instance()
+            .get(&crate::DataKey::MultiSigSigners)
+            .unwrap()
+    })
+}
+
+fn current_fee_bps(env: &Env, contract: &EscrowContractClient<'_>) -> u32 {
+    env.as_contract(&contract.address, || {
+        env.storage()
+            .instance()
+            .get(&soroban_sdk::symbol_short!("FEE"))
+            .unwrap()
+    })
+}
+
+// ── Issue #1153: proposals must not accumulate in instance storage ───────────
+
+#[test]
+fn test_executed_proposal_is_moved_out_of_instance_storage() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, admin) = setup_test(&env);
+
+    // Threshold is 1 and Unpause carries no time lock, so this auto-executes.
+    let proposal_id = contract.propose_admin_action(&admin, &AdminAction::Unpause);
+
+    assert!(
+        !instance_has_proposal(&env, &contract, proposal_id),
+        "executed proposal must not stay in instance storage"
+    );
+
+    let archived = archived_proposal(&env, &contract, proposal_id)
+        .expect("executed proposal should be archived to persistent storage");
+    assert!(archived.executed, "archived record should be marked executed");
+    assert_eq!(archived.id, proposal_id);
+}
+
+#[test]
+fn test_execution_not_before_key_is_cleared_on_execution() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, admin) = setup_test(&env);
+
+    // Pause is time-locked, so `MultiSigExecutionNotBefore` is written on propose.
+    let proposal_id = contract.propose_admin_action(&admin, &AdminAction::Pause);
+    assert!(env.as_contract(&contract.address, || {
+        env.storage()
+            .instance()
+            .has(&crate::DataKey::MultiSigExecutionNotBefore(proposal_id))
+    }));
+
+    env.ledger().with_mut(|l| l.timestamp += MULTISIG_TIME_LOCK + 1);
+    contract.execute_proposal(&admin, &proposal_id);
+
+    assert!(
+        env.as_contract(&contract.address, || {
+            !env.storage()
+                .instance()
+                .has(&crate::DataKey::MultiSigExecutionNotBefore(proposal_id))
+        }),
+        "time-lock key must be dropped once the proposal is terminal"
+    );
+}
+
+#[test]
+fn test_instance_storage_does_not_grow_over_many_propose_execute_cycles() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, admin) = setup_test(&env);
+
+    // First cycle establishes the steady state: it is the call that first writes
+    // `MultiSigProposalCount` and `Paused`. Every later cycle must reuse them.
+    contract.propose_admin_action(&admin, &AdminAction::Unpause);
+    let baseline = instance_entry_count(&env, &contract);
+
+    for _ in 0..50 {
+        let id = contract.propose_admin_action(&admin, &AdminAction::Unpause);
+        assert!(
+            !instance_has_proposal(&env, &contract, id),
+            "proposal {} lingered in instance storage",
+            id
+        );
+    }
+
+    assert_eq!(
+        instance_entry_count(&env, &contract),
+        baseline,
+        "instance storage grew across propose+execute cycles"
+    );
+}
+
+#[test]
+fn test_expired_proposal_can_be_pruned_from_instance_storage() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    // Threshold 2, so a single proposal never auto-executes and goes stale.
+    let (contract, _, _, _, signer1, _signer2) = setup_multisig(&env);
+
+    let baseline = instance_entry_count(&env, &contract);
+    let proposal_id = contract.propose_admin_action(&signer1, &AdminAction::Pause);
+    assert!(instance_has_proposal(&env, &contract, proposal_id));
+    assert!(instance_entry_count(&env, &contract) > baseline);
+
+    env.ledger()
+        .with_mut(|l| l.timestamp += MULTISIG_PROPOSAL_TTL + 1);
+
+    contract.prune_expired_proposal(&proposal_id);
+
+    assert!(
+        !instance_has_proposal(&env, &contract, proposal_id),
+        "expired proposal must be evicted from instance storage"
+    );
+    let archived = archived_proposal(&env, &contract, proposal_id)
+        .expect("pruned proposal should remain readable in persistent storage");
+    assert!(
+        !archived.executed,
+        "an expired proposal must not be recorded as executed"
+    );
+    // Back to the pre-proposal size plus `MultiSigProposalCount`, which is a
+    // single monotonic u64 that must persist so ids are never reused.
+    assert_eq!(
+        instance_entry_count(&env, &contract),
+        baseline + 1,
+        "pruning should leave only the proposal counter behind"
+    );
+
+    // And the expiry path, like the execution path, must be repeatable without
+    // instance storage creeping upward.
+    let steady = instance_entry_count(&env, &contract);
+    for _ in 0..20 {
+        let id = contract.propose_admin_action(&signer1, &AdminAction::Pause);
+        env.ledger()
+            .with_mut(|l| l.timestamp += MULTISIG_PROPOSAL_TTL + 1);
+        contract.prune_expired_proposal(&id);
+        assert!(!instance_has_proposal(&env, &contract, id));
+    }
+    assert_eq!(
+        instance_entry_count(&env, &contract),
+        steady,
+        "instance storage grew across propose+expire+prune cycles"
+    );
+}
+
+#[test]
+fn test_prune_expired_proposal_rejects_a_still_live_proposal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, signer1, _signer2) = setup_multisig(&env);
+    let proposal_id = contract.propose_admin_action(&signer1, &AdminAction::Pause);
+
+    // One second short of the TTL — still actionable, so not prunable.
+    env.ledger()
+        .with_mut(|l| l.timestamp += MULTISIG_PROPOSAL_TTL);
+
+    let res = contract.try_prune_expired_proposal(&proposal_id);
+    assert!(res.is_err(), "live proposal must not be prunable"); // ProposalNotExpirable (#40)
+    assert!(instance_has_proposal(&env, &contract, proposal_id));
+}
+
+#[test]
+fn test_prune_expired_proposal_unknown_id_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, _signer1, _signer2) = setup_multisig(&env);
+
+    let res = contract.try_prune_expired_proposal(&999u64);
+    assert!(res.is_err()); // MultiSigProposalNotFound (#31)
+}
+
+#[test]
+fn test_archived_proposal_still_reports_already_executed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, admin) = setup_test(&env);
+    let proposal_id = contract.propose_admin_action(&admin, &AdminAction::Unpause);
+
+    // Archiving must not degrade the error into "not found": the proposal is
+    // gone from instance storage but its outcome is still knowable.
+    let res = contract.try_execute_proposal(&admin, &proposal_id);
+    assert_eq!(
+        res,
+        Err(Ok(EscrowError::MultiSigAlreadyExecuted)),
+        "re-executing an archived proposal should report AlreadyExecuted"
+    );
+
+    let res = contract.try_approve_admin_action(&admin, &proposal_id);
+    assert_eq!(res, Err(Ok(EscrowError::MultiSigAlreadyExecuted)));
+}
+
+// ── Issue #1154: SetFeeBps validated when proposed, not only when executed ───
+
+#[test]
+fn test_propose_set_fee_bps_above_max_rejected_at_proposal_time() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    // Threshold 2 so the proposal would otherwise sit awaiting approvals and
+    // only fail much later, at execution time.
+    let (contract, _, _, _, signer1, _signer2) = setup_multisig(&env);
+    let baseline = instance_entry_count(&env, &contract);
+
+    let res = contract
+        .try_propose_admin_action(&signer1, &AdminAction::SetFeeBps(crate::MAX_FEE_BPS + 1));
+    assert_eq!(res, Err(Ok(EscrowError::InvalidFee)));
+
+    // The proposal must never have been created: no stored proposal, and the
+    // counter is untouched so the next valid proposal still gets id 1.
+    assert!(!instance_has_proposal(&env, &contract, 1));
+    assert_eq!(
+        instance_entry_count(&env, &contract),
+        baseline,
+        "a rejected proposal must not leave anything in storage"
+    );
+
+    let next_id = contract.propose_admin_action(&signer1, &AdminAction::SetFeeBps(crate::MAX_FEE_BPS));
+    assert_eq!(next_id, 1, "rejected proposal must not consume a proposal id");
+}
+
+#[test]
+fn test_propose_set_fee_bps_at_max_is_accepted_and_executes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, admin) = setup_test(&env);
+
+    // Boundary: exactly MAX_FEE_BPS is valid and still auto-executes.
+    let proposal_id =
+        contract.propose_admin_action(&admin, &AdminAction::SetFeeBps(crate::MAX_FEE_BPS));
+    let archived = archived_proposal(&env, &contract, proposal_id)
+        .expect("valid fee proposal should execute and archive");
+    assert!(archived.executed);
+    assert_eq!(current_fee_bps(&env, &contract), crate::MAX_FEE_BPS);
+}
+
+// ── Issue #1155: AddSigner/RemoveSigner no-ops must not report success ───────
+
+#[test]
+fn test_add_signer_already_present_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, admin) = setup_test(&env);
+    let signers_before = current_signers(&env, &contract);
+
+    // `admin` is already a signer — this used to succeed while changing nothing.
+    let res = contract.try_propose_admin_action(&admin, &AdminAction::AddSigner(admin.clone()));
+    assert_eq!(res, Err(Ok(EscrowError::AlreadyInitialized)));
+
+    assert_eq!(
+        current_signers(&env, &contract),
+        signers_before,
+        "a rejected AddSigner must leave the signer set untouched"
+    );
+    // The failed execution must not leave an "executed" record behind.
+    assert!(archived_proposal(&env, &contract, 1).is_none());
+}
+
+#[test]
+fn test_remove_signer_not_present_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, signer1, _signer2) = setup_multisig(&env);
+    let stranger = Address::generate(&env);
+    let signers_before = current_signers(&env, &contract);
+
+    // Threshold is 2, so drive the proposal to execution via a real approval.
+    let proposal_id =
+        contract.propose_admin_action(&signer1, &AdminAction::RemoveSigner(stranger.clone()));
+    let res = contract.try_approve_admin_action(&_signer2, &proposal_id);
+    assert_eq!(res, Err(Ok(EscrowError::SignerNotFound)));
+
+    assert_eq!(
+        current_signers(&env, &contract),
+        signers_before,
+        "a rejected RemoveSigner must leave the signer set untouched"
+    );
+    assert!(
+        archived_proposal(&env, &contract, proposal_id).is_none(),
+        "a failed removal must not be archived as executed"
+    );
+}
+
+#[test]
+fn test_add_and_remove_signer_still_work_for_real_changes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, admin) = setup_test(&env);
+    let newcomer = Address::generate(&env);
+
+    let add_id = contract.propose_admin_action(&admin, &AdminAction::AddSigner(newcomer.clone()));
+    assert!(current_signers(&env, &contract).contains(&newcomer));
+    assert!(
+        archived_proposal(&env, &contract, add_id)
+            .expect("real add should be archived")
+            .executed
+    );
+
+    // Threshold is 1 and there are now 2 signers, so the removal is permitted.
+    let remove_id =
+        contract.propose_admin_action(&admin, &AdminAction::RemoveSigner(newcomer.clone()));
+    assert!(!current_signers(&env, &contract).contains(&newcomer));
+    assert!(
+        archived_proposal(&env, &contract, remove_id)
+            .expect("real removal should be archived")
+            .executed
+    );
+}
+
+#[test]
+fn test_remove_signer_below_threshold_still_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    // 2 signers, threshold 2 — removing either would drop the set below it.
+    let (contract, _, _, _, signer1, signer2) = setup_multisig(&env);
+
+    let proposal_id =
+        contract.propose_admin_action(&signer1, &AdminAction::RemoveSigner(signer2.clone()));
+    let res = contract.try_approve_admin_action(&signer2, &proposal_id);
+    assert_eq!(res, Err(Ok(EscrowError::InvalidThreshold)));
+    assert_eq!(current_signers(&env, &contract).len(), 2);
+}
+
+// ── Issue #1158: bump_escrow must actually extend the job's TTL ──────────────
+
+#[test]
+fn test_bump_escrow_extends_job_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000;
+        l.sequence_number = 1;
+    });
+
+    let (contract, client, freelancer, token, _admin) = setup_test(&env);
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(
+        &client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+
+    let key = crate::DataKey::Job(job_id);
+
+    // Let a large part of the original TTL burn down before bumping.
+    env.ledger().with_mut(|l| l.sequence_number = 400_000);
+    let ttl_before =
+        env.as_contract(&contract.address, || env.storage().persistent().get_ttl(&key));
+
+    contract.bump_escrow(&job_id);
+
+    let ttl_after =
+        env.as_contract(&contract.address, || env.storage().persistent().get_ttl(&key));
+
+    assert!(
+        ttl_after > ttl_before,
+        "bump_escrow should extend the TTL (before: {}, after: {})",
+        ttl_before,
+        ttl_after
+    );
+    assert_eq!(
+        ttl_after,
+        crate::ESCROW_TTL_LEDGERS,
+        "bump_escrow should extend the job key to the full escrow TTL"
+    );
+}
+
+#[test]
+fn test_bump_escrow_keeps_job_readable_past_its_original_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1000;
+        l.sequence_number = 1;
+    });
+
+    let (contract, client, freelancer, token, _admin) = setup_test(&env);
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(
+        &client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD,
+        &DEFAULT_EXPIRY_LEDGER,
+    );
+
+    // Bump partway through the original window, then advance past where the
+    // entry would have been archived had the bump not taken effect.
+    env.ledger().with_mut(|l| l.sequence_number = 400_000);
+    contract.bump_escrow(&job_id);
+    env.ledger().with_mut(|l| l.sequence_number = 700_000);
+
+    let job = contract.get_job(&job_id);
+    assert_eq!(job.id, job_id);
+}
+
+#[test]
+fn test_bump_escrow_unknown_job_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, _admin) = setup_test(&env);
+
+    let res = contract.try_bump_escrow(&999u64);
+    assert_eq!(res, Err(Ok(EscrowError::JobNotFound)));
 }
