@@ -32,7 +32,7 @@ function getRedisClient(): Redis | null {
   }
 }
 
-async function expireJobs(): Promise<void> {
+export async function expireJobs(): Promise<void> {
   const now = new Date();
   logger.info({ at: now.toISOString() }, "[ExpiryJob] Running");
 
@@ -53,9 +53,7 @@ async function expireJobs(): Promise<void> {
 
       await NotificationService.sendNotification({
         userId: job.clientId,
-        // Note: "CANCELLED" is not a member of the NotificationType enum;
-        // preserved as-is (pre-existing behavior, not a lint-pass concern).
-        type: "CANCELLED" as unknown as NotificationType,
+        type: NotificationType.JOB_EXPIRED,
         title: "Job Expired",
         message: `Your job "${job.title}" has expired without being funded and has been closed.`,
       });
@@ -88,9 +86,7 @@ async function expireJobs(): Promise<void> {
 
         await NotificationService.sendNotification({
           userId: job.clientId,
-          // Note: "CANCELLED" is not a member of the NotificationType enum;
-        // preserved as-is (pre-existing behavior, not a lint-pass concern).
-        type: "CANCELLED" as unknown as NotificationType,
+          type: NotificationType.JOB_EXPIRED,
           title: "Funded Job Expired",
           message: `Your funded job "${job.title}" passed its deadline and has been marked as expired. Please contact support to claim your escrow refund.`,
         });

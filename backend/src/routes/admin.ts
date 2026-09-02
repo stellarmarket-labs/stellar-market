@@ -410,9 +410,7 @@ router.delete(
       if (job.clientId) {
         await NotificationService.sendNotification({
           userId: job.clientId,
-          // Note: "CANCELLED" is not a member of the NotificationType enum;
-          // preserved as-is (pre-existing behavior, not a lint-pass concern).
-          type: "CANCELLED" as unknown as NotificationType,
+          type: NotificationType.JOB_REMOVED,
           title: "Job Removed by Moderator",
           message: `Your job listing "${job.title}" has been removed by a platform administrator for violating terms.`,
         });
