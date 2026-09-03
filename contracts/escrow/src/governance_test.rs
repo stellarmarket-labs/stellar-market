@@ -491,11 +491,26 @@ fn delegated_weight_is_snapshot_safe() {
 }
 
 #[test]
+fn test_get_delegate() {
 fn undelegate_removes_delegation_and_restores_direct_voting() {
     let ctx = setup();
     let delegate = voter_with(&ctx, 40, 500_000);
     let delegator = voter_with(&ctx, 90, 500_000);
 
+    // Undelegated case (none / None)
+    assert_eq!(ctx.escrow.get_delegate(&delegator), None);
+
+    // Delegated case
+    ctx.escrow.delegate(&delegator, &delegate);
+    assert_eq!(ctx.escrow.get_delegate(&delegator), Some(delegate.clone()));
+
+    // Self-delegation case (clears delegation)
+    ctx.escrow.delegate(&delegator, &delegator);
+    assert_eq!(ctx.escrow.get_delegate(&delegator), None);
+
+    // Re-delegate and test undelegate
+    ctx.escrow.delegate(&delegator, &delegate);
+    assert_eq!(ctx.escrow.get_delegate(&delegator), Some(delegate.clone()));
     // Initial state: no delegation set
     assert_eq!(ctx.escrow.get_delegate(&delegator), None);
 
