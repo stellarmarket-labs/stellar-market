@@ -4,6 +4,7 @@ import { authenticate, AuthRequest } from "../middleware/auth";
 import { validate } from "../middleware/validation";
 import { asyncHandler } from "../middleware/error";
 import { getRecommendationsQuerySchema } from "../schemas";
+import { decodeCursor } from "../lib/cursor";
 import { RecommendationService } from "../services/recommendation.service";
 
 const router = Router();
@@ -14,14 +15,24 @@ router.get(
   authenticate,
   validate({ query: getRecommendationsQuerySchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { page, limit } = req.query as unknown as z.infer<
+    const query = req.query as unknown as z.infer<
       typeof getRecommendationsQuerySchema
     >;
+    const { page, limit, cursor } = query;
+
+    let decodedCursor = null;
+    if (cursor) {
+      decodedCursor = decodeCursor(cursor);
+      if (!decodedCursor) {
+        return res.status(400).json({ error: "Invalid cursor parameter." });
+      }
+    }
 
     const result = await RecommendationService.getRecommendedJobs(
       req.userId!,
-      page,
-      limit
+      decodedCursor ? undefined : page,
+      limit,
+      decodedCursor
     );
 
     if (!result) {

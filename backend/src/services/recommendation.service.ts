@@ -6,6 +6,7 @@ import {
 } from "../lib/cache";
 import { ReputationCacheService, OnChainReputation } from "./reputation-cache.service";
 import { logger } from "../lib/logger";
+import { CursorPayload, encodeCursor } from "../lib/cursor";
 
 const prisma = new PrismaClient();
 
@@ -213,9 +214,15 @@ export class RecommendationService {
   static async getRecommendedJobs(
     userId: string,
     page: number = 1,
-    limit: number = 10
+    limit: number = 10,
+    cursorData?: CursorPayload | null
   ) {
-    const cacheKey = generateRecommendationsCacheKey(userId, page, limit);
+    const cacheKey = cursorData
+        ? `rec:${userId}:cursor:${cursorData.snapshot}:${cursorData.lastScore}:${cursorData.lastId}:${limit}`
+        : generateRecommendationsCacheKey(userId, page, limit);
+
+      // Snapshot timestamp: captures the visibility window for cursor pagination
+      const snapshotTs = cursorData?.snapshot ?? new Date().toISOString();
 
     const { data } = await cache(cacheKey, 60, async () => {
       // 1. Fetch freelancer's skills and wallet address
@@ -237,6 +244,12 @@ export class RecommendationService {
         where: { freelancerId: userId, status: "COMPLETED" },
         select: { category: true },
       });
+
+      // When cursor is provided, filter OPEN jobs by snapshot time
+      // so that jobs created after the snapshot don't shift pagination
+      const snapshotFilter = cursorData?.snapshot
+        ? { lte: new Date(cursorData.snapshot) }
+        : undefined;
       const completedCategories = [
         ...new Set(completedJobs.map((j) => j.category)),
       ];
@@ -356,18 +369,51 @@ export class RecommendationService {
         };
       });
 
-      scoredJobs.sort((a, b) => b.relevanceScore - a.relevanceScore);
+      // Deterministic sort: score DESC, then id ASC for stable cursors
+      scoredJobs.sort((a, b) => {
+        if (b.relevanceScore !== a.relevanceScore) {
+          return b.relevanceScore - a.relevanceScore;
+        }
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
 
-      // 8. Paginate
       const total = scoredJobs.length;
-      const skip = (page - 1) * limit;
-      const paginatedJobs = scoredJobs.slice(skip, skip + limit);
+
+      let startIndex = 0;
+      let paginatedJobs: typeof scoredJobs;
+      let nextCursor: string | null = null;
+      let hasNextPage = false;
+
+      if (cursorData) {
+        // Cursor-based: find the position after (lastScore, lastId)
+        const cursorIndex = scoredJobs.findIndex(
+          (j) => j.relevanceScore === cursorData.lastScore && j.id === cursorData.lastId
+        );
+        startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+        paginatedJobs = scoredJobs.slice(startIndex, startIndex + limit);
+        hasNextPage = startIndex + limit < total;
+        if (hasNextPage) {
+          const lastItem = paginatedJobs[paginatedJobs.length - 1];
+          nextCursor = encodeCursor({
+            snapshot: cursorData.snapshot,
+            lastScore: lastItem.relevanceScore,
+            lastId: lastItem.id,
+          });
+        }
+      } else {
+        // Offset-based (legacy, snapshot-unsafe)
+        startIndex = (page - 1) * limit;
+        paginatedJobs = scoredJobs.slice(startIndex, startIndex + limit);
+        hasNextPage = startIndex + limit < total;
+      }
 
       return {
         data: paginatedJobs,
         total,
         page,
         totalPages: Math.ceil(total / limit),
+        nextCursor,
+        hasNextPage,
       };
     });
 

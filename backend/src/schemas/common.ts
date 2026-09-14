@@ -1,8 +1,14 @@
 import { z } from "zod";
 
 export const paginationSchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
+  page: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().positive().min(1).max(100).default(10),
+  cursor: z.string().optional(),
+});
+
+export const cursorPaginationSchema = z.object({
+  limit: z.coerce.number().int().positive().min(1).max(100).default(10),
+  cursor: z.string().optional(),
 });
 
 export const idParamSchema = z.object({
