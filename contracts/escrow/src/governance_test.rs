@@ -575,6 +575,35 @@ fn undelegate_when_not_delegated_succeeds_gracefully() {
     assert_eq!(ctx.escrow.get_delegate(&delegator), None);
 }
 
+#[test]
+fn get_delegate_reports_delegated_and_undelegated_accounts() {
+    let ctx = setup();
+    let delegate = voter_with(&ctx, 40, 500_000);
+    let delegator = voter_with(&ctx, 90, 500_000);
+    // An account that never interacts with delegation at all.
+    let untouched = voter_with(&ctx, 10, 500_000);
+
+    // Undelegated case: no delegation has ever been set.
+    assert_eq!(ctx.escrow.get_delegate(&delegator), None);
+    assert_eq!(ctx.escrow.get_delegate(&untouched), None);
+
+    // Delegated case: the accessor reads back the exact delegate address.
+    ctx.escrow.delegate(&delegator, &delegate);
+    assert_eq!(ctx.escrow.get_delegate(&delegator), Some(delegate.clone()));
+    // Delegation is per-account: the delegate itself has not delegated away.
+    assert_eq!(ctx.escrow.get_delegate(&delegate), None);
+    assert_eq!(ctx.escrow.get_delegate(&untouched), None);
+
+    // Re-delegating updates the read path to the new delegate.
+    let other = voter_with(&ctx, 20, 500_000);
+    ctx.escrow.delegate(&delegator, &other);
+    assert_eq!(ctx.escrow.get_delegate(&delegator), Some(other.clone()));
+
+    // Undelegating returns the accessor to the undelegated case.
+    ctx.escrow.undelegate(&delegator);
+    assert_eq!(ctx.escrow.get_delegate(&delegator), None);
+}
+
 // ============================================================
 // Governance / multisig separation of powers
 // ============================================================
