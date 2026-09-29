@@ -1883,23 +1883,15 @@ impl DisputeContract {
             .unwrap_or(Vec::new(&env))
     }
 
-    /// Submit evidence for an active dispute.
-    ///
-    /// Only the client or freelancer involved in the dispute may submit evidence.
-    /// The dispute must be in `Open` or `Voting` status.
-    /// Emits `EvidenceSubmitted` so indexers can track evidence without polling storage.
-    pub fn submit_evidence(
-        env: Env,
-        dispute_id: u64,
-        submitted_by: Address,
-        evidence_hash: BytesN<32>,
-    ) -> Result<(), DisputeError> {
-        submitted_by.require_auth();
-        require_not_paused(&env)?;
-
-        let dispute: Dispute = env
-            .storage()
+    /// Get all votes for an appeal.
+    pub fn get_appeal_votes(env: Env, appeal_id: u64) -> Vec<Vote> {
+        env.storage()
             .persistent()
+            .get(&DataKey::AppealVotes(appeal_id))
+            .unwrap_or(Vec::new(&env))
+    }
+
+    ///     .persistent()
             .get(&DataKey::Dispute(dispute_id))
             .ok_or(DisputeError::DisputeNotFound)?;
         bump_dispute_ttl(&env, dispute_id);
