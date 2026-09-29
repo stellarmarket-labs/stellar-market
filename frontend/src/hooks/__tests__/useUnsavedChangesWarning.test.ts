@@ -64,6 +64,35 @@ describe("useUnsavedChangesWarning", () => {
     document.body.removeChild(anchor);
   });
 
+  it.each([
+    ["metaKey (cmd-click)", { metaKey: true }],
+    ["ctrlKey (ctrl-click)", { ctrlKey: true }],
+    ["shiftKey (shift-click)", { shiftKey: true }],
+    ["altKey (alt-click)", { altKey: true }],
+    ["middle mouse button", { button: 1 }],
+  ])("isDirty = true + %s on internal link: no guard", (_label, init) => {
+    const { result } = renderHook(() => useUnsavedChangesWarning(true));
+
+    const anchor = document.createElement("a");
+    anchor.href = "http://localhost/dashboard";
+    document.body.appendChild(anchor);
+
+    const event = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    act(() => {
+      anchor.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(result.current.showModal).toBe(false);
+    expect(mockPush).not.toHaveBeenCalled();
+
+    document.body.removeChild(anchor);
+  });
+
   it("Successful save clears the guard", () => {
     const { result, rerender } = renderHook(({ isDirty }) => useUnsavedChangesWarning(isDirty), {
       initialProps: { isDirty: true },
