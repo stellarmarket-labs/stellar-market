@@ -377,8 +377,15 @@ router.put(
       return res.status(400).json({ error: "Milestone must be in progress to submit." });
     }
 
+    const walletAddress = milestone.job.freelancer.walletAddress;
+    if (!walletAddress) {
+      return res.status(400).json({
+        error: "Freelancer wallet address is required to submit milestones.",
+      });
+    }
+
     const xdr = await ContractService.buildSubmitMilestoneTx(
-      milestone.job.freelancer.walletAddress ?? "",
+      walletAddress,
       milestone.job.contractJobId ?? "",
       milestone.onChainIndex,
     );
@@ -581,8 +588,15 @@ router.put(
       return res.status(400).json({ error: "Milestone must be submitted to approve." });
     }
 
+    const walletAddress = milestone.job.client.walletAddress;
+    if (!walletAddress) {
+      return res.status(400).json({
+        error: "Client wallet address is required to approve milestones.",
+      });
+    }
+
     const xdr = await ContractService.buildApproveMilestoneTx(
-      milestone.job.client.walletAddress ?? "",
+      walletAddress,
       milestone.job.contractJobId ?? "",
       milestone.onChainIndex,
     );

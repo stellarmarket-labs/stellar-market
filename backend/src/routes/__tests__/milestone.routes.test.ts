@@ -307,6 +307,29 @@ describe("PUT /api/milestones/milestones/:id/submit", () => {
     expect(res.body).toEqual({ error: "On-chain milestone not found." });
   });
 
+  it("returns 400 when the assigned freelancer has no wallet", async () => {
+    milestoneMock.findUnique.mockResolvedValueOnce({
+      id: MILESTONE_ID,
+      status: "IN_PROGRESS",
+      onChainIndex: 0,
+      job: {
+        contractJobId: "contract-1",
+        freelancerId: FREELANCER_ID,
+        freelancer: { walletAddress: null },
+      },
+    });
+
+    const res = await request(app)
+      .put(`/api/milestones/milestones/${MILESTONE_ID}/submit`)
+      .set(authHeader(FREELANCER_ID, "FREELANCER"));
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: "Freelancer wallet address is required to submit milestones.",
+    });
+    expect(ContractService.buildSubmitMilestoneTx).not.toHaveBeenCalled();
+  });
+
   it("returns 403 when caller is not the assigned freelancer", async () => {
     milestoneMock.findUnique.mockResolvedValueOnce({
       id: MILESTONE_ID,
@@ -382,6 +405,29 @@ describe("PUT /api/milestones/milestones/:id/approve", () => {
       `/api/milestones/milestones/${MILESTONE_ID}/approve`,
     );
     expect(res.status).toBe(401);
+  });
+
+  it("returns 400 when the client has no wallet", async () => {
+    milestoneMock.findUnique.mockResolvedValueOnce({
+      id: MILESTONE_ID,
+      status: "SUBMITTED",
+      onChainIndex: 0,
+      job: {
+        contractJobId: "contract-1",
+        clientId: CLIENT_ID,
+        client: { walletAddress: null },
+      },
+    });
+
+    const res = await request(app)
+      .put(`/api/milestones/milestones/${MILESTONE_ID}/approve`)
+      .set(authHeader(CLIENT_ID, "CLIENT"));
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: "Client wallet address is required to approve milestones.",
+    });
+    expect(ContractService.buildApproveMilestoneTx).not.toHaveBeenCalled();
   });
 
   it("returns 403 when caller is not the client", async () => {
