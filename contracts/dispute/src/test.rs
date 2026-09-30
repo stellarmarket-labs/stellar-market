@@ -4197,6 +4197,47 @@ fn test_get_appeal_success() {
     assert_eq!(ap.refund_split_sum, 0);
 }
 
+#[test]
+fn test_get_appeal_votes() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+    let escrow_id = env.register_contract(None, DummyEscrow);
+    let rep_id = env.register_contract(None, MockReputationContract);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &rep_id, &300, &escrow_id);
+
+    for _ in 0..5 {
+        client.add_arbitrator(&admin, &Address::generate(&env));
+    }
+
+    let user_client = Address::generate(&env);
+    let freelancer = Address::generate(&env);
+    let dispute_id = client.raise_dispute(
+        &1u64, &user_client, &freelancer, &user_client,
+        &String::from_str(&env, "Issue"), &3u32, &None,
+    );
+    resolve_dispute_for_client(&env, &client, dispute_id);
+    let appeal_id = client.appeal(&dispute_id, &user_client);
+
+    assert_eq!(client.get_appeal_votes(&appeal_id).len(), 0);
+
+    let voter = Address::generate(&env);
+    let reason = String::from_str(&env, "Evidence supports the client");
+    let timestamp = env.ledger().timestamp();
+    client.cast_appeal_vote(&appeal_id, &voter, &VoteChoice::Client, &reason);
+
+    let votes = client.get_appeal_votes(&appeal_id);
+    assert_eq!(votes.len(), 1);
+    let vote = votes.get(0).unwrap();
+    assert_eq!(vote.voter, voter);
+    assert_eq!(vote.choice, VoteChoice::Client);
+    assert_eq!(vote.reason, reason);
+    assert_eq!(vote.timestamp, timestamp);
+}
+
 // ─── get_dispute_by_job / get_disputes_for_job tests ─────────────────────
 
 /// Both lookup functions return empty/None for a job that has never had a dispute.

@@ -1885,6 +1885,14 @@ impl DisputeContract {
             .unwrap_or(Vec::new(&env))
     }
 
+    /// Get all votes for an appeal.
+    pub fn get_appeal_votes(env: Env, appeal_id: u64) -> Vec<Vote> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AppealVotes(appeal_id))
+            .unwrap_or(Vec::new(&env))
+    }
+
     /// Submit evidence for an active dispute.
     ///
     /// Only the client or freelancer involved in the dispute may submit evidence.
