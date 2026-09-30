@@ -1885,6 +1885,14 @@ impl DisputeContract {
             .unwrap_or(Vec::new(&env))
     }
 
+    /// Get all votes for an appeal.
+    pub fn get_appeal_votes(env: Env, appeal_id: u64) -> Vec<Vote> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AppealVotes(appeal_id))
+            .unwrap_or(Vec::new(&env))
+    }
+
     /// Submit evidence for an active dispute.
     ///
     /// Only the client or freelancer involved in the dispute may submit evidence.
@@ -2292,9 +2300,17 @@ impl DisputeContract {
         );
 
         if !escrow_ok {
+            // Indexer payload: (dispute_id: u64, status: DisputeStatus, job_id: u64, client: Address, freelancer: Address, resolution: DisputeResolution)
             env.events().publish(
                 (symbol_short!("dispute"), Symbol::new(&env, "escrow_fail")),
-                (dispute_id, dispute.job_id),
+                (
+                    dispute_id,
+                    dispute.status.clone(),
+                    dispute.job_id,
+                    dispute.client.clone(),
+                    dispute.freelancer.clone(),
+                    resolution,
+                ),
             );
             return Ok(DisputeStatus::ResolutionFailed);
         }
@@ -2437,9 +2453,17 @@ fn internal_resolve(
                 .persistent()
                 .set(&DataKey::Dispute(dispute_id), &*dispute);
             bump_dispute_ttl(env, dispute_id);
+            // Indexer payload: (dispute_id: u64, status: DisputeStatus, job_id: u64, client: Address, freelancer: Address, resolution: DisputeResolution)
             env.events().publish(
                 (symbol_short!("dispute"), Symbol::new(env, "escrow_fail")),
-                (dispute_id, dispute.job_id),
+                (
+                    dispute_id,
+                    dispute.status.clone(),
+                    dispute.job_id,
+                    dispute.client.clone(),
+                    dispute.freelancer.clone(),
+                    DisputeResolution::MaliciousFiling,
+                ),
             );
             return Ok(DisputeStatus::ResolutionFailed);
         }
@@ -2581,9 +2605,17 @@ fn internal_resolve(
                 .persistent()
                 .set(&DataKey::Dispute(dispute_id), &*dispute);
             bump_dispute_ttl(env, dispute_id);
+            // Indexer payload: (dispute_id: u64, status: DisputeStatus, job_id: u64, client: Address, freelancer: Address, resolution: DisputeResolution)
             env.events().publish(
                 (symbol_short!("dispute"), Symbol::new(env, "escrow_fail")),
-                (dispute_id, dispute.job_id),
+                (
+                    dispute_id,
+                    dispute.status.clone(),
+                    dispute.job_id,
+                    dispute.client.clone(),
+                    dispute.freelancer.clone(),
+                    resolution,
+                ),
             );
             return Ok(DisputeStatus::ResolutionFailed);
         }

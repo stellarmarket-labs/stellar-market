@@ -3188,6 +3188,61 @@ fn test_resolve_dispute_escrow_fail_enters_resolution_failed() {
     assert_eq!(dispute.status, DisputeStatus::ResolutionFailed);
 }
 
+#[test]
+fn test_escrow_fail_event_includes_resolution_context() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, job_client, freelancer, dispute_id) = setup_dispute_with_failing_escrow(&env);
+    let assigned = client.get_assigned_arbitrators(&dispute_id);
+
+    client.cast_vote(
+        &dispute_id,
+        &assigned.get(0).unwrap(),
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &0u64,
+    );
+    client.cast_vote(
+        &dispute_id,
+        &assigned.get(1).unwrap(),
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &1u64,
+    );
+    client.cast_vote(
+        &dispute_id,
+        &assigned.get(2).unwrap(),
+        &VoteChoice::Client,
+        &String::from_str(&env, "r"),
+        &2u64,
+    );
+
+    let events = env.events().all();
+    let fail_event = events.iter().find(|(_, topics, _)| {
+        if topics.len() >= 2 {
+            let t1: Symbol = topics.get(1).unwrap().into_val(&env);
+            return t1 == Symbol::new(&env, "escrow_fail");
+        }
+        false
+    });
+
+    assert!(fail_event.is_some(), "escrow_fail event should be emitted");
+
+    let (_, _, data) = fail_event.unwrap();
+    let actual: (u64, DisputeStatus, u64, Address, Address, DisputeResolution) =
+        soroban_sdk::TryFromVal::try_from_val(&env, &data).unwrap();
+    let expected = (
+        dispute_id,
+        DisputeStatus::ResolutionFailed,
+        1u64,
+        job_client,
+        freelancer,
+        DisputeResolution::ClientWins,
+    );
+    assert_eq!(actual, expected);
+}
+
 /// After escrow is fixed, retry_escrow_callback transitions the dispute to the
 /// correct terminal status (ResolvedForClient here).
 #[test]
