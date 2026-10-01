@@ -187,7 +187,7 @@ pub struct DisputeTally {
     pub refund_split_sum: u64,
     /// Number of votes for refund split.
     pub refund_split_count: u32,
-    /// Number of votes for malicious filing.
+    /// Total weight of votes for malicious filing.
     pub malicious_weight: u64,
     /// Number of votes for malicious filing.
     pub malicious_count: u32,
