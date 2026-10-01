@@ -48,7 +48,10 @@ export class EmailService {
 
   static buildUnsubscribeUrl(userId: string): string {
     const token = this.generateUnsubscribeToken(userId);
-    return `${config.frontendUrl}/api/v1/unsubscribe?token=${token}`;
+    // Point at a frontend page (like verify-email/reset-password) that calls
+    // the backend API client-side — not at the backend API path itself, which
+    // only exists under the backend origin.
+    return `${config.frontendUrl}/unsubscribe?token=${token}`;
   }
 
   static async sendVerificationEmail(to: string, token: string): Promise<void> {
