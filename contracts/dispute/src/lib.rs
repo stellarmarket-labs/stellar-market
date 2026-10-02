@@ -127,6 +127,7 @@ pub struct Appeal {
 pub enum VoteChoice {
     Client,
     Freelancer,
+    /// Vote to refund a percentage split; the value is a whole-number percentage (0–100).
     RefundSplit(u32),
     /// Vote that the dispute initiator filed in bad faith.
     MaliciousFiling,
@@ -142,6 +143,14 @@ pub struct Vote {
     pub reason: String,
     pub timestamp: u64,
 }
+
+/// Maximum refund-split percentage, expressed as a whole-number percentage (0–100).
+/// Used to validate the `VoteChoice::RefundSplit` variant.
+pub const MAX_REFUND_SPLIT_PCT: u32 = 100;
+
+/// Total basis points representing a full (100%) split, used to validate the
+/// `VoteChoice::SplitAward` variant where `client_bps + freelancer_bps` must equal this.
+pub const SPLIT_AWARD_TOTAL_BPS: u32 = 10_000;
 
 /// A single piece of evidence attached to a dispute.
 #[contracttype]
@@ -1176,7 +1185,7 @@ impl DisputeContract {
             VoteChoice::Client => dispute.votes_for_client += 1,
             VoteChoice::Freelancer => dispute.votes_for_freelancer += 1,
             VoteChoice::RefundSplit(pct_client) => {
-                if pct_client > 100 {
+                if pct_client > MAX_REFUND_SPLIT_PCT {
                     return Err(DisputeError::InvalidSplitBps);
                 }
                 dispute.votes_for_refund_split += 1;
@@ -1185,7 +1194,7 @@ impl DisputeContract {
             }
             VoteChoice::MaliciousFiling => dispute.votes_for_malicious += 1,
             VoteChoice::SplitAward(client_bps, freelancer_bps) => {
-                if client_bps.saturating_add(freelancer_bps) != 10_000 {
+                if client_bps.saturating_add(freelancer_bps) != SPLIT_AWARD_TOTAL_BPS {
                     return Err(DisputeError::InvalidSplitBps);
                 }
                 dispute.votes_for_split_award += 1;
@@ -1598,7 +1607,7 @@ impl DisputeContract {
             VoteChoice::Client => ap.votes_for_client += 1,
             VoteChoice::Freelancer => ap.votes_for_freelancer += 1,
             VoteChoice::RefundSplit(pct) => {
-                if pct > 100 {
+                if pct > MAX_REFUND_SPLIT_PCT {
                     return Err(DisputeError::InvalidSplitBps);
                 }
                 ap.votes_for_refund_split += 1;
