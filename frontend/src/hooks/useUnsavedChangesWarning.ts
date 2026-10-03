@@ -25,6 +25,12 @@ export function useUnsavedChangesWarning(isDirty: boolean) {
     const handleClick = (e: MouseEvent) => {
       if (!isDirty) return;
 
+      // Ignore modified clicks (ctrl/cmd/shift/alt) and non-primary mouse
+      // buttons (e.g. middle-click), which open links in a new tab/window.
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+        return;
+      }
+
       const target = e.target as HTMLElement;
       const anchor = target.closest("a");
 
