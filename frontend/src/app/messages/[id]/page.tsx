@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Send, ArrowLeft, User, Briefcase, Paperclip } from "lucide-react";
+import { Send, ArrowLeft, User, Briefcase, Paperclip, MessageSquare } from "lucide-react";
 import axios from "axios";
 import { Message } from "@/types";
 import MessageBubble from "@/components/MessageBubble";
@@ -215,7 +215,10 @@ export default function ChatThreadPage() {
         <div className="flex items-end gap-3 bg-theme-card p-2 rounded-2xl border border-theme-border focus-within:border-stellar-blue/50 transition-all shadow-xl">
           <button
             type="button"
-            className="p-2.5 text-theme-text hover:text-stellar-blue transition-colors"
+            className="p-2.5 text-theme-text/50 cursor-not-allowed"
+            aria-label="Attach file (coming soon)"
+            disabled
+            title="Coming soon"
           >
             <Paperclip size={20} />
           </button>
@@ -246,30 +249,5 @@ export default function ChatThreadPage() {
         </div>
       </form>
     </div>
-  );
-}
-
-function MessageSquare({
-  size,
-  className,
-}: {
-  size: number;
-  className?: string;
-}) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
   );
 }

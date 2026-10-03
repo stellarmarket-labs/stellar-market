@@ -350,11 +350,21 @@ router.put(
     const id = req.params.id as string;
     const { isRead } = req.body;
 
+    const message = await prisma.message.findUnique({
+      where: { id },
+    });
+
+    if (!message) {
+      return res.status(404).json({ error: "Message not found." });
+    }
+    if (message.receiverId !== req.userId) {
+      return res
+        .status(403)
+        .json({ error: "Not authorized to mark this message as read." });
+    }
+
     await prisma.message.update({
-      where: {
-        id,
-        receiverId: req.userId!,
-      },
+      where: { id },
       data: { read: isRead },
     });
     res.status(204).send();

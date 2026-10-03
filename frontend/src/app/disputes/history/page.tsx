@@ -59,6 +59,11 @@ export default function DisputeHistoryPage() {
         return "bg-stellar-blue/10 text-stellar-blue";
       case "RESOLVED":
         return "bg-theme-success/10 text-theme-success";
+      case "VOTING":
+        return "bg-stellar-blue/10 text-stellar-blue";
+      case "RESOLVED_CLIENT":
+      case "RESOLVED_FREELANCER":
+        return "bg-theme-success/10 text-theme-success";
       default:
         return "bg-theme-text/10 text-theme-text";
     }
@@ -71,6 +76,11 @@ export default function DisputeHistoryPage() {
       case "IN_PROGRESS":
         return <Clock size={16} />;
       case "RESOLVED":
+        return <CheckCircle size={16} />;
+      case "VOTING":
+        return <Clock size={16} />;
+      case "RESOLVED_CLIENT":
+      case "RESOLVED_FREELANCER":
         return <CheckCircle size={16} />;
       default:
         return <ShieldAlert size={16} />;

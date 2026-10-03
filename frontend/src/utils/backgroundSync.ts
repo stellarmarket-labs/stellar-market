@@ -50,7 +50,7 @@ export async function queueAction(
   headers: Record<string, string> = {}
 ): Promise<string> {
   const db = await getDB();
-  const id = `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
   const action: PendingAction = {
     id,

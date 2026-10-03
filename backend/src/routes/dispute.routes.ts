@@ -26,6 +26,7 @@ import {
   disputeIdParamSchema,
   initRaiseDisputeSchema,
   queryDisputesSchema,
+  queryDisputeHistorySchema,
   resolveDisputeSchema,
   webhookPayloadSchema,
   initiateEvidenceSessionSchema,
@@ -142,28 +143,21 @@ function omitWalletAddress<T extends { walletAddress: unknown }>(
 router.get(
   "/history",
   authenticate,
+  validate({ query: queryDisputeHistorySchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const {
-      filter = "all",
-      sortBy = "recent",
-      page = 1,
-      limit = 20,
-    } = req.query;
+    const query = req.query as unknown as {
+      filter: "all" | "initiated" | "involved";
+      sortBy: "recent" | "oldest";
+      page: number;
+      limit: number;
+    };
     const userId = req.userId!;
-
-    const rawLimit = Number(limit);
-    const rawPage = Number(page);
-    if (!Number.isFinite(rawLimit) || rawLimit < 1) {
-      return res.status(400).json({ error: "limit must be a positive integer" });
-    }
-    const safeLimit = Math.min(rawLimit, MAX_PAGE_SIZE);
-    const safePage = Math.max(1, Number.isFinite(rawPage) ? rawPage : 1);
 
     const disputes = await DisputeService.getUserDisputeHistory(
       userId,
-      filter as "all" | "initiated" | "involved",
-      sortBy as "recent" | "oldest",
-      { page: safePage, limit: safeLimit },
+      query.filter,
+      query.sortBy,
+      { page: query.page, limit: query.limit },
     );
 
     res.setHeader("X-Max-Page-Size", String(MAX_PAGE_SIZE));
@@ -328,7 +322,8 @@ router.get(
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const disputeId = req.params.id as string;
     const cursor = req.query.cursor as string | undefined;
-    const limit = Math.min(Number(req.query.limit) || 20, 100);
+    const rawLimit = Number(req.query.limit) || 20;
+    const limit = Math.min(Math.max(rawLimit, 1), 100);
 
     const dispute = await DisputeService.getDisputeById(disputeId);
     if (!dispute) {

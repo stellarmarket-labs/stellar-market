@@ -20,6 +20,7 @@ export default function NotificationsPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [markingAll, setMarkingAll] = useState(false);
+  const [hasUnread, setHasUnread] = useState(false);
   const mergedNotifications = [
     ...liveNotifications,
     ...notifications.filter(
@@ -47,6 +48,7 @@ export default function NotificationsPage() {
         );
         setNotifications(res.data.data);
         setTotal(res.data.total);
+        if (res.data.data.some((n) => !n.read)) setHasUnread(true);
       } catch (error) {
         console.error("Failed to fetch notifications:", error);
       } finally {
@@ -220,7 +222,7 @@ export default function NotificationsPage() {
 
           <button
             onClick={markAllAsRead}
-            disabled={markingAll || notifications.every((n) => n.read)}
+            disabled={markingAll || !hasUnread}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-theme-border/50 text-theme-heading hover:bg-theme-border transition-colors disabled:opacity-50 text-sm font-medium border border-theme-border"
           >
             <CheckSquare size={16} />

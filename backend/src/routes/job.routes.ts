@@ -1112,7 +1112,7 @@ router.put(
 
     if (
       updateData.status &&
-      ["COMPLETED", "DISPUTED", "CANCELLED", "REFUNDED"].includes(updateData.status)
+      ["COMPLETED", "DISPUTED", "CANCELLED", "EXPIRED"].includes(updateData.status)
     ) {
       return res.status(400).json({
         error: `Cannot update job status to ${updateData.status} directly.`,

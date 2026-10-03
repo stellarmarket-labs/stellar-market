@@ -27,6 +27,7 @@ export async function resizeImage(
     }
 
     img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
       let { width, height } = img;
 
       if (width > maxWidth || height > maxHeight) {
@@ -66,10 +67,12 @@ export async function resizeImage(
     };
 
     img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
       reject(new Error("Failed to load image"));
     };
 
-    img.src = URL.createObjectURL(file);
+    const objectUrl = URL.createObjectURL(file);
+    img.src = objectUrl;
   });
 }
 

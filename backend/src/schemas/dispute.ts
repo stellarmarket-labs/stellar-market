@@ -84,6 +84,13 @@ export const queryDisputesSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 
+export const queryDisputeHistorySchema = z.object({
+  filter: z.enum(["all", "initiated", "involved"]).optional().default("all"),
+  sortBy: z.enum(["recent", "oldest"]).optional().default("recent"),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+});
+
 export const resolveDisputeSchema = z.object({
   outcome: z
     .string()

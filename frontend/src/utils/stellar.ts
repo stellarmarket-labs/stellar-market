@@ -6,6 +6,7 @@ import {
   rpc,
   xdr,
 } from "@stellar/stellar-sdk";
+import type { Transaction as AppTransaction } from "@/types";
 
 const RPC_URL =
   process.env.NEXT_PUBLIC_STELLAR_RPC_URL || "https://soroban-testnet.stellar.org";
@@ -51,7 +52,7 @@ export function parseJobIdFromResult(returnValueXdr: string): number {
   }
 }
 
-export type TxType = "DEPOSIT" | "RELEASE" | "REFUND" | "DISPUTE_PAYOUT";
+export type TxType = AppTransaction["type"];
 
 export interface PreRegisterOptions {
   type: TxType;

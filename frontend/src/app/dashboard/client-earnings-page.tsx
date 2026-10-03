@@ -27,6 +27,7 @@ interface MonthlySpend {
 interface FreelancerBreakdownEntry {
   freelancerId: string;
   displayName: string;
+  username?: string;
   totalPaid: number;
   jobCount: number;
 }
@@ -165,7 +166,10 @@ const ClientEarningsPage = () => {
                   dataKey="totalPaid"
                   fill="#2563EB"
                   cursor="pointer"
-                  onClick={(entry: any) => router.push(`/u/${(entry as FreelancerBreakdownEntry).displayName}`)}
+                  onClick={(entry: any) => {
+                    const e = entry as FreelancerBreakdownEntry;
+                    router.push(`/u/${encodeURIComponent(e.username || e.freelancerId)}`);
+                  }}
                 />
               </BarChart>
             </ResponsiveContainer>

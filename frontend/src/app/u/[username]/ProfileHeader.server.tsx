@@ -40,7 +40,7 @@ export default async function ProfileHeader({ userPromise }: Props) {
 
         <div className="flex flex-wrap gap-5 text-sm text-theme-text">
           <div className="flex items-center gap-1.5">
-            <div className="text-theme-warning font-semibold text-xl">{Math.round(user.averageRating || 0)}</div>
+            <div className="text-theme-warning font-semibold text-xl">{(user.averageRating || 0).toFixed(1)}/5</div>
             <div className="ml-2 text-theme-text/60">({user.reviewCount || 0} reviews)</div>
           </div>
           <div className="flex items-center gap-1.5">Member since {new Date(user.createdAt).toLocaleDateString()}</div>
