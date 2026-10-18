@@ -25,6 +25,10 @@ export function useUnsavedChangesWarning(isDirty: boolean) {
     const handleClick = (e: MouseEvent) => {
       if (!isDirty) return;
 
+      // Ctrl/Cmd/Shift-click and middle-click open a new tab or window; the
+      // current page (and its unsaved changes) stays put, so don't intercept.
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+
       const target = e.target as HTMLElement;
       const anchor = target.closest("a");
 
