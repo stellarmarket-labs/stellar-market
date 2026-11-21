@@ -674,6 +674,15 @@
                               "u64": 0
                             }
                           },
+
+                          {
+                            "key": {
+                              "symbol": "split_award_weight"
+                            },
+                            "val": {
+                              "u64": 0
+                            }
+                          },
                           {
                             "key": {
                               "symbol": "total_weight_cast"
@@ -985,6 +994,15 @@
                               "u64": 0
                             }
                           },
+
+                          {
+                            "key": {
+                              "symbol": "split_award_weight"
+                            },
+                            "val": {
+                              "u64": 0
+                            }
+                          },
                           {
                             "key": {
                               "symbol": "total_weight_cast"
@@ -1166,6 +1184,15 @@
                         "u64": 0
                       }
                     },
+
+                    {
+                      "key": {
+                        "symbol": "split_award_weight"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
                     {
                       "key": {
                         "symbol": "total_weight_cast"
@@ -1279,6 +1306,15 @@
                     {
                       "key": {
                         "symbol": "refund_split_weight"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+
+                    {
+                      "key": {
+                        "symbol": "split_award_weight"
                       },
                       "val": {
                         "u64": 0

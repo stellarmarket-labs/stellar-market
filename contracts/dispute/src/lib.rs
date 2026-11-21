@@ -209,6 +209,8 @@ pub struct DisputeTally {
     pub malicious_weight: u64,
     /// Number of votes for malicious filing.
     pub malicious_count: u32,
+    /// Total weight of votes for a proportional split award (SplitAward variant).
+    pub split_award_weight: u64,
 }
 
 #[contracttype]
@@ -527,6 +529,7 @@ fn new_tally() -> DisputeTally {
         refund_split_count: 0,
         malicious_weight: 0,
         malicious_count: 0,
+        split_award_weight: 0,
     }
 }
 
@@ -1262,8 +1265,8 @@ impl DisputeContract {
             }
             VoteChoice::SplitAward(_client_bps, _freelancer_bps) => {
                 // SplitAward votes are counted separately in votes_for_split_award
-                // The tally tracks them as a distinct vote category
-                tally.refund_split_weight = tally.refund_split_weight.saturating_add(vote_weight);
+                // and tracked as a distinct vote category in the tally.
+                tally.split_award_weight = tally.split_award_weight.saturating_add(vote_weight);
             }
         }
 
@@ -2036,8 +2039,9 @@ impl DisputeContract {
             .unwrap_or(Vec::<Address>::new(&env))
     }
 
-    /// Get the assigned arbitrators for a dispute (those assigned via assign_arbitrators).
-    /// This is different from get_arbitrators which returns voters who have actually cast votes.
+    /// Get the assigned arbitrators for a dispute (those assigned via `raise_dispute` on initial
+    /// creation, or replaced via `add_excluded_voter` when a voter is excluded and substituted).
+    /// This is different from `get_arbitrators` which returns voters who have actually cast votes.
     pub fn get_assigned_arbitrators(env: Env, dispute_id: u64) -> Vec<Address> {
         let arbitrators = env
             .storage()
@@ -2196,6 +2200,22 @@ impl DisputeContract {
             bump_vote_delegation_ttl(&env, &owner, job_id);
         }
         delegate
+    }
+
+    /// Return the owner who has delegated their vote to `delegate` for the given job, if any.
+    ///
+    /// This is the reverse of `get_delegation`: while `get_delegation` looks up the forward
+    /// owner → delegate mapping, this getter reads the reverse delegate → owner mapping stored
+    /// under `DelegationOwner`. It is populated by `delegate_vote` and cleared by
+    /// `revoke_delegation`, and is what `cast_vote` uses internally to resolve the stake owner
+    /// when a delegate casts a vote.
+    pub fn get_delegation_owner(env: Env, delegate: Address, job_id: u64) -> Option<Address> {
+        let owner_key = DataKey::DelegationOwner(delegate.clone(), job_id);
+        let owner: Option<Address> = env.storage().persistent().get(&owner_key);
+        if owner.is_some() {
+            bump_delegation_owner_ttl(&env, &delegate, job_id);
+        }
+        owner
     }
 
     /// Check if a voter is excluded from voting on a specific dispute.

@@ -2369,6 +2369,9 @@ impl ReputationContract {
         let new_balance = balance - amount;
         if new_balance > 0 {
             env.storage().persistent().set(&balance_key, &new_balance);
+            env.storage()
+                .persistent()
+                .extend_ttl(&balance_key, MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
         } else {
             env.storage().persistent().remove(&balance_key);
         }
