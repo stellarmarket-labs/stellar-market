@@ -3628,6 +3628,30 @@ fn test_get_multisig_proposal_reads_pending_archived_and_unknown_ids() {
 }
 
 #[test]
+fn test_get_execution_not_before() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, _, _, _, signer1, _) = setup_multisig(&env);
+
+    let timelocked_id = contract.propose_admin_action(&signer1, &AdminAction::Pause);
+    assert_eq!(
+        contract.get_execution_not_before(&timelocked_id),
+        Some(1000 + MULTISIG_TIME_LOCK_SECS)
+    );
+
+    let immediate_id =
+        contract.propose_admin_action(&signer1, &AdminAction::AddSigner(Address::generate(&env)));
+    assert_eq!(
+        contract.get_execution_not_before(&immediate_id),
+        Some(1000)
+    );
+
+    assert_eq!(contract.get_execution_not_before(&999), None);
+}
+
+#[test]
 fn test_multisig_unauthorized_proposal() {
     let env = Env::default();
     env.mock_all_auths();
@@ -8405,6 +8429,28 @@ fn test_set_price_oracle_overwrites_previous_value() {
 
     contract.set_price_oracle(&admin, &oracle_second);
     assert_eq!(contract.get_price_oracle(), Some(oracle_second));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_set_price_oracle_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, _client, _freelancer, _token, admin) = setup_test(&env);
+
+    pause_escrow(&env, &contract, &admin);
+    contract.set_price_oracle(&admin, &Address::generate(&env));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_set_dispute_contract_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, _client, _freelancer, _token, admin) = setup_test(&env);
+
+    pause_escrow(&env, &contract, &admin);
+    contract.set_dispute_contract(&admin, &Address::generate(&env));
 }
 
 // ============================================================

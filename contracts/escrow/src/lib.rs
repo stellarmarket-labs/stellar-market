@@ -365,6 +365,7 @@ pub struct Job {
 
 pub(crate) const MAX_FEE_BPS: u32 = 500; // 5%
 const MAX_MILESTONES: u32 = 50;
+const REFUND_SPLIT_PERCENT_DENOMINATOR: i128 = 100;
 
 /// A formal proposal to revise the milestones and total budget of an active job.
 #[contracttype]
@@ -456,7 +457,6 @@ pub struct SubAssignment {
 enum DataKey {
     Job(u64),
     JobCount,
-    Admin, // Legacy single admin
     Paused,
     AllowedTokens,
     RevisionProposal(u64),
@@ -534,6 +534,11 @@ fn resolve_milestone_token(milestone: &Milestone, job: &Job) -> Address {
     milestone.token.clone().unwrap_or_else(|| job.token.clone())
 }
 
+fn refund_split_client_amount(amount: i128, pct_client: u32) -> i128 {
+    let pct = pct_client.min(REFUND_SPLIT_PERCENT_DENOMINATOR as u32) as i128;
+    (amount * pct) / REFUND_SPLIT_PERCENT_DENOMINATOR
+}
+
 /// Transfer `amount` of `token` from this contract to the appropriate party according
 /// to the dispute resolution. No-op when amount <= 0 or resolution is Escalate.
 fn apply_dispute_distribution(
@@ -565,8 +570,7 @@ fn apply_dispute_distribution(
             }
         }
         DisputeResolution::RefundSplit(pct_client) => {
-            let pct = if *pct_client > 100 { 100 } else { *pct_client } as i128;
-            let ca = (amount * pct) / 100;
+            let ca = refund_split_client_amount(amount, *pct_client);
             let fa = amount - ca;
             if ca > 0 {
                 tc.transfer(&contract, client, &ca);
@@ -1075,6 +1079,8 @@ impl EscrowContract {
         admin: Address,
         oracle: Address,
     ) -> Result<(), EscrowError> {
+        require_not_paused(&env)?;
+
         admin.require_auth();
         if !is_signer(&env, &admin) {
             return Err(EscrowError::NotAdmin);
@@ -1094,6 +1100,8 @@ impl EscrowContract {
         admin: Address,
         dispute_contract: Address,
     ) -> Result<(), EscrowError> {
+        require_not_paused(&env)?;
+
         admin.require_auth();
         if !is_signer(&env, &admin) {
             return Err(EscrowError::NotAdmin);
@@ -1264,6 +1272,15 @@ impl EscrowContract {
     /// Return a multi-sig proposal by id, whether it is pending or archived.
     pub fn get_multisig_proposal(env: Env, proposal_id: u64) -> Option<MultiSigProposal> {
         load_proposal(&env, proposal_id)
+    }
+
+    /// Return the timestamp at which a multi-sig proposal becomes executable.
+    ///
+    /// Returns `None` if the proposal has no timelock entry or is unknown.
+    pub fn get_execution_not_before(env: Env, proposal_id: u64) -> Option<u64> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultiSigExecutionNotBefore(proposal_id))
     }
 
     /// Record an additional approval on a pending multi-sig proposal. When the
@@ -2399,8 +2416,7 @@ impl EscrowContract {
                 }
             }
             DisputeResolution::RefundSplit(pct_client) => {
-                let pct = if pct_client > 100 { 100 } else { pct_client } as i128;
-                let client_amount = (remaining * pct) / 100;
+                let client_amount = refund_split_client_amount(remaining, pct_client);
                 PayoutBreakdown {
                     client: client_amount,
                     freelancer: remaining - client_amount,
