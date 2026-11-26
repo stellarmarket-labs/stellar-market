@@ -100,7 +100,7 @@ describe("getHealthStatus", () => {
 
     const result = await getHealthStatus(prisma);
 
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("degraded");
     expect(result.checks.database).toBe("ok");
     expect(result.checks.redis).toBe("ok");
     expect(result.checks.sorobanRpc).toBe("error");

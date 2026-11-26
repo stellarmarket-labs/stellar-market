@@ -933,6 +933,19 @@ impl DisputeContract {
         Ok(())
     }
 
+    /// Issue #1804: Get the configured minimum voter reputation threshold.
+    ///
+    /// Returns the value set via `set_min_voter_reputation` (or by
+    /// `initialize`), falling back to the same default used internally by
+    /// `is_eligible_voter`. Lets a UI or arbitrator discover the current
+    /// threshold without probing eligibility for a specific address.
+    pub fn get_min_voter_reputation(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MinVoterReputation)
+            .unwrap_or(MIN_VOTER_REPUTATION)
+    }
+
     /// Set the per-party-pair cooldown duration in seconds (admin only).
     pub fn set_cooldown_duration(env: Env, admin: Address, seconds: u64) -> Result<(), DisputeError> {
         admin.require_auth();

@@ -53,10 +53,11 @@ export async function getHealthStatus(
     checks.sorobanRpc = "error";
   }
 
-  // Database and Redis are critical; horizon listener "down" is also critical
+  // Database, Redis, and Soroban RPC are critical; horizon listener "down" is also critical
   const criticalHealthy =
     checks.database === "ok" &&
     checks.redis === "ok" &&
+    checks.sorobanRpc === "ok" &&
     checks.horizonListener !== "down";
 
   return {

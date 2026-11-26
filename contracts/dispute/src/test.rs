@@ -155,6 +155,25 @@ fn test_set_min_voter_reputation_non_admin_fails() {
 }
 
 #[test]
+fn test_get_min_voter_reputation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let dispute_contract_id = env.register_contract(None, DisputeContract);
+    let client = DisputeContractClient::new(&env, &dispute_contract_id);
+
+    let reputation_contract_id = env.register_contract(None, MockReputationContract);
+    let escrow_contract_id = env.register_contract(None, DummyEscrow);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reputation_contract_id, &300, &escrow_contract_id);
+    assert_eq!(client.get_min_voter_reputation(), 300);
+
+    client.set_min_voter_reputation(&admin, &500);
+    assert_eq!(client.get_min_voter_reputation(), 500);
+}
+
+#[test]
 fn test_is_eligible_voter_high_reputation() {
     let env = Env::default();
     env.mock_all_auths();

@@ -18,6 +18,11 @@ export async function cache<T>(
   ttl: number,
   fn: () => Promise<T>
 ): Promise<CacheResult<T>> {
+  // Only the Redis-specific lookup is allowed to fall back; errors thrown by
+  // fn() itself must propagate once, un-retried (see issue #1757).
+  let redisAvailable = true;
+  let cached: string | null = null;
+
   try {
     // Try to connect to Redis if not already connected
     if (!RedisClient.isRedisConnected()) {
@@ -25,39 +30,40 @@ export async function cache<T>(
     }
 
     const redis = RedisClient.getInstance();
-    
-    // Try to get cached data
-    const cached = await redis.get(key);
-    
-    if (cached) {
-      logger.debug({ key }, "Cache HIT");
-      return {
-        data: JSON.parse(cached) as T,
-        hit: true,
-      };
-    }
 
-    // Cache miss - execute the function
-    logger.debug({ key }, "Cache MISS");
-    const result = await fn();
-    
-    // Cache the result
-    await redis.setex(key, ttl, JSON.stringify(result));
-    logger.debug({ key, ttl }, "Cached data");
-    
-    return {
-      data: result,
-      hit: false,
-    };
+    // Try to get cached data
+    cached = await redis.get(key);
   } catch (error) {
-    logger.warn({ err: error, key }, "Cache error, falling back to direct execution");
-    // Graceful degradation - execute the function directly
-    const result = await fn();
+    redisAvailable = false;
+    logger.warn({ err: error, key }, "Cache read error, falling back to direct execution");
+  }
+
+  if (cached) {
+    logger.debug({ key }, "Cache HIT");
     return {
-      data: result,
-      hit: false,
+      data: JSON.parse(cached) as T,
+      hit: true,
     };
   }
+
+  // Cache miss (or Redis unavailable) - execute the function exactly once
+  logger.debug({ key }, "Cache MISS");
+  const result = await fn();
+
+  if (redisAvailable) {
+    try {
+      // Cache the result
+      await RedisClient.getInstance().setex(key, ttl, JSON.stringify(result));
+      logger.debug({ key, ttl }, "Cached data");
+    } catch (error) {
+      logger.warn({ err: error, key }, "Cache write error, serving uncached result");
+    }
+  }
+
+  return {
+    data: result,
+    hit: false,
+  };
 }
 
 /**
